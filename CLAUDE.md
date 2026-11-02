@@ -81,6 +81,7 @@ FIRST, before any other tool. When in doubt, invoke the skill.
 | Build and test a workflow in a generated app, browser only | `browser-workflow-builder` |
 | Write a new EML model, or change an existing `.mmd` | `model-working-session` |
 | Generate, build or run an application from a model | `generate-and-run-app` |
+| QA lifecycle, workflows, rules, RBAC end-to-end | `qa-lifecycle-workflows` |
 | Before committing, pushing or merging | `ship-checks` |
 
 Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
