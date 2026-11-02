@@ -91,7 +91,7 @@ function InitPage() {
   };
 
   const handleContinue = () => {
-    navigate({ to: "/projects/$id/design", params: { id: projectId } });
+    navigate({ to: "/projects/$id/design", params: { id: projectId }, search: { view: "mermaid" } });
   };
 
   if (isLoading) {

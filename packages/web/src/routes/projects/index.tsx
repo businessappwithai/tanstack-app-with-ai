@@ -157,7 +157,7 @@ function ProjectsPage() {
 
     setCurrentProject(imported.id);
     setShowImportModal(false);
-    navigate({ to: "/projects/$id/design", params: { id: imported.id } });
+    navigate({ to: "/projects/$id/design", params: { id: imported.id }, search: { view: "mermaid" } });
   };
 
   const handleDeleteProject = async (id: string) => {

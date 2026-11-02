@@ -358,7 +358,7 @@ function GeneratePage() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <button
             type="button"
-            onClick={() => navigate({ to: "/projects/$id/design", params: { id: projectId } })}
+            onClick={() => navigate({ to: "/projects/$id/design", params: { id: projectId }, search: { view: "mermaid" } })}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-secondary text-foreground font-medium transition-all"
           >
             ← Back

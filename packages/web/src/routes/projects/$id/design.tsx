@@ -1315,7 +1315,7 @@ function DesignPage() {
                       type="button"
                       onClick={() => {
                         const newView = showFlowView ? "mermaid" : "flow";
-                        navigate({ search: { view: newView } });
+                        navigate({ to: "/projects/$id/design", params: { id: projectId }, search: (prev) => ({ ...prev, view: newView }) });
                       }}
                       className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
                         showFlowView
