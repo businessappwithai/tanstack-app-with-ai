@@ -769,7 +769,7 @@ ${contents}
 
   <section id="overview">
     <h2>What this application is</h2>
-${options.description && options.description !== "A generated full-stack application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>\n` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${
+${options.description && options.description !== "Generated application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>\n` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${
     model.categories.length ? `, grouped into ${model.categories.length} areas of the business` : ""
   }. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated from the same description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>

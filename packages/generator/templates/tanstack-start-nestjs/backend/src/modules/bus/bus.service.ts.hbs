@@ -1427,7 +1427,7 @@ export class BusService {
     // Baked in at generation time so the manual header names the application.
     const appName = '{{project.name}}';
     const appVersion = '{{project.version}}';
-    const appDescription = '{{project.description}}';
+    const appDescription: string = '{{project.description}}';
     const generatedAt = new Date().toISOString();
 
     // ── Load data ──────────────────────────────────────────────────────────
@@ -1890,7 +1890,7 @@ ${toc}
 
   <section id="overview">
     <h2>What this application is</h2>
-${appDescription && appDescription !== 'A generated full-stack application' ? `    <div class="app-overview"><p>${esc(appDescription)}</p></div>\n` : ''}    <p>${esc(appName)} keeps ${tables.length} kind${tables.length === 1 ? '' : 's'} of record. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
+${appDescription && appDescription !== 'Generated application' ? `    <div class="app-overview"><p>${esc(appDescription)}</p></div>\n` : ''}    <p>${esc(appName)} keeps ${tables.length} kind${tables.length === 1 ? '' : 's'} of record. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated dynamically from that live description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
     <p class="back"><a href="#top">Back to contents</a></p>
   </section>
