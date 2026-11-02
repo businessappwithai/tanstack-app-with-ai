@@ -1,6 +1,6 @@
 import { useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
 import { CopilotSidebar } from "@copilotkit/react-ui";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   AlertCircle,
   CheckCircle2,
@@ -58,6 +58,9 @@ async function checkAuthMe() {
 }
 
 export const Route = createFileRoute("/projects/$id/design")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: (search.view as string) || "mermaid",
+  }),
   beforeLoad: async () => {
     try {
       const data = await checkAuthMe();
@@ -186,7 +189,8 @@ function DesignPage() {
   const [showEntityList, setShowEntityList] = useState(false);
   const [autoRetryCount, setAutoRetryCount] = useState(0);
   const [isAutoRetrying, setIsAutoRetrying] = useState(false);
-  const [showFlowView, setShowFlowView] = useState(false);
+  const search = useSearch({ from: "/projects/$id/design" });
+  const showFlowView = search.view === "flow";
   const [showDbModal, setShowDbModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTab, setImportTab] = useState<"local" | "library">("local");
@@ -1309,7 +1313,10 @@ function DesignPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowFlowView(!showFlowView)}
+                      onClick={() => {
+                        const newView = showFlowView ? "mermaid" : "flow";
+                        navigate({ search: { view: newView } });
+                      }}
                       className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
                         showFlowView
                           ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
@@ -1646,7 +1653,7 @@ function DesignPage() {
             </div>
           )}
 
-          {!isFullscreen && (
+          {!isFullscreen && !showFlowView && (
             <div
               className={`${
                 showVersions || showEntityList ? "w-1/2" : "w-1/2"
@@ -1758,69 +1765,72 @@ function DesignPage() {
             </div>
           )}
 
-          <div
-            className={`${
-              isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
-            } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}
-          >
-            <div className="p-6 pr-24 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Live Preview</h2>
-              <div className="flex items-center gap-2">
-                {!isFullscreen && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleZoomOut}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Zoom Out"
-                    >
-                      <ZoomOut className="w-4 h-4" />
-                    </button>
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400 min-w-[50px] text-center">
-                      {zoom}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleZoomIn}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Zoom In"
-                    >
-                      <ZoomIn className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleZoomReset}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Fit to Screen"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                  title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-                >
-                  {isFullscreen ? (
-                    <Minimize2 className="w-4 h-4" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
+          {showFlowView ? (
             <div
-              className={`flex-1 overflow-auto ${isFullscreen ? "p-4" : "p-6"} bg-white dark:bg-slate-900`}
-              style={{ position: "relative" }}
+              className={`${isFullscreen ? "w-full h-screen" : "w-full"} flex flex-col bg-slate-50 dark:bg-slate-900`}
+              style={{ height: isFullscreen ? "100vh" : "calc(100vh - 280px)" }}
             >
-              {showFlowView ? (
-                <div style={{ width: "100%", minHeight: "400px", height: "100%" }}>
-                  <ErdFlowViewer erdCode={erdCode} />
+              <ErdFlowViewer erdCode={erdCode} />
+            </div>
+          ) : (
+            <div
+              className={`${
+                isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
+              } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}
+            >
+              <div className="p-6 pr-24 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Live Preview</h2>
+                <div className="flex items-center gap-2">
+                  {!isFullscreen && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleZoomOut}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        title="Zoom Out"
+                      >
+                        <ZoomOut className="w-4 h-4" />
+                      </button>
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-400 min-w-[50px] text-center">
+                        {zoom}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleZoomIn}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        title="Zoom In"
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleZoomReset}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        title="Fit to Screen"
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsFullscreen(!isFullscreen)}
+                    className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                    title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                  >
+                    {isFullscreen ? (
+                      <Minimize2 className="w-4 h-4" />
+                    ) : (
+                      <Maximize2 className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
-              ) : (
+              </div>
+
+              <div
+                className={`flex-1 overflow-auto ${isFullscreen ? "p-4" : "p-6"} bg-white dark:bg-slate-900`}
+                style={{ position: "relative" }}
+              >
                 <div
                   ref={previewRef}
                   style={{
@@ -1830,9 +1840,9 @@ function DesignPage() {
                   }}
                   className="mermaid-preview w-full"
                 />
-              )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {!isFullscreen && (
