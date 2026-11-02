@@ -56,7 +56,9 @@
       "@appwithai/editors/*": ["./packages/editors/src/*"],
       "@appwithai/web": ["./packages/web/src"],
       "@appwithai/web/*": ["./packages/web/src/*"],
-      "@/*": ["./packages/web/src/*"]
+      "@/*": ["./packages/web/src/*"],
+      "monaco-editor": ["./node_modules/.bun/monaco-editor@0.57.0/node_modules/monaco-editor/esm/vs/index"],
+      "monaco-editor/*": ["./node_modules/.bun/monaco-editor@0.57.0/node_modules/monaco-editor/*"]
     }
   },
   "include": [
