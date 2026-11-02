@@ -918,6 +918,13 @@ export function busRoutes(model) {
       if (!(error instanceof SagaFailure)) throw error;
       // The rollback took the failed run with it; put it back for Run History.
       await recordFailedSaga(db, entity, current, error, user);
+      // Write the failure reason so the form can show it beside the action buttons.
+      try {
+        await db.query(
+          `UPDATE ${ident(entity.tableName)} SET doc_status_message = $1 WHERE id = $2`,
+          [error.reason ?? error.message, params.id]
+        );
+      } catch (_) { /* best effort */ }
       return json(
         {
           statusCode: 422,

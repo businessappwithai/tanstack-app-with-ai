@@ -32,7 +32,7 @@ import { Flag, Play, Plus, Settings2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StateFlow } from "../../lib/eml/workflow-flow";
 
-type StateData = { name: string; isInitial: boolean; isTerminal: boolean };
+type StateData = { name: string; isInitial: boolean; isTerminal: boolean; workflows?: string[] };
 
 function StateNode({ data, selected }: NodeProps) {
   const stateData = data as StateData;
@@ -52,6 +52,20 @@ function StateNode({ data, selected }: NodeProps) {
         {stateData.isTerminal && <Flag className="h-3 w-3 text-slate-700" />}
         <span className="font-mono text-sm font-medium">{stateData.name}</span>
       </div>
+      {stateData.workflows && stateData.workflows.length > 0 && (
+        <div className="mt-1 flex flex-wrap justify-center gap-1">
+          {stateData.workflows.map((name) => (
+            <span
+              key={name}
+              className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700"
+              title={`Workflow runs when entering this state: ${name}`}
+            >
+              <Settings2 className="h-2.5 w-2.5" />
+              {name}
+            </span>
+          ))}
+        </div>
+      )}
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -62,12 +76,14 @@ const NODE_TYPES = { state: StateNode };
 export interface StateFlowCanvasProps {
   flow: StateFlow;
   onChange: (flow: StateFlow) => void;
+  /** Workflows bound to each state (keyed by state name), shown as badges on the node. */
+  boundWorkflows?: Record<string, string[]>;
 }
 
 let counter = 0;
 const nextId = () => `s${Date.now().toString(36)}${(counter++).toString(36)}`;
 
-export function StateFlowCanvas({ flow, onChange }: StateFlowCanvasProps) {
+export function StateFlowCanvas({ flow, onChange, boundWorkflows }: StateFlowCanvasProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const positions = useRef(new Map<string, { x: number; y: number }>());
 
@@ -82,9 +98,10 @@ export function StateFlowCanvas({ flow, onChange }: StateFlowCanvasProps) {
           name: state.name,
           isInitial: flow.initial === state.id,
           isTerminal: flow.terminal.includes(state.id),
+          workflows: boundWorkflows?.[state.name],
         } satisfies StateData,
       })),
-    [flow]
+    [flow, boundWorkflows]
   );
 
   const edges: Edge[] = useMemo(

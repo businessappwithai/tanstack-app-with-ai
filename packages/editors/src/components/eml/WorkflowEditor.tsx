@@ -322,7 +322,7 @@ export function WorkflowEditor({
         />
       ) : (
         <div className="h-[460px]">
-          <StateFlowCanvas flow={workflow.states} onChange={(states) => onChange({ states })} />
+          <StateFlowCanvas flow={workflow.states} onChange={(states) => onChange({ states })} boundWorkflows={boundWorkflows} />
         </div>
       )}
 
