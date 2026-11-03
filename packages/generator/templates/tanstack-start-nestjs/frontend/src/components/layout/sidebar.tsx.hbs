@@ -375,7 +375,9 @@ export function Sidebar({ className, inDrawer = false }: SidebarProps) {
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
               <Database className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold">{{project.name}}</span>
+            {/* A long name (Hospital Management System) wrapped to three lines and overflowed the
+                fixed-height header: two lines at most, the whole name on hover. */}
+            <span className="line-clamp-2 text-sm font-semibold leading-tight" title="{{project.name}}">{{project.name}}</span>
           </div>
         )}
         {/* The drawer has its own Close in this corner; a rail toggle means nothing there. */}
