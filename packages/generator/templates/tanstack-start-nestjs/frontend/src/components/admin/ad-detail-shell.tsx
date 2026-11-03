@@ -925,7 +925,13 @@ export function ADDetailShell({
     crumbs.push({ label: parentNames[i] ?? id, href: buildAdminDetailUrl(grandParentCtx, pl, id) });
   }
   crumbs.push({ label: pluralLabel(level.label), href: buildAdminListUrl(parentContext, level) });
-  const currentName = currentRecord
+  // The server resolves a record's label (references followed to the names behind
+  // them); the name column alone would show a uuid for a record named by its parents.
+  const servedLabel =
+    currentRecord && typeof currentRecord._label === "string" ? currentRecord._label : "";
+  const currentName = servedLabel
+    ? servedLabel
+    : currentRecord
     ? level.nameField === "first_name" && currentRecord.last_name
       ? `${currentRecord.first_name ?? ""} ${currentRecord.last_name ?? ""}`.trim()
       : ((currentRecord[level.nameField] as string) ?? recordId)

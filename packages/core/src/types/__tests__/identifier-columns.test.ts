@@ -137,4 +137,35 @@ describe("identifierColumnNames", () => {
       )
     ).toEqual([]);
   });
+
+  describe("a record with no free text of its own", () => {
+    const pack = [
+      { name: "id", type: "string" },
+      { name: "member_id", type: "string", isForeignKey: true },
+      { name: "credits", type: "integer" },
+      { name: "purchased_on", type: "date" },
+      { name: "status", type: "string", enumReferenceId: 1042 },
+    ];
+
+    it("is not named by its status, a closed vocabulary", () => {
+      expect(identifierColumnNames(pack, "id")).not.toContain("status");
+    });
+
+    it("is named by whose it is and when", () => {
+      // Found in a generated app: a booking's Class Pack read "active".
+      expect(identifierColumnNames(pack, "id")).toEqual(["member_id", "purchased_on"]);
+    });
+
+    it("still prefers a free-text column beside the status", () => {
+      expect(identifierColumnNames([...pack, { name: "notes", type: "string" }], "id")).toEqual([
+        "notes",
+      ]);
+    });
+
+    it("has none with no parent or no date to say", () => {
+      expect(identifierColumnNames(pack.filter((a) => a.name !== "purchased_on"), "id")).toEqual(
+        []
+      );
+    });
+  });
 });

@@ -21,6 +21,10 @@ export function referenceLabel(
   labelFields: string[],
   id: string
 ): string {
+  // The server resolves references into text (a class session is "Yoga · Studio A", not
+  // two uuids); what it sent is the label.
+  if (typeof record._label === "string" && record._label) return record._label;
+
   const parts = labelFields
     .map((f) => record[f])
     .filter((v) => v != null && v !== "")

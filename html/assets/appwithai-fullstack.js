@@ -12508,8 +12508,12 @@ function identifierColumnNames(attributes, primaryKey) {
   const references = attributes.filter((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName(attribute.name));
   if (references.length >= 2)
     return references.slice(0, 2).map((attribute) => attribute.name);
-  const readable = attributes.find((attribute) => attribute.name !== primaryKey && !attribute.isForeignKey && !attribute.name.endsWith("_id") && (attribute.type === "string" || attribute.type === "text"));
-  return readable ? [readable.name] : [];
+  const readable = attributes.find((attribute) => attribute.name !== primaryKey && !attribute.isForeignKey && !attribute.enumReferenceId && !attribute.name.endsWith("_id") && (attribute.type === "string" || attribute.type === "text"));
+  if (readable)
+    return [readable.name];
+  const parent = attributes.find((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName(attribute.name));
+  const when = attributes.find((attribute) => attribute.type === "date" || attribute.type === "datetime");
+  return parent && when ? [parent.name, when.name] : [];
 }
 function attributeReferenceId(attr, entityPrimaryKey) {
   if (attr.name === "id")
