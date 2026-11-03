@@ -84,3 +84,44 @@ describe("seeded move facts", () => {
     expect(marked.entities[0].attributes.some((a: any) => a.isMoveFact)).toBe(false);
   });
 });
+
+describe("a required <state>_at is the model's own fact", () => {
+  // Found driving the education model: SafeguardingConcern has a state called
+  // `reported` and a REQUIRED `reported_at`. The seed nulled it as a move fact,
+  // the NOT NULL refused the insert, seed 03 failed and the app never started.
+  it("keeps a required column filled, though a state shares its name", () => {
+    const concern = {
+      name: "Concern",
+      className: "Concern",
+      displayName: "Concern",
+      tableName: "bus_concern",
+      primaryKey: "id",
+      attributes: [
+        { name: "status", columnName: "status", type: "string" },
+        { name: "reported_at", columnName: "reported_at", type: "datetime", required: true },
+        { name: "closed_at", columnName: "closed_at", type: "datetime" },
+      ],
+    };
+    const marked = (NestJsBackendGenerator.prototype as any).withMoveFacts.call(
+      {
+        options: {
+          compiledWorkflows: [
+            {
+              name: "ConcernLifecycle",
+              entity: "Concern",
+              states: [{ name: "reported" }, { name: "closed" }],
+              transitions: [],
+              initial: "reported",
+              terminal: ["closed"],
+            },
+          ],
+        },
+      },
+      { now: "test", fkOverrides: [], entities: [concern] }
+    );
+    const attributes = marked.entities[0].attributes;
+    expect(attributes.find((a: any) => a.name === "reported_at").isMoveFact).toBeUndefined();
+    expect(attributes.find((a: any) => a.name === "closed_at").isMoveFact).toBe(true);
+  });
+});
+

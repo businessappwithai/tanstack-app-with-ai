@@ -70,12 +70,19 @@ test.describe("a generated application enforces a drawn state machine", () => {
   const setStatus = (id: string, status: string) =>
     api.patch(`/api/bus/ticket/${id}`, { data: { status }, failOnStatusCode: false });
 
-  /** Record the fact a move rests on — the time it happened. */
-  const record = (id: string, fact: string) =>
-    api.patch(`/api/bus/ticket/${id}`, {
-      data: { [fact]: new Date().toISOString() },
+  /**
+   * Press the button for a move: `POST /bus/:e/:id/transition`. A record moves only
+   * this way — recording the fact a move once rested on moves nothing — and the press
+   * must carry the version it was read at (`If-Match`; 428 without).
+   */
+  const press = async (id: string, to: string) => {
+    const read = await api.get(`/api/bus/ticket/${id}`);
+    return api.post(`/api/bus/ticket/${id}/transition`, {
+      data: { to },
+      headers: { "If-Match": read.headers().etag ?? "" },
       failOnStatusCode: false,
     });
+  };
 
   const statusOf = async (id: string): Promise<string | undefined> => {
     const body = (await (await api.get(`/api/bus/ticket/${id}`)).json()) as {
@@ -113,39 +120,35 @@ test.describe("a generated application enforces a drawn state machine", () => {
     expect(await statusOf(id), "the refused write must leave the record alone").toBe("open");
   });
 
-  test("recording the fact behind a drawn move makes the move", async () => {
+  test("pressing the button for a drawn move makes the move", async () => {
     const id = await createTicket();
-    const response = await record(id, "in_progress_at");
+    const response = await press(id, "in_progress");
     expect(response.status(), await response.text()).toBeLessThan(300);
     expect(await statusOf(id)).toBe("in_progress");
   });
 
-  test("a fact with no drawn move from here moves nothing", async () => {
+  test("a move with no drawn edge from here is refused and moves nothing", async () => {
     const id = await createTicket();
     // open -> resolved is not an edge: it must go through in_progress.
-    const response = await record(id, "resolved_at");
-    expect(response.status(), await response.text()).toBeLessThan(300);
+    const response = await press(id, "resolved");
+    expect(response.status(), await response.text()).toBe(409);
+    expect(await response.text()).toContain("INVALID_TRANSITION");
     expect(await statusOf(id)).toBe("open");
   });
 
   test("a whole path is walkable, and a closed ticket goes nowhere", async () => {
     const id = await createTicket();
-    const path: Array<[string, string]> = [
-      ["in_progress_at", "in_progress"],
-      ["resolved_at", "resolved"],
-      ["in_progress_at", "in_progress"],
-      ["resolved_at", "resolved"],
-      ["closed_at", "closed"],
-    ];
-    for (const [fact, state] of path) {
-      const response = await record(id, fact);
-      expect(response.status(), `${fact}: ${await response.text()}`).toBeLessThan(300);
-      expect(await statusOf(id), `after recording ${fact}`).toBe(state);
+    for (const state of ["in_progress", "resolved", "in_progress", "resolved", "closed"]) {
+      const response = await press(id, state);
+      expect(response.status(), `to ${state}: ${await response.text()}`).toBeLessThan(300);
+      expect(await statusOf(id), `after moving to ${state}`).toBe(state);
     }
-    await record(id, "in_progress_at");
+    // An end state is Final and locked: no move leaves it, and a form cannot write it.
+    const again = await press(id, "in_progress");
+    expect(again.status(), await again.text()).toBe(409);
     expect(await statusOf(id)).toBe("closed");
     const back = await setStatus(id, "open");
-    expect(back.status()).toBe(403);
+    expect([403, 409]).toContain(back.status());
     expect(await statusOf(id)).toBe("closed");
   });
 });

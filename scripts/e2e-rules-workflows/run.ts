@@ -303,6 +303,10 @@ async function startGeneratedApp(
     });
   }
   return {
+    // Specs 10 and 11 read what the generator wrote (`lib/rule-model.ts`) and default
+    // to a path nothing creates; handing them the real directory is what lets them run
+    // through this runner at all.
+    GEN_DIR: out,
     GENERATED_APP_URL: `http://localhost:${frontendPort}`,
     GENERATED_ADMIN_EMAIL: "admin@admin.com",
     GENERATED_ADMIN_PASSWORD: password,

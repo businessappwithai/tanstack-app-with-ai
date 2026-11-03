@@ -2159,7 +2159,11 @@ export async function seed(db: Kysely<any>): Promise<void> {
       return {
         ...entity,
         attributes: (entity.attributes ?? []).map((attribute: any) =>
-          facts.has(attribute.columnName ?? attribute.name)
+          // A column the model requires is the model's own fact, not a stamp of a
+          // move: `SafeguardingConcern.reported_at` (required) beside a state
+          // called `reported` was nulled by the seed, and the NOT NULL it asked
+          // for refused the insert — seed 03 failed and the app never started.
+          facts.has(attribute.columnName ?? attribute.name) && !attribute.required
             ? { ...attribute, isMoveFact: true }
             : attribute
         ),

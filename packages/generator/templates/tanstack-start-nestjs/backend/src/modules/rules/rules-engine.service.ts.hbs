@@ -334,6 +334,40 @@ export class RulesEngine implements OnModuleDestroy {
   }
 
   /**
+   * Keep the Record node's schema from refusing a record the application holds.
+   *
+   * The editor writes each enumerated field as `{ type: ["string", "null"], enum:
+   * [...] }`, so the Simulator offers the model's values. JSON Schema judges `enum`
+   * apart from `type`, and the application writes records that are not in that list:
+   * an optional field left blank (`industry: null`) and a state column during a save
+   * (the lifecycle holds a record as `draft`, or `error`, whatever the model's
+   * vocabulary says). Either made zen raise a NodeError, the engine reported it and
+   * let the write through — a rule that refuses a hot lead refused nothing on any
+   * lead with a blank industry. The API already refuses a value outside an enum at
+   * the write, so the schema is not where that is judged: the `enum` is dropped from
+   * what is evaluated, and the type is kept. What is stored is left as the author drew it.
+   */
+  private relaxEnums(node: Record<string, any>): Record<string, any> {
+    const raw = node.content?.schema;
+    if (typeof raw !== 'string') return node;
+    try {
+      const schema = JSON.parse(raw) as {
+        properties?: Record<string, { type?: unknown; enum?: unknown[] }>;
+      };
+      let changed = false;
+      for (const property of Object.values(schema.properties ?? {})) {
+        if (Array.isArray(property.enum)) {
+          delete property.enum;
+          changed = true;
+        }
+      }
+      return changed ? { ...node, content: { ...node.content, schema: JSON.stringify(schema) } } : node;
+    } catch {
+      return node;
+    }
+  }
+
+  /**
    * Speak the runtime's vocabulary in a graph the editor drew.
    *
    * zen runs a function node only from `content: { source }`: a bare string is
@@ -354,6 +388,7 @@ export class RulesEngine implements OnModuleDestroy {
         if (node.type === 'functionNode' && typeof node.content === 'string') {
           return { ...node, content: { source: node.content } };
         }
+        if (node.type === 'inputNode') return this.relaxEnums(node);
         const original = node.content as
           | {
               outputs?: Array<{ id: string; name?: string; field?: string }>;

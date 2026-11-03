@@ -17187,7 +17187,7 @@ export async function seed(db: Kysely<any>): Promise<void> {
       const facts = new Set(workflow.states.map((state) => `${state.name}_at`));
       return {
         ...entity,
-        attributes: (entity.attributes ?? []).map((attribute) => facts.has(attribute.columnName ?? attribute.name) ? { ...attribute, isMoveFact: true } : attribute)
+        attributes: (entity.attributes ?? []).map((attribute) => facts.has(attribute.columnName ?? attribute.name) && !attribute.required ? { ...attribute, isMoveFact: true } : attribute)
       };
     });
     return { ...context, entities };
