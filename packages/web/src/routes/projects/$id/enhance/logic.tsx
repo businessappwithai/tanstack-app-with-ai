@@ -49,7 +49,12 @@ export const Route = createFileRoute("/projects/$id/enhance/logic")({
 function EnhanceLogicRoute() {
   return (
     <CopilotProvider>
-      <EnhanceLogicPage />
+      {/* The assistant's launcher is fixed at the bottom right, which is where the
+          workbench's Save button ends the page: with nothing under it the launcher
+          covered Save at the end of the scroll and could not be scrolled clear. */}
+      <div className="pb-24">
+        <EnhanceLogicPage />
+      </div>
       <CopilotSidebar
         labels={{
           title: "Rules and processes",

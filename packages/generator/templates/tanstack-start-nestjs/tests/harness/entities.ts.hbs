@@ -10,7 +10,7 @@
  * Project: {{project.name}}
  */
 
-import { refusals, stateMachines } from "./model.ts";
+import { refusals, stateMachines, transforms } from "./model.ts";
 
 export type FieldType =
   | "string"
@@ -246,10 +246,16 @@ const FORMATTED_TEXT_COLUMNS = /email|url|website|link|phone|mobile|tel|slug|sig
  * dictionary refuses.
  */
 export function firstTextField(entity: EntityMeta): FieldMeta | undefined {
+  const overwritten = new Set(
+    transforms.filter((t) => t.tableName === entity.tableName).map((t) => t.column)
+  );
   const textish = scalarFields(entity).filter(
     (f) =>
       (f.type === "string" || f.type === "text") &&
-      !(f.enumValues && f.enumValues.length > 0)
+      !(f.enumValues && f.enumValues.length > 0) &&
+      // A transform rule rewrites this column after the write, so a value stored
+      // here is not the value read back.
+      !overwritten.has(f.name)
   );
   // A column a refusing rule reads is not safe to overwrite with an invented
   // string: `status == "pending" and final_grade != null` is refused, so a suite

@@ -45,7 +45,7 @@ export function workflowIdentifier(title: string): string {
 
 export async function openLogic(page: Page, author: Author): Promise<void> {
   await page.goto(logicPath(author));
-  await expect(page.getByRole("heading", { name: "Rules and workflows" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: /^Rules(,| and) workflows/ })).toBeVisible({
     timeout: 60_000,
   });
   await expect(page.getByText("Loading the model…")).toHaveCount(0, { timeout: 60_000 });

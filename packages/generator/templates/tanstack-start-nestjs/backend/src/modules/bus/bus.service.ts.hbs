@@ -275,6 +275,7 @@ export class BusService {
     });
     const result = await this.db.findAll(tableName, processedOptions.options, processedOptions.filters);
     await executeAfterListHooks(entity, result.data);
+    await this.withLabels(tableName, result.data);
 
     this.logger.log(`findAll: entity=${entity}, returned ${result.data.length} records`);
     return result;
@@ -410,6 +411,7 @@ export class BusService {
     const processedId = await executeBeforeReadHooks(entity, { id });
     const result = await this.db.findByIdOrFail(tableName, processedId.id || id);
     await executeAfterReadHooks(entity, result);
+    await this.withLabels(tableName, [result]);
 
     return result;
   }
@@ -419,7 +421,9 @@ export class BusService {
     await this.verifyEntity(entity);
 
     const metadata = await this.getEntityMetadata(entity);
-    const dataWithDefaults = { ...data };
+    // `_label` is served, never stored: a form hands back whatever it was given.
+    const { _label: _servedLabel, ...writable } = data;
+    const dataWithDefaults = { ...writable };
 
     // A new record starts in Draft (common/lifecycle.ts); the save pipeline
     // moves it on — to the first status of its flow, or to Final. A person's
@@ -555,7 +559,8 @@ export class BusService {
     const tableName = this.getTableName(entity);
     await this.verifyEntity(entity);
 
-    const processedData = await executeBeforeUpdateHooks(entity, data);
+    const { _label: _servedLabel, ...writable } = data;
+    const processedData = await executeBeforeUpdateHooks(entity, writable);
 
     // Validate business rules against the record as it would look after the
     // update, so rules over fields absent from a partial payload still hold.
@@ -1348,6 +1353,106 @@ export class BusService {
     '{{column}}': '{{table}}',
 {{/each}}
   };
+
+  /**
+   * Serve each record's display label beside its columns, as `_label`.
+   *
+   * The dictionary names which columns say what a record *is* (`is_identifier`). Some
+   * of those are references — a class session is its offering and its room, a class
+   * pack is its member and the day it was bought — and a reference holds a uuid. Drawn
+   * as it is stored, a booking's Class Session read "1ad4ba31-… · ef22358c-…". So the
+   * server resolves each reference part through the parent's own identifier columns
+   * (one level deep, one query per reference column for the whole page) and sends the
+   * finished text. Every lookup, grid cell and record header reads this one answer.
+   */
+  private async withLabels(tableName: string, rows: any[]): Promise<void> {
+    if (!rows.length) return;
+    try {
+      const labels = await this.buildLabels(tableName, rows, 2);
+      rows.forEach((row, index) => {
+        const label = labels[index];
+        if (label) row._label = label;
+      });
+    } catch (error) {
+      // A label is a courtesy: never fail a read for want of one.
+      this.logger.warn(`labels for ${tableName} could not be resolved: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * The label of each row, in order. `hops` is how many references may be followed:
+   * a booking is its session and its member, and the session is its offering and its
+   * room — two hops reach the names, and a model that chains further reads as far as
+   * that and no more.
+   */
+  private async buildLabels(
+    tableName: string,
+    rows: Array<Record<string, any>>,
+    hops: number
+  ): Promise<Array<string | undefined>> {
+    const fields = await this.resolveRefLabelFields(tableName);
+    if (!fields.length) return rows.map(() => undefined);
+    const registered = await this.registeredTableNames();
+
+    const resolved = new Map<string, Map<string, string>>();
+    for (const field of fields) {
+      const parent = this.resolveRefTableName(field, 18);
+      if (!parent || !registered.has(parent) || hops < 1) continue;
+      const ids = [...new Set(rows.map((row) => row[field]).filter((v) => v != null && v !== ''))];
+      if (!ids.length) continue;
+      const parentFields = await this.resolveRefLabelFields(parent);
+      if (!parentFields.length) continue;
+      const found = await (this.kysely as any)
+        .selectFrom(parent)
+        .select(['id', ...parentFields])
+        .where('id', 'in', ids)
+        .execute();
+      const text = await this.buildLabels(parent, found, hops - 1);
+      const labels = new Map<string, string>();
+      found.forEach((record: any, index: number) => {
+        const label = text[index];
+        if (label) labels.set(String(record.id), label);
+      });
+      resolved.set(field, labels);
+    }
+
+    const names = fields.every((f) => /(^|_)name$/.test(f));
+    return rows.map((row) => {
+      const parts = fields
+        .map((field) => {
+          const value = row[field];
+          if (value == null || value === '') return undefined;
+          // A reference that could not be followed is left out, never shown as its uuid.
+          if (this.resolveRefTableName(field, 18)) return resolved.get(field)?.get(String(value));
+          return BusService.formatLabelPart(value);
+        })
+        .filter((part): part is string => !!part);
+      return parts.length ? parts.join(names ? ' ' : ' · ') : undefined;
+    });
+  }
+
+  private registeredTables?: { at: number; names: Set<string> };
+
+  private async registeredTableNames(): Promise<Set<string>> {
+    if (this.registeredTables && Date.now() - this.registeredTables.at < 30_000) {
+      return this.registeredTables.names;
+    }
+    const names = new Set<string>(
+      (await this.kysely.selectFrom('sys_table').select('table_name').execute()).map(
+        (row: any) => row.table_name as string
+      )
+    );
+    this.registeredTables = { at: Date.now(), names };
+    return names;
+  }
+
+  private static formatLabelPart(value: unknown): string {
+    if (value instanceof Date) {
+      const iso = value.toISOString();
+      return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso.slice(0, 16).replace('T', ' ');
+    }
+    return String(value);
+  }
 
   private async resolveRefLabelFields(refTableName: string): Promise<string[]> {
     const cachedFields = this.identifierFieldsCache.get(refTableName);

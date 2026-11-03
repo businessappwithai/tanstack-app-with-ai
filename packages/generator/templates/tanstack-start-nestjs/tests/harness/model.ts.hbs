@@ -112,6 +112,13 @@ export const refusals: Refusal[] = [
 {{/each}}
 ];
 
+/** A column a `transform` rule overwrites after a write — never a probe's home. */
+export const transforms: Array<{ tableName: string; column: string }> = [
+{{#each transforms}}
+  { tableName: "{{tableName}}", column: "{{column}}" },
+{{/each}}
+];
+
 export const stateMachines: StateMachine[] = [
 {{#each stateMachines}}
   {

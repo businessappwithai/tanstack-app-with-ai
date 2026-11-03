@@ -149,7 +149,7 @@ export class LogicPage {
   async open(): Promise<void> {
     await this.page.goto(logicPath({ projectId: this.projectId }));
     // A cold dev server compiles the route on first request.
-    await expect(this.page.getByRole("heading", { name: "Rules and workflows" })).toBeVisible({
+    await expect(this.page.getByRole("heading", { name: /^Rules(,| and) workflows/ })).toBeVisible({
       timeout: 60_000,
     });
     await expect(this.page.getByText("Loading the model…")).toHaveCount(0, { timeout: 60_000 });

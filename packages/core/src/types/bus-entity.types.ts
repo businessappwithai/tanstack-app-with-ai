@@ -234,7 +234,13 @@ const SEMANTIC_REFERENCE = {
  * Returns the names in the order they should be concatenated.
  */
 export function identifierColumnNames(
-  attributes: Array<{ name: string; type?: string; unique?: boolean; isForeignKey?: boolean }>,
+  attributes: Array<{
+    name: string;
+    type?: string;
+    unique?: boolean;
+    isForeignKey?: boolean;
+    enumReferenceId?: number;
+  }>,
   primaryKey?: string
 ): string[] {
   const names = new Set(attributes.map((attribute) => attribute.name));
@@ -272,15 +278,34 @@ export function identifierColumnNames(
   if (references.length >= 2) return references.slice(0, 2).map((attribute) => attribute.name);
 
   /* Failing all of that, the first plain text column the model declared that is
-     neither the key nor a pointer at another record. */
+     neither the key, a pointer at another record, nor a closed vocabulary. A column
+     bound to a `%%enum` (a `status`, a `stage`) says what the record is *doing*, not
+     which record it is: every pack read "active", and a lifecycle owns the column, so
+     no form even offers it. */
   const readable = attributes.find(
     (attribute) =>
       attribute.name !== primaryKey &&
       !attribute.isForeignKey &&
+      !attribute.enumReferenceId &&
       !attribute.name.endsWith("_id") &&
       (attribute.type === "string" || attribute.type === "text")
   );
-  return readable ? [readable.name] : [];
+  if (readable) return [readable.name];
+
+  /* No text of its own: a record with one parent and a date is told apart by whose
+     it is and when — a class pack is "Dennis Lindgren · 2026-08-26". The reference
+     holds a uuid, so whoever renders this resolves it through the parent's own label,
+     as for a join entity above. */
+  const parent = attributes.find(
+    (attribute) =>
+      attribute.name !== primaryKey &&
+      attribute.isForeignKey &&
+      isForeignKeyColumnName(attribute.name)
+  );
+  const when = attributes.find(
+    (attribute) => attribute.type === "date" || attribute.type === "datetime"
+  );
+  return parent && when ? [parent.name, when.name] : [];
 }
 
 export function attributeReferenceId(attr: EntityAttribute, entityPrimaryKey?: string): number {
