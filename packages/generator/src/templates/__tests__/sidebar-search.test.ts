@@ -106,6 +106,8 @@ describe("the sidebar search", () => {
     // This is a `.hbs` file, so a JSX `style={{ … }}` would be compiled as a
     // Handlebars expression and the generated file would be broken.
     const tokens = SIDEBAR.match(/\{\{[^}]*\}\}/g) ?? [];
-    expect(tokens.sort()).toEqual(["{{now}}", "{{project.name}}"]);
+    // The application name appears twice on purpose: the visible text and the `title` that
+    // shows the whole of a long name the header clamps to two lines.
+    expect(tokens.sort()).toEqual(["{{now}}", "{{project.name}}", "{{project.name}}"]);
   });
 });
