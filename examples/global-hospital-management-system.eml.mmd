@@ -1,0 +1,2725 @@
+%%meta name: Next-Generation Global Hospital Management System
+%%meta kind: erd
+%%meta version: 1.0.0
+%%enum TenantStatus: provisioning, active, suspended, retired
+%%enum FacilityType: hospital, clinic, laboratory, imaging_center, pharmacy, virtual
+%%enum EmploymentStatus: onboarding, active, leave, suspended, terminated
+%%enum AccountStatus: invited, active, locked, disabled
+%%enum ConsentStatus: draft, active, refused, withdrawn, expired
+%%enum AppointmentStatus: requested, scheduled, checked_in, fulfilled, cancelled, no_show
+%%enum EncounterStatus: planned, arrived, in_progress, on_hold, finished, cancelled
+%%enum AdmissionStatus: planned, admitted, transferred, discharge_ready, discharged, cancelled
+%%enum BedStatus: available, reserved, occupied, cleaning, blocked, maintenance
+%%enum AssignmentStatus: requested, reserved, active, released, cancelled
+%%enum RecordStatus: draft, signed, amended, entered_in_error
+%%enum OrderStatus: draft, placed, accepted, in_progress, completed, cancelled, rejected
+%%enum SpecimenStatus: ordered, collected, received, processing, completed, rejected
+%%enum ResultStatus: preliminary, verified, corrected, cancelled
+%%enum PrescriptionStatus: draft, signed, verified, dispensing, completed, stopped, cancelled
+%%enum DispenseStatus: queued, reviewing, prepared, issued, partially_issued, rejected, cancelled
+%%enum AdministrationStatus: scheduled, due, given, withheld, missed, refused, entered_in_error
+%%enum SurgicalStatus: planned, scheduled, ready, in_progress, recovery, completed, cancelled
+%%enum BloodUnitStatus: available, reserved, issued, transfused, quarantined, expired, discarded
+%%enum TransfusionStatus: requested, crossmatched, issued, started, completed, stopped, reaction_review
+%%enum IncidentStatus: reported, triaged, investigating, action_required, resolved, closed
+%%enum ActionStatus: open, assigned, in_progress, verification, effective, ineffective, closed
+%%enum StockStatus: available, quarantined, recalled, expired, depleted
+%%enum ProcurementStatus: draft, submitted, approved, ordered, partially_received, received, cancelled, closed
+%%enum InvoiceStatus: draft, issued, partially_paid, paid, disputed, void, refunded
+%%enum ClaimStatus: draft, ready, submitted, accepted, partially_adjudicated, paid, denied, appealed, closed
+%%enum JournalStatus: draft, posted, reversed
+%%enum RequestStatus: received, identity_verified, assessing, fulfilled, partially_fulfilled, refused, closed
+%%enum BreachStatus: suspected, confirmed, contained, assessing, notified, remediating, closed
+%%enum DowntimeStatus: declared, active, restoring, reconciling, closed
+%%enum IntegrationStatus: received, validated, processed, retry_scheduled, dead_letter, acknowledged
+%%enum AiReviewStatus: generated, under_review, accepted, rejected, superseded
+%%enum ResearchStatus: requested, ethics_review, approved, extracting, available_in_spe, expired, revoked
+%%enum ComplaintStatus: received, acknowledged, investigating, resolved, appealed, closed
+%%enum ServiceStatus: requested, assigned, in_progress, completed, cancelled
+%%enum CoverageStatus: pending_verification, active, inactive, expired
+%%enum PreauthStatus: draft, submitted, approved, partially_approved, denied, expired, cancelled
+%%enum DiagnosisStatus: provisional, confirmed, resolved, refuted, entered_in_error
+%%enum AllergyStatus: active, inactive, resolved, entered_in_error
+%%enum InfectionStatus: suspected, probable, confirmed, resolved, excluded
+%%enum ReceiptStatus: draft, inspected, posted, partially_accepted, rejected, reversed
+%%enum SupplierInvoiceStatus: received, matching, approved, on_hold, paid, disputed, credited
+%%enum PaymentStatus: pending, completed, failed, reversed, refunded
+%%enum FiscalPeriodStatus: open, soft_closed, closed, reopened
+%%enum ReconciliationStatus: pending_match, conflict, accepted, rejected, duplicate
+%%enum ProcedureStatus: preparation, in_progress, completed, cancelled, entered_in_error
+%%enum CarePlanStatus: draft, active, on_hold, completed, revoked, entered_in_error
+%%enum ImmunizationStatus: completed, refused, deferred, historical, entered_in_error
+%%enum MealStatus: requested, verified, prepared, delivered, omitted, cancelled
+%%enum TripStatus: requested, dispatched, arrived, transporting, completed, cancelled
+%%enum WasteStatus: open, sealed, stored, handed_over, treated, discrepancy
+%%enum AiSystemStatus: evaluation, approved, active, suspended, decommissioned
+%%enum PolicyStatus: draft, active, superseded, retired
+%%enum DeviceStatus: active, inactive, maintenance, recalled, implanted, explanted, retired
+%%enum RecallStatus: received, assessing, quarantining, tracing, remediating, closed
+%%enum PlanStatus: draft, approved, active, superseded, retired
+erDiagram
+    Tenant {
+        string id PK
+        string tenant_code
+        string name
+        string status
+        string home_region
+        string default_time_zone
+}
+    Facility {
+        string id PK
+        string tenant_id FK
+        string facility_code
+        string name
+        string facility_type
+        string time_zone
+        string currency_code
+}
+    Department {
+        string id PK
+        string facility_id FK
+        string department_code
+        string name
+        string department_type
+        boolean is_active
+}
+    Employee {
+        string id PK
+        string facility_id FK
+        string department_id FK
+        string employee_number
+        string full_name
+        string employment_status
+        email email
+}
+    Doctor {
+        string id PK
+        string employee_id FK
+        string department_id FK
+        string license_number
+        string medical_council
+        string specialization
+        date credential_expires_on
+}
+    UserAccount {
+        string id PK
+        string employee_id FK
+        string username
+        string status
+        boolean mfa_required
+        boolean is_privileged
+}
+    UserRoleAssignment {
+        string id PK
+        string user_account_id FK
+        string facility_id FK OPTIONAL
+        string role_name
+        date valid_from
+        date valid_to OPTIONAL
+}
+    SessionLog {
+        string id PK
+        string user_account_id FK
+        string session_reference
+        string authentication_method
+        string ip_address
+        datetime started_at
+        datetime ended_at OPTIONAL
+}
+    AuditEvent {
+        string id PK
+        string facility_id FK
+        string session_log_id FK OPTIONAL
+        string employee_id FK
+        string event_type
+        string purpose_of_use
+        string target_reference
+        datetime occurred_at
+}
+    Patient {
+        string id PK
+        string tenant_id FK
+        string medical_record_number
+        string full_name
+        date date_of_birth
+        string administrative_gender
+        string duplicate_review_status
+        datetime deceased_at OPTIONAL
+}
+    PatientIdentifier {
+        string id PK
+        string patient_id FK
+        string identifier_system
+        string identifier_value
+        date valid_from OPTIONAL
+        date valid_to OPTIONAL
+}
+    Consent {
+        string id PK
+        string patient_id FK
+        string facility_id FK
+        string consent_reference
+        string consent_type
+        string status
+        datetime effective_at OPTIONAL
+        datetime expires_at OPTIONAL
+}
+    Appointment {
+        string id PK
+        string patient_id FK
+        string facility_id FK
+        string doctor_id FK OPTIONAL
+        string appointment_number
+        string status
+        datetime scheduled_start
+        text reason
+}
+    Encounter {
+        string id PK
+        string patient_id FK
+        string appointment_id FK OPTIONAL
+        string doctor_id FK OPTIONAL
+        string encounter_number
+        string encounter_type
+        string status
+        datetime started_at OPTIONAL
+}
+    Admission {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string doctor_id FK
+        string admission_number
+        string status
+        datetime admitted_at OPTIONAL
+        date expected_discharge_on OPTIONAL
+}
+    Ward {
+        string id PK
+        string facility_id FK
+        string ward_code
+        string name
+        string ward_type
+        boolean is_active
+}
+    Bed {
+        string id PK
+        string ward_id FK
+        string bed_code
+        string bed_type
+        string status
+        boolean is_isolation_capable
+        boolean has_oxygen
+}
+    BedAssignment {
+        string id PK
+        string admission_id FK
+        string bed_id FK
+        string assignment_reference
+        string status
+        datetime assigned_at OPTIONAL
+        datetime released_at OPTIONAL
+}
+    MedicalRecord {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string doctor_id FK OPTIONAL
+        string record_number
+        string record_type
+        string status
+        text clinical_text
+        datetime signed_at OPTIONAL
+}
+    Diagnosis {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string medical_record_id FK OPTIONAL
+        string diagnosis_code
+        string diagnosis_system
+        string status
+        date onset_on OPTIONAL
+}
+    ClinicalOrder {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string doctor_id FK
+        string order_number
+        string order_type
+        string status
+        string priority
+        text clinical_indication
+}
+    Specimen {
+        string id PK
+        string clinical_order_id FK
+        string patient_id FK
+        string specimen_number
+        string specimen_type
+        string status
+        datetime collected_at OPTIONAL
+        datetime received_at OPTIONAL
+}
+    LabObservation {
+        string id PK
+        string specimen_id FK
+        string clinical_order_id FK
+        string observation_code
+        string result_value
+        string unit OPTIONAL
+        string status
+        string interpretation OPTIONAL
+        datetime critical_notified_at OPTIONAL
+}
+    ImagingStudy {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string clinical_order_id FK
+        string doctor_id FK OPTIONAL
+        string study_instance_uid
+        string accession_number
+        string modality
+        string status
+        text impression OPTIONAL
+}
+    Medication {
+        string id PK
+        string medication_code
+        string generic_name
+        string dosage_form
+        string strength
+        string schedule_class
+        boolean is_active
+}
+    Prescription {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string doctor_id FK
+        string prescription_number
+        string status
+        text clinical_indication
+        boolean interaction_alert
+}
+    PrescriptionItem {
+        string id PK
+        string prescription_id FK
+        string medication_id FK
+        decimal dose
+        string dose_unit
+        string route
+        string frequency
+        integer duration_days OPTIONAL
+}
+    Dispense {
+        string id PK
+        string prescription_id FK
+        string store_id FK
+        string dispense_number
+        string status
+        datetime dispensed_at OPTIONAL
+        text rejection_reason OPTIONAL
+}
+    MedicationAdministration {
+        string id PK
+        string admission_id FK
+        string prescription_item_id FK
+        string employee_id FK
+        string status
+        datetime scheduled_at
+        datetime administered_at OPTIONAL
+        decimal dose_given OPTIONAL
+        text variance_reason OPTIONAL
+}
+    OperatingTheatre {
+        string id PK
+        string facility_id FK
+        string department_id FK
+        string theatre_code
+        string name
+        string theatre_type
+        integer turnaround_minutes
+}
+    SurgicalCase {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string operating_theatre_id FK
+        string doctor_id FK
+        string case_number
+        string status
+        string urgency
+        datetime scheduled_start OPTIONAL
+}
+    SurgicalSafetyCheck {
+        string id PK
+        string surgical_case_id FK
+        string employee_id FK
+        string phase
+        boolean patient_identity_confirmed
+        boolean site_marked
+        datetime completed_at OPTIONAL
+}
+    BloodUnit {
+        string id PK
+        string facility_id FK
+        string store_id FK
+        string unit_number
+        string component_type
+        string blood_group
+        date expires_on
+        string status
+}
+    Transfusion {
+        string id PK
+        string blood_unit_id FK
+        string patient_id FK
+        string encounter_id FK
+        string employee_id FK
+        string transfusion_number
+        string status
+        datetime started_at OPTIONAL
+        text reaction_details OPTIONAL
+}
+    AllergyIntolerance {
+        string id PK
+        string patient_id FK
+        string encounter_id FK OPTIONAL
+        string substance
+        string category
+        string criticality
+        string status
+        text reaction
+}
+    InfectionCase {
+        string id PK
+        string patient_id FK
+        string facility_id FK
+        string owner_id FK
+        string case_number
+        string infection_type
+        string organism OPTIONAL
+        string status
+        datetime isolation_started_at OPTIONAL
+}
+    SafetyIncident {
+        string id PK
+        string patient_id FK OPTIONAL
+        string facility_id FK
+        string employee_id FK
+        string incident_number
+        string incident_type
+        string severity
+        string status
+        text description
+}
+    CorrectiveAction {
+        string id PK
+        string safety_incident_id FK
+        string owner_id FK
+        string action_type
+        string status
+        text action_description
+        date due_on
+        text effectiveness_evidence OPTIONAL
+}
+    Item {
+        string id PK
+        string item_code
+        string name
+        string item_type
+        string unit_of_measure
+        decimal reorder_level
+        boolean is_lot_tracked
+}
+    Store {
+        string id PK
+        string facility_id FK
+        string store_code
+        string name
+        string store_type
+        boolean is_active
+}
+    StockLot {
+        string id PK
+        string item_id FK
+        string store_id FK
+        string lot_number
+        date expiry_date OPTIONAL
+        decimal quantity_on_hand
+        decimal quantity_reserved
+        string status
+}
+    StockMovement {
+        string id PK
+        string stock_lot_id FK
+        string employee_id FK
+        string movement_type
+        decimal quantity
+        string source_reference
+        datetime occurred_at
+}
+    Supplier {
+        string id PK
+        string supplier_code
+        string name
+        string tax_identifier OPTIONAL
+        email email
+        string qualification_status
+}
+    PurchaseOrder {
+        string id PK
+        string supplier_id FK
+        string facility_id FK
+        string employee_id FK
+        string purchase_order_number
+        string status
+        date order_date
+        decimal total_amount
+}
+    GoodsReceipt {
+        string id PK
+        string purchase_order_id FK
+        string store_id FK
+        string employee_id FK
+        string receipt_number
+        string status
+        datetime received_at
+        text notes OPTIONAL
+}
+    SupplierInvoice {
+        string id PK
+        string supplier_id FK
+        string purchase_order_id FK OPTIONAL
+        string invoice_number
+        string status
+        date invoice_date
+        date due_date
+        decimal total_amount
+}
+    Coverage {
+        string id PK
+        string patient_id FK
+        string payer_name
+        string policy_number
+        string member_number
+        string status
+        date valid_from
+        date valid_to OPTIONAL
+}
+    Preauthorization {
+        string id PK
+        string coverage_id FK
+        string clinical_order_id FK OPTIONAL
+        string authorization_number OPTIONAL
+        string status
+        decimal requested_amount OPTIONAL
+        decimal approved_amount OPTIONAL
+        date expires_on OPTIONAL
+}
+    Invoice {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string admission_id FK OPTIONAL
+        string invoice_number
+        string status
+        decimal gross_amount
+        decimal discount_amount
+        decimal net_amount
+}
+    InvoiceLine {
+        string id PK
+        string invoice_id FK
+        string clinical_order_id FK OPTIONAL
+        string description
+        decimal quantity
+        decimal unit_price
+        decimal line_amount
+}
+    Payment {
+        string id PK
+        string invoice_id FK
+        string patient_id FK
+        string employee_id FK
+        string payment_number
+        string payment_method
+        string status
+        decimal amount
+        datetime paid_at
+}
+    Claim {
+        string id PK
+        string coverage_id FK
+        string invoice_id FK
+        string claim_number
+        string status
+        decimal claimed_amount
+        decimal approved_amount OPTIONAL
+        decimal settled_amount OPTIONAL
+}
+    ClaimDecision {
+        string id PK
+        string claim_id FK
+        string decision_type
+        datetime decided_at
+        decimal amount
+        text reason OPTIONAL
+        string external_reference
+}
+    Account {
+        string id PK
+        string account_code
+        string name
+        string account_type
+        boolean is_control_account
+        boolean is_active
+}
+    FiscalPeriod {
+        string id PK
+        string facility_id FK
+        string period_name
+        date starts_on
+        date ends_on
+        string status
+}
+    JournalEntry {
+        string id PK
+        string fiscal_period_id FK
+        string facility_id FK
+        string journal_number
+        string status
+        date entry_date
+        string description
+        string source_reference
+}
+    JournalLine {
+        string id PK
+        string journal_entry_id FK
+        string account_id FK
+        string line_description
+        decimal debit_amount
+        decimal credit_amount
+}
+    ServiceRequest {
+        string id PK
+        string facility_id FK
+        string patient_id FK OPTIONAL
+        string owner_id FK OPTIONAL
+        string request_number
+        string service_type
+        string status
+        datetime needed_at OPTIONAL
+}
+    HousekeepingTask {
+        string id PK
+        string facility_id FK
+        string ward_id FK
+        string bed_id FK OPTIONAL
+        string owner_id FK OPTIONAL
+        string task_type
+        string status
+        datetime completed_at OPTIONAL
+}
+    Complaint {
+        string id PK
+        string patient_id FK OPTIONAL
+        string facility_id FK
+        string owner_id FK
+        string complaint_number
+        string complaint_type
+        string status
+        text description
+        date due_on
+}
+    DataSubjectRequest {
+        string id PK
+        string patient_id FK
+        string facility_id FK
+        string owner_id FK
+        string request_number
+        string request_type
+        string status
+        date due_on
+        datetime fulfilled_at OPTIONAL
+}
+    DataBreach {
+        string id PK
+        string facility_id FK
+        string owner_id FK
+        string breach_number
+        string severity
+        string status
+        integer affected_people_count
+        datetime discovered_at
+        datetime notified_at OPTIONAL
+}
+    DowntimeEvent {
+        string id PK
+        string facility_id FK
+        string owner_id FK
+        string event_number
+        string downtime_type
+        string severity
+        string status
+        datetime started_at
+        datetime restored_at OPTIONAL
+}
+    OfflineReconciliation {
+        string id PK
+        string downtime_event_id FK
+        string patient_id FK OPTIONAL
+        string source_reference
+        string record_type
+        string status
+        string payload_hash
+        datetime reconciled_at OPTIONAL
+}
+    IntegrationMessage {
+        string id PK
+        string facility_id FK
+        string correlation_reference
+        string source_system
+        string destination_system
+        string message_type
+        string direction
+        string status
+        string payload_hash
+        integer attempt_count
+        datetime next_retry_at OPTIONAL
+}
+    AiClinicalDraft {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string medical_record_id FK OPTIONAL
+        string doctor_id FK
+        string model_reference
+        string status
+        text draft_text
+        datetime reviewed_at OPTIONAL
+}
+    ProcedureRecord {
+        string id PK
+        string patient_id FK
+        string encounter_id FK
+        string doctor_id FK
+        string procedure_code
+        string status
+        datetime performed_at OPTIONAL
+        text outcome OPTIONAL
+}
+    DischargeSummary {
+        string id PK
+        string admission_id FK
+        string patient_id FK
+        string doctor_id FK
+        string summary_number
+        string status
+        text hospital_course
+        text follow_up_instructions
+        datetime signed_at OPTIONAL
+}
+    CarePlan {
+        string id PK
+        string patient_id FK
+        string encounter_id FK OPTIONAL
+        string owner_id FK
+        string plan_number
+        string status
+        text goals
+        date review_on OPTIONAL
+}
+    ImmunizationRecord {
+        string id PK
+        string patient_id FK
+        string medication_id FK OPTIONAL
+        string employee_id FK OPTIONAL
+        string vaccine_name
+        string lot_number OPTIONAL
+        string status
+        datetime administered_at OPTIONAL
+        text reason OPTIONAL
+}
+    MealOrder {
+        string id PK
+        string admission_id FK
+        string owner_id FK OPTIONAL
+        string meal_reference
+        string diet_type
+        string status
+        datetime service_at
+        text special_instructions OPTIONAL
+}
+    AmbulanceTrip {
+        string id PK
+        string patient_id FK OPTIONAL
+        string facility_id FK
+        string owner_id FK OPTIONAL
+        string trip_number
+        string priority
+        string status
+        datetime requested_at
+        datetime completed_at OPTIONAL
+}
+    BiomedicalWasteBatch {
+        string id PK
+        string facility_id FK
+        string department_id FK
+        string employee_id FK
+        string batch_number
+        string waste_category
+        string status
+        decimal weight_kg
+        datetime sealed_at OPTIONAL
+}
+    WasteHandover {
+        string id PK
+        string biomedical_waste_batch_id FK
+        string employee_id FK
+        string manifest_reference
+        string carrier_name
+        datetime handed_over_at
+        decimal accepted_weight_kg
+}
+    BreakGlassAccess {
+        string id PK
+        string patient_id FK
+        string employee_id FK
+        string session_log_id FK
+        text justification
+        string purpose_of_use
+        datetime expires_at
+        datetime reviewed_at OPTIONAL
+}
+    AiSystemRegistry {
+        string id PK
+        string tenant_id FK
+        string owner_id FK
+        string system_name
+        string model_reference
+        text intended_use
+        string risk_class
+        string status
+        date last_reviewed_on
+}
+    DataResidencyPolicy {
+        string id PK
+        string tenant_id FK
+        string owner_id FK
+        string policy_name
+        string data_class
+        text permitted_regions
+        string transfer_basis OPTIONAL
+        string status
+        date effective_on
+}
+    Device {
+        string id PK
+        string facility_id FK
+        string item_id FK OPTIONAL
+        string device_identifier
+        string name
+        string status
+        string manufacturer
+        date next_maintenance_on OPTIONAL
+}
+    RecallAlert {
+        string id PK
+        string item_id FK OPTIONAL
+        string device_id FK OPTIONAL
+        string alert_number
+        string severity
+        string status
+        date issued_on
+        text instructions
+}
+    ContingencyPlan {
+        string id PK
+        string facility_id FK
+        string owner_id FK
+        string plan_name
+        string scenario_type
+        integer recovery_time_hours
+        string status
+        date last_tested_on OPTIONAL
+        text test_findings OPTIONAL
+}
+    ResearchDatasetRequest {
+        string id PK
+        string tenant_id FK
+        string owner_id FK
+        string request_number
+        text purpose
+        string legal_basis
+        string status
+        date approved_until OPTIONAL
+        string secure_environment_reference OPTIONAL
+}
+Tenant ||--o{ Facility : "links"
+Facility ||--o{ Department : "links"
+Facility ||--o{ Employee : "links"
+Department ||--o{ Employee : "links"
+Employee ||--o{ Doctor : "links"
+Department ||--o{ Doctor : "links"
+Employee ||--o{ UserAccount : "links"
+UserAccount ||--o{ UserRoleAssignment : "links"
+Facility ||--o{ UserRoleAssignment : "links"
+UserAccount ||--o{ SessionLog : "links"
+Facility ||--o{ AuditEvent : "links"
+SessionLog ||--o{ AuditEvent : "links"
+Employee ||--o{ AuditEvent : "links"
+Tenant ||--o{ Patient : "links"
+Patient ||--o{ PatientIdentifier : "links"
+Patient ||--o{ Consent : "links"
+Facility ||--o{ Consent : "links"
+Patient ||--o{ Appointment : "links"
+Facility ||--o{ Appointment : "links"
+Doctor ||--o{ Appointment : "links"
+Patient ||--o{ Encounter : "links"
+Appointment ||--o{ Encounter : "links"
+Doctor ||--o{ Encounter : "links"
+Patient ||--o{ Admission : "links"
+Encounter ||--o{ Admission : "links"
+Doctor ||--o{ Admission : "links"
+Facility ||--o{ Ward : "links"
+Ward ||--o{ Bed : "links"
+Admission ||--o{ BedAssignment : "links"
+Bed ||--o{ BedAssignment : "links"
+Patient ||--o{ MedicalRecord : "links"
+Encounter ||--o{ MedicalRecord : "links"
+Doctor ||--o{ MedicalRecord : "links"
+Patient ||--o{ Diagnosis : "links"
+Encounter ||--o{ Diagnosis : "links"
+MedicalRecord ||--o{ Diagnosis : "links"
+Patient ||--o{ ClinicalOrder : "links"
+Encounter ||--o{ ClinicalOrder : "links"
+Doctor ||--o{ ClinicalOrder : "links"
+ClinicalOrder ||--o{ Specimen : "links"
+Patient ||--o{ Specimen : "links"
+Specimen ||--o{ LabObservation : "links"
+ClinicalOrder ||--o{ LabObservation : "links"
+Patient ||--o{ ImagingStudy : "links"
+Encounter ||--o{ ImagingStudy : "links"
+ClinicalOrder ||--o{ ImagingStudy : "links"
+Doctor ||--o{ ImagingStudy : "links"
+Patient ||--o{ Prescription : "links"
+Encounter ||--o{ Prescription : "links"
+Doctor ||--o{ Prescription : "links"
+Prescription ||--o{ PrescriptionItem : "links"
+Medication ||--o{ PrescriptionItem : "links"
+Prescription ||--o{ Dispense : "links"
+Store ||--o{ Dispense : "links"
+Admission ||--o{ MedicationAdministration : "links"
+PrescriptionItem ||--o{ MedicationAdministration : "links"
+Employee ||--o{ MedicationAdministration : "links"
+Facility ||--o{ OperatingTheatre : "links"
+Department ||--o{ OperatingTheatre : "links"
+Patient ||--o{ SurgicalCase : "links"
+Encounter ||--o{ SurgicalCase : "links"
+OperatingTheatre ||--o{ SurgicalCase : "links"
+Doctor ||--o{ SurgicalCase : "links"
+SurgicalCase ||--o{ SurgicalSafetyCheck : "links"
+Employee ||--o{ SurgicalSafetyCheck : "links"
+Facility ||--o{ BloodUnit : "links"
+Store ||--o{ BloodUnit : "links"
+BloodUnit ||--o{ Transfusion : "links"
+Patient ||--o{ Transfusion : "links"
+Encounter ||--o{ Transfusion : "links"
+Employee ||--o{ Transfusion : "links"
+Patient ||--o{ AllergyIntolerance : "links"
+Encounter ||--o{ AllergyIntolerance : "links"
+Patient ||--o{ InfectionCase : "links"
+Facility ||--o{ InfectionCase : "links"
+Employee ||--o{ InfectionCase : "links"
+Patient ||--o{ SafetyIncident : "links"
+Facility ||--o{ SafetyIncident : "links"
+Employee ||--o{ SafetyIncident : "links"
+SafetyIncident ||--o{ CorrectiveAction : "links"
+Employee ||--o{ CorrectiveAction : "links"
+Facility ||--o{ Store : "links"
+Item ||--o{ StockLot : "links"
+Store ||--o{ StockLot : "links"
+StockLot ||--o{ StockMovement : "links"
+Employee ||--o{ StockMovement : "links"
+Supplier ||--o{ PurchaseOrder : "links"
+Facility ||--o{ PurchaseOrder : "links"
+Employee ||--o{ PurchaseOrder : "links"
+PurchaseOrder ||--o{ GoodsReceipt : "links"
+Store ||--o{ GoodsReceipt : "links"
+Employee ||--o{ GoodsReceipt : "links"
+Supplier ||--o{ SupplierInvoice : "links"
+PurchaseOrder ||--o{ SupplierInvoice : "links"
+Patient ||--o{ Coverage : "links"
+Coverage ||--o{ Preauthorization : "links"
+ClinicalOrder ||--o{ Preauthorization : "links"
+Patient ||--o{ Invoice : "links"
+Encounter ||--o{ Invoice : "links"
+Admission ||--o{ Invoice : "links"
+Invoice ||--o{ InvoiceLine : "links"
+ClinicalOrder ||--o{ InvoiceLine : "links"
+Invoice ||--o{ Payment : "links"
+Patient ||--o{ Payment : "links"
+Employee ||--o{ Payment : "links"
+Coverage ||--o{ Claim : "links"
+Invoice ||--o{ Claim : "links"
+Claim ||--o{ ClaimDecision : "links"
+Facility ||--o{ FiscalPeriod : "links"
+FiscalPeriod ||--o{ JournalEntry : "links"
+Facility ||--o{ JournalEntry : "links"
+JournalEntry ||--o{ JournalLine : "links"
+Account ||--o{ JournalLine : "links"
+Facility ||--o{ ServiceRequest : "links"
+Patient ||--o{ ServiceRequest : "links"
+Employee ||--o{ ServiceRequest : "links"
+Facility ||--o{ HousekeepingTask : "links"
+Ward ||--o{ HousekeepingTask : "links"
+Bed ||--o{ HousekeepingTask : "links"
+Employee ||--o{ HousekeepingTask : "links"
+Patient ||--o{ Complaint : "links"
+Facility ||--o{ Complaint : "links"
+Employee ||--o{ Complaint : "links"
+Patient ||--o{ DataSubjectRequest : "links"
+Facility ||--o{ DataSubjectRequest : "links"
+Employee ||--o{ DataSubjectRequest : "links"
+Facility ||--o{ DataBreach : "links"
+Employee ||--o{ DataBreach : "links"
+Facility ||--o{ DowntimeEvent : "links"
+Employee ||--o{ DowntimeEvent : "links"
+DowntimeEvent ||--o{ OfflineReconciliation : "links"
+Patient ||--o{ OfflineReconciliation : "links"
+Facility ||--o{ IntegrationMessage : "links"
+Patient ||--o{ AiClinicalDraft : "links"
+Encounter ||--o{ AiClinicalDraft : "links"
+MedicalRecord ||--o{ AiClinicalDraft : "links"
+Doctor ||--o{ AiClinicalDraft : "links"
+Patient ||--o{ ProcedureRecord : "links"
+Encounter ||--o{ ProcedureRecord : "links"
+Doctor ||--o{ ProcedureRecord : "links"
+Admission ||--o{ DischargeSummary : "links"
+Patient ||--o{ DischargeSummary : "links"
+Doctor ||--o{ DischargeSummary : "links"
+Patient ||--o{ CarePlan : "links"
+Encounter ||--o{ CarePlan : "links"
+Employee ||--o{ CarePlan : "links"
+Patient ||--o{ ImmunizationRecord : "links"
+Medication ||--o{ ImmunizationRecord : "links"
+Employee ||--o{ ImmunizationRecord : "links"
+Admission ||--o{ MealOrder : "links"
+Employee ||--o{ MealOrder : "links"
+Patient ||--o{ AmbulanceTrip : "links"
+Facility ||--o{ AmbulanceTrip : "links"
+Employee ||--o{ AmbulanceTrip : "links"
+Facility ||--o{ BiomedicalWasteBatch : "links"
+Department ||--o{ BiomedicalWasteBatch : "links"
+Employee ||--o{ BiomedicalWasteBatch : "links"
+BiomedicalWasteBatch ||--o{ WasteHandover : "links"
+Employee ||--o{ WasteHandover : "links"
+Patient ||--o{ BreakGlassAccess : "links"
+Employee ||--o{ BreakGlassAccess : "links"
+SessionLog ||--o{ BreakGlassAccess : "links"
+Tenant ||--o{ AiSystemRegistry : "links"
+Employee ||--o{ AiSystemRegistry : "links"
+Tenant ||--o{ DataResidencyPolicy : "links"
+Employee ||--o{ DataResidencyPolicy : "links"
+Facility ||--o{ Device : "links"
+Item ||--o{ Device : "links"
+Item ||--o{ RecallAlert : "links"
+Device ||--o{ RecallAlert : "links"
+Facility ||--o{ ContingencyPlan : "links"
+Employee ||--o{ ContingencyPlan : "links"
+Tenant ||--o{ ResearchDatasetRequest : "links"
+Employee ||--o{ ResearchDatasetRequest : "links"
+%%entity Tenant help: A legally and operationally isolated health-system customer whose residency, retention, and subscription policies scope every facility and user.
+%%field Tenant.tenant_code help: Stable customer code used in provisioning and cross-system correlation.
+%%field Tenant.name help: Legal or trading name shown throughout administration and reports.
+%%field Tenant.status enum: TenantStatus
+%%field Tenant.status help: Provisioning controls setup; suspension blocks normal access; retirement preserves mandated records.
+%%field Tenant.home_region help: Jurisdictional hosting region that constrains where protected data may be stored.
+%%field Tenant.default_time_zone help: IANA time zone used when a facility has not supplied its own.
+%%section entity: Tenant; name: Tenant; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: tenant_code, name | home_region, default_time_zone
+%%rbac role:platform_admin|tenant_admin on Tenant.read
+%%entity Facility help: A licensed care location or virtual service operated by one tenant, with its own identifiers, locale, and accountable administration.
+%%field Facility.tenant_id help: Tenant that owns and isolates this facility.
+%%field Facility.facility_code help: Code used by local staff and outbound interface headers.
+%%field Facility.name help: Recognizable facility name used in lookups and patient communications.
+%%field Facility.facility_type enum: FacilityType
+%%field Facility.facility_type help: Care setting that drives available workflows and reporting obligations.
+%%field Facility.time_zone help: IANA time zone governing appointments, medication times, and audit display.
+%%field Facility.currency_code help: ISO currency used for prices and financial postings.
+%%section entity: Facility; name: Facility; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: tenant_id, facility_code | name, facility_type | time_zone, currency_code
+%%index Facility(tenant_id)
+%%rbac role:tenant_admin|facility_admin|clinical_admin|finance_manager on Facility.read
+%%entity Department help: Clinical or administrative service unit used for accountability, scheduling, cost allocation, and access scoping.
+%%field Department.facility_id help: Facility in which this department operates.
+%%field Department.department_code help: Local code used on orders, reports, and integrations.
+%%field Department.name help: Operational name staff recognize in lookups.
+%%field Department.department_type help: Service classification used for workflow routing and analytics.
+%%field Department.is_active help: Cleared when the unit closes while historical records remain attributed.
+%%section entity: Department; name: Department; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, department_code | name, department_type | is_active
+%%index Department(facility_id)
+%%rbac role:facility_admin|clinical_admin|department_manager on Department.read
+%%entity Employee help: A worker, contractor, or credentialed professional who may be scheduled, assigned work, or granted a system account.
+%%field Employee.facility_id help: Primary facility responsible for this worker.
+%%field Employee.department_id help: Home department used for supervision and default work routing.
+%%field Employee.employee_number help: Human-resources identifier retained across account changes.
+%%field Employee.full_name help: Name displayed in clinical authorship, approvals, and assignments.
+%%field Employee.employment_status enum: EmploymentStatus
+%%field Employee.employment_status help: Current workforce standing; only active workers may receive new assignments.
+%%field Employee.email help: Verified work address used for security and operational notices.
+%%section entity: Employee; name: Employee; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, department_id | employee_number, full_name | employment_status, email
+%%index Employee(facility_id, department_id)
+%%rbac role:tenant_admin|facility_admin|hr_manager|clinical_admin on Employee.read
+%%entity Doctor help: Licensed practitioner profile extending an employee with specialty, registration, and credential validity needed for clinical privileges.
+%%field Doctor.employee_id help: Workforce identity associated with this practitioner.
+%%field Doctor.department_id help: Clinical department in which the practitioner normally works.
+%%field Doctor.license_number help: Professional registration checked before orders or signatures are accepted.
+%%field Doctor.medical_council help: Authority that issued the professional license.
+%%field Doctor.specialization help: Primary specialty used for referrals and clinical routing.
+%%field Doctor.credential_expires_on help: Expiry date monitored by credentialing before privileges lapse.
+%%section entity: Doctor; name: Doctor; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: employee_id, department_id | license_number, medical_council | specialization, credential_expires_on
+%%index Doctor(employee_id, department_id)
+%%rbac role:clinical_admin|doctor|credentialing_officer on Doctor.read
+%%entity UserAccount help: Sign-in identity linked to a worker and governed by multifactor, lockout, privilege review, and tenant scoping controls.
+%%field UserAccount.employee_id help: Worker who is accountable for activity performed through this account.
+%%field UserAccount.username help: Unique sign-in name supplied to the identity provider.
+%%field UserAccount.status enum: AccountStatus
+%%field UserAccount.status help: Invitation, activation, lock, and disablement lifecycle for system access.
+%%field UserAccount.mfa_required help: Whether a second factor is mandatory at the next authentication.
+%%field UserAccount.is_privileged help: Flags accounts requiring stronger monitoring and periodic access review.
+%%section entity: UserAccount; name: User Account; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: employee_id, username | mfa_required, is_privileged
+%%index UserAccount(employee_id)
+%%rbac role:tenant_admin|security_admin on UserAccount.read
+%%entity UserRoleAssignment help: Time-bounded assignment of an operational role to one account within an optional facility scope.
+%%entity UserRoleAssignment parent: UserAccount
+%%field UserRoleAssignment.user_account_id help: Account receiving the role.
+%%field UserRoleAssignment.facility_id help: Facility boundary for the role; empty only for tenant-wide duties.
+%%field UserRoleAssignment.role_name help: Approved functional role matched by access-control policy.
+%%field UserRoleAssignment.valid_from help: First date on which the assignment may be used.
+%%field UserRoleAssignment.valid_to help: Last permitted date, after which access review removes the grant.
+%%section entity: UserRoleAssignment; name: User Role Assignment; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: user_account_id, facility_id | role_name, valid_from | valid_to
+%%index UserRoleAssignment(user_account_id, facility_id)
+%%rbac role:tenant_admin|security_admin on UserRoleAssignment.read
+%%entity SessionLog help: Authentication session evidence recording device, network, assurance, and termination without copying clinical content.
+%%field SessionLog.user_account_id help: Account that authenticated for this session.
+%%field SessionLog.session_reference help: Opaque identifier used to correlate audit events without exposing tokens.
+%%field SessionLog.authentication_method help: Method and assurance level used to prove identity.
+%%field SessionLog.ip_address help: Network origin retained for threat investigation under local policy.
+%%field SessionLog.started_at help: Time authentication succeeded.
+%%field SessionLog.ended_at help: Time the session ended or was revoked.
+%%section entity: SessionLog; name: Session Log; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: user_account_id, session_reference | authentication_method, ip_address | started_at, ended_at
+%%index SessionLog(user_account_id)
+%%rbac role:security_admin|privacy_officer on SessionLog.read
+%%entity AuditEvent help: Immutable evidence of access or change, including purpose of use and break-glass context, without storing full clinical payloads.
+%%field AuditEvent.facility_id help: Facility context in which the audited activity occurred.
+%%field AuditEvent.session_log_id help: Authentication session correlated with the event.
+%%field AuditEvent.employee_id help: Person accountable for the action.
+%%field AuditEvent.event_type help: Security or business event classification used by monitoring rules.
+%%field AuditEvent.purpose_of_use help: Declared treatment, payment, operations, legal, research, or emergency purpose.
+%%field AuditEvent.target_reference help: Entity and record reference affected without duplicating its protected content.
+%%field AuditEvent.occurred_at help: Tamper-evident event time from the trusted server clock.
+%%section entity: AuditEvent; name: Audit Event; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, session_log_id | employee_id, event_type | purpose_of_use, target_reference | occurred_at
+%%index AuditEvent(facility_id, session_log_id)
+%%rbac role:security_admin|privacy_officer|auditor on AuditEvent.read
+%%entity Patient help: Enterprise patient identity used to connect care safely while retaining source identifiers and duplicate-resolution status.
+%%field Patient.tenant_id help: Tenant whose master patient index owns this identity.
+%%field Patient.medical_record_number help: Tenant-issued identifier printed on labels and used for reconciliation.
+%%field Patient.full_name help: Current legal or preferred display name verified during registration.
+%%field Patient.date_of_birth help: Identity-matching and clinical-safety value verified against evidence.
+%%field Patient.administrative_gender help: Administrative demographic value; clinical sex and gender details may be recorded separately.
+%%field Patient.duplicate_review_status help: Whether identity matching has found a potential duplicate requiring steward review.
+%%field Patient.deceased_at help: Verified death time used to prevent inappropriate scheduling and messaging.
+%%section entity: Patient; name: Patient; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: tenant_id, medical_record_number | full_name, date_of_birth | administrative_gender, duplicate_review_status | deceased_at
+%%index Patient(tenant_id)
+%%rbac role:registration_clerk|doctor|nurse|privacy_officer on Patient.read
+%%entity PatientIdentifier help: Source-specific identifier attached to a patient, allowing national, payer, and legacy numbers without placing them all on the master record.
+%%entity PatientIdentifier parent: Patient
+%%field PatientIdentifier.patient_id help: Patient to whom this identifier has been verified.
+%%field PatientIdentifier.identifier_system help: Issuing authority or namespace needed to interpret the value.
+%%field PatientIdentifier.identifier_value help: Identifier exactly as issued, protected according to its sensitivity.
+%%field PatientIdentifier.valid_from help: Date the issuing authority began recognizing the identifier.
+%%field PatientIdentifier.valid_to help: Date the identifier stopped being valid.
+%%section entity: PatientIdentifier; name: Patient Identifier; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, identifier_system | identifier_value, valid_from | valid_to
+%%index PatientIdentifier(patient_id)
+%%rbac role:registration_clerk|privacy_officer on PatientIdentifier.read
+%%entity Consent help: Recorded permission, refusal, or withdrawal for treatment, disclosure, research, photography, or another defined purpose.
+%%field Consent.patient_id help: Person whose choice is being recorded.
+%%field Consent.facility_id help: Facility responsible for obtaining and honoring the choice.
+%%field Consent.consent_reference help: Document or electronic signature reference proving the choice.
+%%field Consent.consent_type help: Specific purpose and data scope to which the decision applies.
+%%field Consent.status enum: ConsentStatus
+%%field Consent.status help: Only active consent authorizes processing; refusal and withdrawal remain auditable.
+%%field Consent.effective_at help: Time the permission begins to apply.
+%%field Consent.expires_at help: Time-limited consent ceases without renewal.
+%%section entity: Consent; name: Consent; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | consent_reference, consent_type | effective_at, expires_at
+%%index Consent(patient_id, facility_id)
+%%rbac role:registration_clerk|doctor|privacy_officer|research_officer on Consent.read
+%%entity Appointment help: Reserved outpatient, diagnostic, procedural, or virtual slot connecting a patient, service, practitioner, and facility.
+%%field Appointment.patient_id help: Patient expected for the scheduled service.
+%%field Appointment.facility_id help: Location responsible for the appointment.
+%%field Appointment.doctor_id help: Practitioner requested or assigned to the visit.
+%%field Appointment.appointment_number help: Reference quoted in reminders and at check-in.
+%%field Appointment.status enum: AppointmentStatus
+%%field Appointment.status help: Tracks request through attendance, cancellation, or no-show.
+%%field Appointment.scheduled_start help: Local start converted and stored consistently for reminders.
+%%field Appointment.reason help: Patient-facing reason used for preparation and triage.
+%%section entity: Appointment; name: Appointment; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | doctor_id, appointment_number | scheduled_start, reason
+%%index Appointment(patient_id, facility_id)
+%%rbac role:scheduler|registration_clerk|doctor|nurse on Appointment.read
+%%entity Encounter help: Actual episode of care linking observations, diagnoses, notes, orders, and charges to the correct patient context.
+%%field Encounter.patient_id help: Patient receiving care in this episode.
+%%field Encounter.appointment_id help: Scheduled visit that originated the episode, if any.
+%%field Encounter.doctor_id help: Practitioner clinically responsible for the episode.
+%%field Encounter.encounter_number help: Facility reference used across clinical and billing workflows.
+%%field Encounter.encounter_type help: Inpatient, outpatient, emergency, virtual, or other setting classification.
+%%field Encounter.status enum: EncounterStatus
+%%field Encounter.status help: Operational progress from planning through completion or cancellation.
+%%field Encounter.started_at help: Actual start used for care sequence and regulatory timing.
+%%section entity: Encounter; name: Encounter; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, appointment_id | doctor_id, encounter_number | encounter_type, started_at
+%%index Encounter(patient_id, appointment_id)
+%%rbac role:registration_clerk|doctor|nurse|clinical_coder on Encounter.read
+%%entity Admission help: Inpatient stay linked to an encounter, carrying admission source, responsible clinician, and formal discharge outcome.
+%%field Admission.patient_id help: Patient occupying the inpatient stay.
+%%field Admission.encounter_id help: Clinical episode under which inpatient care is documented.
+%%field Admission.doctor_id help: Attending practitioner accountable for the stay.
+%%field Admission.admission_number help: Reference used on wristbands, transfers, and discharge documents.
+%%field Admission.status enum: AdmissionStatus
+%%field Admission.status help: Progress from planned arrival through discharge.
+%%field Admission.admitted_at help: Time inpatient responsibility began.
+%%field Admission.expected_discharge_on help: Planning date used for beds, pharmacy, transport, and care coordination.
+%%section entity: Admission; name: Admission; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | doctor_id, admission_number | admitted_at, expected_discharge_on
+%%index Admission(patient_id, encounter_id)
+%%rbac role:bed_manager|doctor|nurse|discharge_coordinator on Admission.read
+%%entity Ward help: Managed inpatient unit whose capacity, specialty, and isolation resources constrain safe bed placement.
+%%field Ward.facility_id help: Facility containing this ward.
+%%field Ward.ward_code help: Short code used on location labels and integrations.
+%%field Ward.name help: Name staff and patients recognize.
+%%field Ward.ward_type help: Clinical specialty or acuity used by placement rules.
+%%field Ward.is_active help: Whether new assignments may be made while historical stays remain visible.
+%%section entity: Ward; name: Ward; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, ward_code | name, ward_type | is_active
+%%index Ward(facility_id)
+%%rbac role:bed_manager|nurse|facility_admin on Ward.read
+%%entity Bed help: Physical or virtual bed location with equipment and sanitation state used by placement and transfer workflows.
+%%field Bed.ward_id help: Ward in which the bed is managed.
+%%field Bed.bed_code help: Label displayed at the bedside and in bed boards.
+%%field Bed.bed_type help: Capability class used to match clinical placement needs.
+%%field Bed.status enum: BedStatus
+%%field Bed.status help: Availability state coordinated with assignment and cleaning workflows.
+%%field Bed.is_isolation_capable help: Whether infection-control placement may use this bed.
+%%field Bed.has_oxygen help: Whether fixed oxygen support is available.
+%%section entity: Bed; name: Bed; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: ward_id, bed_code | bed_type, is_isolation_capable | has_oxygen
+%%index Bed(ward_id)
+%%rbac role:bed_manager|nurse|housekeeping on Bed.read
+%%entity BedAssignment help: Time-bounded occupancy or reservation connecting one admission to one bed and preserving every transfer.
+%%field BedAssignment.admission_id help: Inpatient stay receiving this placement.
+%%field BedAssignment.bed_id help: Bed reserved or occupied.
+%%field BedAssignment.assignment_reference help: Transfer-board reference used to reconcile concurrent requests.
+%%field BedAssignment.status enum: AssignmentStatus
+%%field BedAssignment.status help: Reservation and occupancy lifecycle; release makes the bed eligible for cleaning.
+%%field BedAssignment.assigned_at help: Time physical occupancy or reservation began.
+%%field BedAssignment.released_at help: Time responsibility ended and sanitation became due.
+%%section entity: BedAssignment; name: Bed Assignment; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: admission_id, bed_id | assignment_reference, assigned_at | released_at
+%%index BedAssignment(admission_id, bed_id)
+%%rbac role:bed_manager|nurse on BedAssignment.read
+%%entity MedicalRecord help: Versioned clinical document or note that becomes immutable when signed and is corrected only through a traceable addendum.
+%%field MedicalRecord.patient_id help: Patient whose longitudinal record receives the document.
+%%field MedicalRecord.encounter_id help: Care episode providing the clinical context.
+%%field MedicalRecord.doctor_id help: Practitioner author or responsible signer.
+%%field MedicalRecord.record_number help: Document reference used in release and amendment tracking.
+%%field MedicalRecord.record_type help: Progress note, consultation, operative note, history, or another clinical class.
+%%field MedicalRecord.status enum: RecordStatus
+%%field MedicalRecord.status help: Draft, signed, amended, or entered-in-error state governing editability.
+%%field MedicalRecord.clinical_text help: Clinical narrative protected by confidentiality and release rules.
+%%field MedicalRecord.signed_at help: Time the accountable signer made the document final.
+%%section entity: MedicalRecord; name: Medical Record; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | doctor_id, record_number | record_type, clinical_text | signed_at
+%%index MedicalRecord(patient_id, encounter_id)
+%%rbac role:doctor|nurse|clinical_coder|privacy_officer on MedicalRecord.read
+%%entity Diagnosis help: Coded health condition asserted for a patient in an encounter, with provenance, certainty, and clinical status.
+%%field Diagnosis.patient_id help: Patient to whom the condition applies.
+%%field Diagnosis.encounter_id help: Episode in which the condition was assessed.
+%%field Diagnosis.medical_record_id help: Signed note supporting the assertion.
+%%field Diagnosis.diagnosis_code help: Code supplied by ICD, SNOMED CT, or an approved local terminology.
+%%field Diagnosis.diagnosis_system help: Canonical terminology namespace and version needed to interpret the code.
+%%field Diagnosis.status enum: DiagnosisStatus
+%%field Diagnosis.status help: Provisional, confirmed, resolved, refuted, or entered-in-error clinical standing.
+%%field Diagnosis.onset_on help: Best known onset date used for clinical chronology.
+%%section entity: Diagnosis; name: Diagnosis; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | medical_record_id, diagnosis_code | diagnosis_system, onset_on
+%%index Diagnosis(patient_id, encounter_id)
+%%rbac role:doctor|nurse|clinical_coder on Diagnosis.read
+%%entity ClinicalOrder help: Authorized request for laboratory, imaging, procedure, therapy, or other service, distinct from the result it later produces.
+%%field ClinicalOrder.patient_id help: Patient for whom the service is requested.
+%%field ClinicalOrder.encounter_id help: Episode providing clinical and billing context.
+%%field ClinicalOrder.doctor_id help: Practitioner accountable for placing or signing the request.
+%%field ClinicalOrder.order_number help: Reference transmitted to fulfilling departments and external systems.
+%%field ClinicalOrder.order_type help: Service domain used to route the request to the correct workflow.
+%%field ClinicalOrder.status enum: OrderStatus
+%%field ClinicalOrder.status help: Lifecycle from draft through fulfillment, cancellation, or rejection.
+%%field ClinicalOrder.priority help: Routine, urgent, stat, or locally governed priority.
+%%field ClinicalOrder.clinical_indication help: Question or condition the fulfilling service must address.
+%%section entity: ClinicalOrder; name: Clinical Order; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | doctor_id, order_number | order_type, priority | clinical_indication
+%%index ClinicalOrder(patient_id, encounter_id)
+%%rbac role:doctor|nurse|pharmacist|laboratory_scientist|radiology_technologist on ClinicalOrder.read
+%%entity Specimen help: Barcode-tracked patient sample whose custody, collection suitability, reception, and rejection are independently auditable.
+%%field Specimen.clinical_order_id help: Laboratory request that requires the sample.
+%%field Specimen.patient_id help: Patient identity verified at collection.
+%%field Specimen.specimen_number help: Barcode and accession reference used through processing.
+%%field Specimen.specimen_type help: Biological material and source needed to interpret results.
+%%field Specimen.status enum: SpecimenStatus
+%%field Specimen.status help: Collection and laboratory custody lifecycle including rejection.
+%%field Specimen.collected_at help: Time used for stability limits and clinical interpretation.
+%%field Specimen.received_at help: Laboratory receipt time used for turnaround monitoring.
+%%section entity: Specimen; name: Specimen; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: clinical_order_id, patient_id | specimen_number, specimen_type | collected_at, received_at
+%%index Specimen(clinical_order_id, patient_id)
+%%rbac role:nurse|phlebotomist|laboratory_scientist on Specimen.read
+%%entity LabObservation help: Atomic laboratory result with code, value, units, ranges, interpretation, verification, and critical-result communication evidence.
+%%field LabObservation.specimen_id help: Sample from which the result was produced.
+%%field LabObservation.clinical_order_id help: Request this result fulfills.
+%%field LabObservation.observation_code help: LOINC or approved local analyte code with versioned meaning.
+%%field LabObservation.result_value help: Reported value preserved exactly, including nonnumeric or coded results.
+%%field LabObservation.unit help: UCUM or local unit required to interpret a quantitative value.
+%%field LabObservation.status enum: ResultStatus
+%%field LabObservation.status help: Preliminary, final, corrected, or cancelled publication state.
+%%field LabObservation.interpretation help: Normality or criticality flag evaluated against the correct population range.
+%%field LabObservation.critical_notified_at help: Time a qualified recipient acknowledged a critical result.
+%%section entity: LabObservation; name: Lab Observation; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: specimen_id, clinical_order_id | observation_code, result_value | unit, interpretation | critical_notified_at
+%%index LabObservation(specimen_id, clinical_order_id)
+%%rbac role:doctor|nurse|laboratory_scientist on LabObservation.read
+%%entity ImagingStudy help: Clinical imaging study indexed by DICOM UID and accession while pixel data remains under PACS custody.
+%%field ImagingStudy.patient_id help: Patient whose identity was used for the study.
+%%field ImagingStudy.encounter_id help: Care episode providing clinical context.
+%%field ImagingStudy.clinical_order_id help: Imaging request this acquisition fulfills.
+%%field ImagingStudy.doctor_id help: Reading radiologist or responsible practitioner.
+%%field ImagingStudy.study_instance_uid help: Globally unique DICOM identifier used for QIDO and WADO retrieval.
+%%field ImagingStudy.accession_number help: RIS or PACS accession used to reconcile the study.
+%%field ImagingStudy.modality help: Acquisition modality used for routing and safety checks.
+%%field ImagingStudy.status enum: ResultStatus
+%%field ImagingStudy.status help: Acquisition and reporting state aligned with the diagnostic workflow.
+%%field ImagingStudy.impression help: Signed diagnostic conclusion made available to the clinical record.
+%%section entity: ImagingStudy; name: Imaging Study; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | clinical_order_id, doctor_id | study_instance_uid, accession_number | modality, impression
+%%index ImagingStudy(patient_id, encounter_id)
+%%rbac role:doctor|radiologist|radiology_technologist on ImagingStudy.read
+%%entity Medication help: Governed medication concept and product identity used for ordering, interaction checking, dispensing, and administration.
+%%field Medication.medication_code help: RxNorm, national product, or formulary code used for unambiguous matching.
+%%field Medication.generic_name help: Ingredient name clinicians recognize independent of manufacturer.
+%%field Medication.dosage_form help: Tablet, solution, injection, or other form constraining routes and doses.
+%%field Medication.strength help: Concentration or amount per unit required for safe calculation.
+%%field Medication.schedule_class help: Controlled-substance or local scheduling classification.
+%%field Medication.is_active help: Whether new prescriptions may use the product.
+%%section entity: Medication; name: Medication; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: medication_code, generic_name | dosage_form, strength | schedule_class, is_active
+%%rbac role:pharmacist|doctor|inventory_manager on Medication.read
+%%entity Prescription help: Signed medication request for one patient and encounter, subject to allergy, interaction, dose, formulary, and verification controls.
+%%field Prescription.patient_id help: Patient for whom medication therapy is ordered.
+%%field Prescription.encounter_id help: Clinical episode in which the therapy is authorized.
+%%field Prescription.doctor_id help: Prescriber accountable for indication and signature.
+%%field Prescription.prescription_number help: Reference used by pharmacy and medication reconciliation.
+%%field Prescription.status enum: PrescriptionStatus
+%%field Prescription.status help: Draft through verification, dispensing, completion, stop, or cancellation.
+%%field Prescription.clinical_indication help: Therapeutic reason needed for review and decision support.
+%%field Prescription.interaction_alert help: Whether safety screening produced an alert requiring documented resolution.
+%%section entity: Prescription; name: Prescription; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | doctor_id, prescription_number | clinical_indication, interaction_alert
+%%index Prescription(patient_id, encounter_id)
+%%rbac role:doctor|pharmacist|nurse on Prescription.read
+%%entity PrescriptionItem help: One medication regimen within a prescription, carrying dose, route, frequency, duration, and patient instructions.
+%%entity PrescriptionItem parent: Prescription
+%%field PrescriptionItem.prescription_id help: Prescription that owns this regimen.
+%%field PrescriptionItem.medication_id help: Medication concept or product being ordered.
+%%field PrescriptionItem.dose help: Numeric dose used for dispensing and bedside verification.
+%%field PrescriptionItem.dose_unit help: Unit that gives the dose clinical meaning.
+%%field PrescriptionItem.route help: Permitted administration route checked against product and patient.
+%%field PrescriptionItem.frequency help: Schedule expression used to create administration times.
+%%field PrescriptionItem.duration_days help: Planned course length used to calculate quantity.
+%%section entity: PrescriptionItem; name: Prescription Item; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: prescription_id, medication_id | dose, dose_unit | route, frequency | duration_days
+%%index PrescriptionItem(prescription_id, medication_id)
+%%rbac role:doctor|pharmacist|nurse on PrescriptionItem.read
+%%entity Dispense help: Pharmacy fulfillment event recording clinical review, preparation, issue, partial supply, rejection, and accountable staff.
+%%field Dispense.prescription_id help: Medication request being fulfilled.
+%%field Dispense.store_id help: Pharmacy inventory location supplying stock.
+%%field Dispense.dispense_number help: Reference printed on labels and used for reconciliation.
+%%field Dispense.status enum: DispenseStatus
+%%field Dispense.status help: Review and issue lifecycle including partial and rejected outcomes.
+%%field Dispense.dispensed_at help: Time custody transferred from pharmacy.
+%%field Dispense.rejection_reason help: Clinical or operational reason the supply was refused or stopped.
+%%section entity: Dispense; name: Dispense; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: prescription_id, store_id | dispense_number, dispensed_at | rejection_reason
+%%index Dispense(prescription_id, store_id)
+%%rbac role:pharmacist|pharmacy_technician on Dispense.read
+%%entity MedicationAdministration help: Bedside medication event that verifies the patient, drug, dose, route, and time and records omissions or corrections.
+%%field MedicationAdministration.admission_id help: Inpatient stay during which administration is due.
+%%field MedicationAdministration.prescription_item_id help: Authorized regimen being administered.
+%%field MedicationAdministration.employee_id help: Clinician accountable for verification and administration.
+%%field MedicationAdministration.status enum: AdministrationStatus
+%%field MedicationAdministration.status help: Scheduled, given, withheld, missed, refused, or corrected outcome.
+%%field MedicationAdministration.scheduled_at help: Dose time against which early or late administration is evaluated.
+%%field MedicationAdministration.administered_at help: Actual time the patient received the medication.
+%%field MedicationAdministration.dose_given help: Dose actually given, retained even when it differs with an authorized reason.
+%%field MedicationAdministration.variance_reason help: Explanation for omission, delay, refusal, or authorized dose variance.
+%%section entity: MedicationAdministration; name: Medication Administration; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: admission_id, prescription_item_id | employee_id, scheduled_at | administered_at, dose_given | variance_reason
+%%index MedicationAdministration(admission_id, prescription_item_id)
+%%rbac role:nurse|doctor|pharmacist on MedicationAdministration.read
+%%entity OperatingTheatre help: Surgical suite with capabilities, availability, and turnaround constraints used for safe theatre scheduling.
+%%field OperatingTheatre.facility_id help: Facility operating this theatre.
+%%field OperatingTheatre.department_id help: Department responsible for staffing and governance.
+%%field OperatingTheatre.theatre_code help: Short location code used on schedules and integrations.
+%%field OperatingTheatre.name help: Recognizable room name used by theatre staff.
+%%field OperatingTheatre.theatre_type help: Capability class constraining procedures and equipment.
+%%field OperatingTheatre.turnaround_minutes help: Planned cleaning and setup time between cases.
+%%section entity: OperatingTheatre; name: Operating Theatre; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, department_id | theatre_code, name | theatre_type, turnaround_minutes
+%%index OperatingTheatre(facility_id, department_id)
+%%rbac role:theatre_manager|surgeon|nurse on OperatingTheatre.read
+%%entity SurgicalCase help: Planned or emergency operation linking patient, encounter, theatre, responsible clinicians, consent, and actual milestones.
+%%field SurgicalCase.patient_id help: Patient undergoing the procedure.
+%%field SurgicalCase.encounter_id help: Episode under which perioperative care is documented.
+%%field SurgicalCase.operating_theatre_id help: Suite reserved for the case.
+%%field SurgicalCase.doctor_id help: Lead surgeon accountable for the procedure.
+%%field SurgicalCase.case_number help: Reference used on schedules, specimens, and safety checks.
+%%field SurgicalCase.status enum: SurgicalStatus
+%%field SurgicalCase.status help: Readiness and execution lifecycle through recovery or cancellation.
+%%field SurgicalCase.urgency help: Elective, urgent, or emergency priority governing scheduling.
+%%field SurgicalCase.scheduled_start help: Planned start used for resources and fasting instructions.
+%%section entity: SurgicalCase; name: Surgical Case; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | operating_theatre_id, doctor_id | case_number, urgency | scheduled_start
+%%index SurgicalCase(patient_id, encounter_id)
+%%rbac role:surgeon|anesthesiologist|theatre_manager|nurse on SurgicalCase.read
+%%entity SurgicalSafetyCheck help: Recorded sign-in, time-out, or sign-out checkpoint proving the team verified the required surgical safety conditions.
+%%entity SurgicalSafetyCheck parent: SurgicalCase
+%%field SurgicalSafetyCheck.surgical_case_id help: Case to which this checklist phase belongs.
+%%field SurgicalSafetyCheck.employee_id help: Team member accountable for completing the checkpoint.
+%%field SurgicalSafetyCheck.phase help: Sign-in, time-out, or sign-out phase performed at its required moment.
+%%field SurgicalSafetyCheck.patient_identity_confirmed help: Confirms active identity verification against patient and procedure.
+%%field SurgicalSafetyCheck.site_marked help: Confirms the operative site was marked when applicable.
+%%field SurgicalSafetyCheck.completed_at help: Time the team completed and acknowledged the checkpoint.
+%%section entity: SurgicalSafetyCheck; name: Surgical Safety Check; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: surgical_case_id, employee_id | phase, patient_identity_confirmed | site_marked, completed_at
+%%index SurgicalSafetyCheck(surgical_case_id, employee_id)
+%%rbac role:surgeon|anesthesiologist|nurse on SurgicalSafetyCheck.read
+%%entity BloodUnit help: Individually traceable blood component with donation, screening, group, expiry, custody, and disposition controls.
+%%field BloodUnit.facility_id help: Facility blood bank currently responsible for the unit.
+%%field BloodUnit.store_id help: Controlled inventory location holding the component.
+%%field BloodUnit.unit_number help: ISBT or approved donation identifier scanned throughout custody.
+%%field BloodUnit.component_type help: Red cells, platelets, plasma, or another prepared component.
+%%field BloodUnit.blood_group help: ABO and Rh classification used in compatibility checks.
+%%field BloodUnit.expires_on help: Latest safe-use date enforced before issue.
+%%field BloodUnit.status enum: BloodUnitStatus
+%%field BloodUnit.status help: Availability and disposition lifecycle including quarantine and discard.
+%%section entity: BloodUnit; name: Blood Unit; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, store_id | unit_number, component_type | blood_group, expires_on
+%%index BloodUnit(facility_id, store_id)
+%%rbac role:blood_bank_scientist|nurse|doctor on BloodUnit.read
+%%entity Transfusion help: Patient-specific request and administration of a blood unit with compatibility, observation, stop, and reaction evidence.
+%%field Transfusion.blood_unit_id help: Component reserved and administered.
+%%field Transfusion.patient_id help: Recipient whose identity must be independently verified.
+%%field Transfusion.encounter_id help: Care episode during which transfusion occurs.
+%%field Transfusion.employee_id help: Clinician accountable for bedside administration.
+%%field Transfusion.transfusion_number help: Reference linking request, crossmatch, issue, and reaction review.
+%%field Transfusion.status enum: TransfusionStatus
+%%field Transfusion.status help: Compatibility and administration lifecycle including emergency stop.
+%%field Transfusion.started_at help: Time infusion began for monitoring intervals.
+%%field Transfusion.reaction_details help: Observed signs, intervention, and reporting details when a reaction is suspected.
+%%section entity: Transfusion; name: Transfusion; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: blood_unit_id, patient_id | encounter_id, employee_id | transfusion_number, started_at | reaction_details
+%%index Transfusion(blood_unit_id, patient_id)
+%%rbac role:doctor|nurse|blood_bank_scientist on Transfusion.read
+%%entity AllergyIntolerance help: Verified or reported allergy or intolerance used by ordering and medication safety checks, with reaction and criticality context.
+%%field AllergyIntolerance.patient_id help: Patient for whom the safety alert applies.
+%%field AllergyIntolerance.encounter_id help: Episode in which the information was recorded or verified.
+%%field AllergyIntolerance.substance help: Coded or clearly named agent that must be matched during ordering.
+%%field AllergyIntolerance.category help: Drug, food, environmental, or biologic class.
+%%field AllergyIntolerance.criticality help: Potential severity used to prioritize alerts.
+%%field AllergyIntolerance.status enum: AllergyStatus
+%%field AllergyIntolerance.status help: Active, inactive, resolved, or entered-in-error clinical standing.
+%%field AllergyIntolerance.reaction help: Manifestation and severity needed to distinguish allergy from intolerance.
+%%section entity: AllergyIntolerance; name: Allergy Intolerance; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | substance, category | criticality, reaction
+%%index AllergyIntolerance(patient_id, encounter_id)
+%%rbac role:doctor|nurse|pharmacist on AllergyIntolerance.read
+%%entity InfectionCase help: Infection-surveillance case applying defined criteria, exposure and isolation timing, organism evidence, and reporting duties.
+%%field InfectionCase.patient_id help: Patient under surveillance or confirmed infection management.
+%%field InfectionCase.facility_id help: Facility accountable for infection control and reporting.
+%%field InfectionCase.owner_id help: Officer responsible for investigation and closure.
+%%field InfectionCase.case_number help: Surveillance reference retained across corrections and notifications.
+%%field InfectionCase.infection_type help: HAI or communicable-disease classification being evaluated.
+%%field InfectionCase.organism help: Laboratory-confirmed organism when available.
+%%field InfectionCase.status enum: InfectionStatus
+%%field InfectionCase.status help: Suspected, probable, confirmed, resolved, or excluded standing.
+%%field InfectionCase.isolation_started_at help: Time precautions began for timeliness and exposure review.
+%%section entity: InfectionCase; name: Infection Case; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | owner_id, case_number | infection_type, organism | isolation_started_at
+%%index InfectionCase(patient_id, facility_id)
+%%rbac role:infection_control_officer|doctor|nurse on InfectionCase.read
+%%entity SafetyIncident help: Confidential report of harm, near miss, medication error, fall, equipment failure, or other safety event requiring triage.
+%%field SafetyIncident.patient_id help: Affected patient when the incident concerns an identifiable person.
+%%field SafetyIncident.facility_id help: Facility accountable for review and prevention.
+%%field SafetyIncident.employee_id help: Reporter identity protected according to non-punitive policy.
+%%field SafetyIncident.incident_number help: Reference used for investigation without exposing narrative in alerts.
+%%field SafetyIncident.incident_type help: Classification used for routing and external reporting.
+%%field SafetyIncident.severity help: Actual or potential harm level driving escalation deadlines.
+%%field SafetyIncident.status enum: IncidentStatus
+%%field SafetyIncident.status help: Investigation and closure lifecycle.
+%%field SafetyIncident.description help: Factual account separated from blame and legal conclusions.
+%%section entity: SafetyIncident; name: Safety Incident; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | employee_id, incident_number | incident_type, severity | description
+%%index SafetyIncident(patient_id, facility_id)
+%%rbac role:quality_officer|risk_manager|department_manager on SafetyIncident.read
+%%entity CorrectiveAction help: Assigned remediation from an incident or audit, including due date, evidence, effectiveness review, and reopening when ineffective.
+%%field CorrectiveAction.safety_incident_id help: Incident or root-cause review that requires this action.
+%%field CorrectiveAction.owner_id help: Person accountable for delivery and evidence.
+%%field CorrectiveAction.action_type help: Containment, correction, prevention, training, or policy classification.
+%%field CorrectiveAction.status enum: ActionStatus
+%%field CorrectiveAction.status help: Execution and effectiveness lifecycle.
+%%field CorrectiveAction.action_description help: Specific measurable change expected from the owner.
+%%field CorrectiveAction.due_on help: Deadline monitored for escalation.
+%%field CorrectiveAction.effectiveness_evidence help: Evidence showing whether recurrence risk was actually reduced.
+%%section entity: CorrectiveAction; name: Corrective Action; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: safety_incident_id, owner_id | action_type, action_description | due_on, effectiveness_evidence
+%%index CorrectiveAction(safety_incident_id, owner_id)
+%%rbac role:quality_officer|risk_manager|department_manager on CorrectiveAction.read
+%%entity Item help: Enterprise catalog item for medicines, consumables, devices, services, or assets with unit, traceability, and replenishment controls.
+%%field Item.item_code help: Stable catalog code shared by procurement and inventory.
+%%field Item.name help: Recognizable item or product description used in lookups.
+%%field Item.item_type help: Medication, supply, device, asset, or service classification.
+%%field Item.unit_of_measure help: Stocking and ordering unit used for quantity calculations.
+%%field Item.reorder_level help: Threshold that triggers replenishment review.
+%%field Item.is_lot_tracked help: Whether batch and expiry are mandatory for receipts and issues.
+%%section entity: Item; name: Item; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: item_code, name | item_type, unit_of_measure | reorder_level, is_lot_tracked
+%%rbac role:inventory_manager|pharmacist|procurement_officer on Item.read
+%%entity Store help: Controlled inventory location such as a central warehouse, pharmacy, theatre store, or ward cupboard.
+%%field Store.facility_id help: Facility responsible for this inventory location.
+%%field Store.store_code help: Short code used in stock movements and integrations.
+%%field Store.name help: Operational name staff recognize when requesting or issuing stock.
+%%field Store.store_type help: Warehouse, pharmacy, ward, theatre, or quarantine classification.
+%%field Store.is_active help: Whether the location may receive new transactions.
+%%section entity: Store; name: Store; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, store_code | name, store_type | is_active
+%%index Store(facility_id)
+%%rbac role:inventory_manager|pharmacist|procurement_officer on Store.read
+%%entity StockLot help: Lot-level balance for one item at one store, preserving batch, expiry, quarantine, reservation, and recall status.
+%%field StockLot.item_id help: Catalog item represented by this lot.
+%%field StockLot.store_id help: Location currently holding the balance.
+%%field StockLot.lot_number help: Manufacturer or internal batch reference needed for traceability.
+%%field StockLot.expiry_date help: Date after which issue is blocked for expiring products.
+%%field StockLot.quantity_on_hand help: Physical ledger balance before reservations.
+%%field StockLot.quantity_reserved help: Committed amount unavailable to new requests.
+%%field StockLot.status enum: StockStatus
+%%field StockLot.status help: Availability, quarantine, recall, expiry, and depletion state.
+%%section entity: StockLot; name: Stock Lot; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: item_id, store_id | lot_number, expiry_date | quantity_on_hand, quantity_reserved
+%%index StockLot(item_id, store_id)
+%%rbac role:inventory_manager|pharmacist|nurse on StockLot.read
+%%entity StockMovement help: Immutable quantity ledger recording receipt, issue, transfer, adjustment, return, or disposal against a lot.
+%%field StockMovement.stock_lot_id help: Lot whose balance changes.
+%%field StockMovement.employee_id help: Person authorizing or recording the movement.
+%%field StockMovement.movement_type help: Receipt, issue, transfer, return, adjustment, or disposal reason.
+%%field StockMovement.quantity help: Signed quantity applied to the lot balance.
+%%field StockMovement.source_reference help: Business document and line that justifies the movement.
+%%field StockMovement.occurred_at help: Effective inventory time used for reconstruction and audit.
+%%section entity: StockMovement; name: Stock Movement; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: stock_lot_id, employee_id | movement_type, quantity | source_reference, occurred_at
+%%index StockMovement(stock_lot_id, employee_id)
+%%rbac role:inventory_manager|pharmacist|auditor on StockMovement.read
+%%entity Supplier help: Approved vendor with legal, tax, contact, qualification, and suspension details used before purchasing.
+%%field Supplier.supplier_code help: Internal vendor identifier referenced on procurement documents.
+%%field Supplier.name help: Legal or trading name shown on orders and invoices.
+%%field Supplier.tax_identifier help: Jurisdictional registration used for tax validation.
+%%field Supplier.email help: Ordering and remittance communication address.
+%%field Supplier.qualification_status help: Approval standing that determines whether new orders are permitted.
+%%section entity: Supplier; name: Supplier; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: supplier_code, name | tax_identifier, email | qualification_status
+%%rbac role:procurement_officer|accounts_payable|inventory_manager on Supplier.read
+%%entity PurchaseOrder help: Authorized commitment to a supplier, created from approved demand and matched against receipts and invoices.
+%%field PurchaseOrder.supplier_id help: Approved vendor receiving the order.
+%%field PurchaseOrder.facility_id help: Legal or operating facility making the commitment.
+%%field PurchaseOrder.employee_id help: Approver accountable for the commitment.
+%%field PurchaseOrder.purchase_order_number help: Reference communicated to vendor and used in three-way matching.
+%%field PurchaseOrder.status enum: ProcurementStatus
+%%field PurchaseOrder.status help: Approval, ordering, receiving, cancellation, and closure lifecycle.
+%%field PurchaseOrder.order_date help: Commercial order date used for terms and reporting.
+%%field PurchaseOrder.total_amount help: Authorized gross commitment in facility currency.
+%%section entity: PurchaseOrder; name: Purchase Order; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: supplier_id, facility_id | employee_id, purchase_order_number | order_date, total_amount
+%%index PurchaseOrder(supplier_id, facility_id)
+%%rbac role:procurement_officer|procurement_manager|accounts_payable on PurchaseOrder.read
+%%entity GoodsReceipt help: Documented delivery against a purchase order, separating accepted, rejected, quarantined, and pending quantities.
+%%field GoodsReceipt.purchase_order_id help: Order against which delivery is received.
+%%field GoodsReceipt.store_id help: Inventory location taking custody of accepted goods.
+%%field GoodsReceipt.employee_id help: Receiver accountable for count and condition.
+%%field GoodsReceipt.receipt_number help: Reference used to create lots and match supplier invoices.
+%%field GoodsReceipt.status enum: ReceiptStatus
+%%field GoodsReceipt.status help: Draft, inspected, posted, partially accepted, rejected, or reversed state.
+%%field GoodsReceipt.received_at help: Physical custody time used for service-level and expiry review.
+%%field GoodsReceipt.notes help: Condition, discrepancy, and quarantine details not captured by quantities.
+%%section entity: GoodsReceipt; name: Goods Receipt; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: purchase_order_id, store_id | employee_id, receipt_number | received_at, notes
+%%index GoodsReceipt(purchase_order_id, store_id)
+%%rbac role:inventory_manager|procurement_officer|accounts_payable on GoodsReceipt.read
+%%entity SupplierInvoice help: Vendor liability document matched to order and receipt before approval, posting, payment, dispute, or credit.
+%%field SupplierInvoice.supplier_id help: Vendor claiming payment.
+%%field SupplierInvoice.purchase_order_id help: Order supporting the liability when applicable.
+%%field SupplierInvoice.invoice_number help: Vendor reference checked for duplicates.
+%%field SupplierInvoice.status enum: SupplierInvoiceStatus
+%%field SupplierInvoice.status help: Matching and payment lifecycle including hold and dispute.
+%%field SupplierInvoice.invoice_date help: Supplier document date used for tax and period controls.
+%%field SupplierInvoice.due_date help: Contractual payment date used for cash planning.
+%%field SupplierInvoice.total_amount help: Claimed amount before credits and withholding.
+%%section entity: SupplierInvoice; name: Supplier Invoice; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: supplier_id, purchase_order_id | invoice_number, invoice_date | due_date, total_amount
+%%index SupplierInvoice(supplier_id, purchase_order_id)
+%%rbac role:accounts_payable|procurement_officer|finance_manager on SupplierInvoice.read
+%%entity Coverage help: Patient insurance or payer coverage with member identifiers, validity, priority, and verification evidence.
+%%field Coverage.patient_id help: Beneficiary whose care may be billed.
+%%field Coverage.payer_name help: Payer or health plan used for eligibility and claims routing.
+%%field Coverage.policy_number help: Policy identifier supplied to the payer.
+%%field Coverage.member_number help: Beneficiary identifier used for eligibility queries.
+%%field Coverage.status enum: CoverageStatus
+%%field Coverage.status help: Verification and validity lifecycle.
+%%field Coverage.valid_from help: First date services may be covered.
+%%field Coverage.valid_to help: Last covered date known from payer response.
+%%section entity: Coverage; name: Coverage; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, payer_name | policy_number, member_number | valid_from, valid_to
+%%index Coverage(patient_id)
+%%rbac role:insurance_clerk|billing_clerk|claims_officer on Coverage.read
+%%entity Preauthorization help: Payer request for advance approval of a planned service, retaining clinical submission, decision, limits, and expiry.
+%%field Preauthorization.coverage_id help: Coverage under which authorization is requested.
+%%field Preauthorization.clinical_order_id help: Planned service requiring payer approval.
+%%field Preauthorization.authorization_number help: Payer reference returned when approved.
+%%field Preauthorization.status enum: PreauthStatus
+%%field Preauthorization.status help: Submission and decision lifecycle including partial approval.
+%%field Preauthorization.requested_amount help: Estimated charge sent for financial approval.
+%%field Preauthorization.approved_amount help: Maximum payer-approved amount.
+%%field Preauthorization.expires_on help: Last date the approved service may occur.
+%%section entity: Preauthorization; name: Preauthorization; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: coverage_id, clinical_order_id | authorization_number, requested_amount | approved_amount, expires_on
+%%index Preauthorization(coverage_id, clinical_order_id)
+%%rbac role:insurance_clerk|doctor|claims_officer on Preauthorization.read
+%%entity Invoice help: Patient account statement aggregating validated charges, discounts, taxes, payer allocations, payments, disputes, and refunds.
+%%field Invoice.patient_id help: Patient financially responsible or represented on the bill.
+%%field Invoice.encounter_id help: Care episode generating the charges.
+%%field Invoice.admission_id help: Inpatient stay when charges span an admission.
+%%field Invoice.invoice_number help: Reference presented to patients, payers, and finance.
+%%field Invoice.status enum: InvoiceStatus
+%%field Invoice.status help: Issue, payment, dispute, void, and refund lifecycle.
+%%field Invoice.gross_amount help: Sum of charge lines before discounts and adjustments.
+%%field Invoice.discount_amount help: Authorized reduction with approval evidence.
+%%field Invoice.net_amount help: Amount due after validated calculations.
+%%section entity: Invoice; name: Invoice; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | admission_id, invoice_number | gross_amount, discount_amount | net_amount
+%%index Invoice(patient_id, encounter_id)
+%%rbac role:billing_clerk|cashier|finance_manager on Invoice.read
+%%entity InvoiceLine help: One charge, adjustment, discount, tax, or credit contributing to an invoice and traceable to its clinical source.
+%%entity InvoiceLine parent: Invoice
+%%field InvoiceLine.invoice_id help: Invoice that owns this financial line.
+%%field InvoiceLine.clinical_order_id help: Clinical request or delivered service supporting the charge.
+%%field InvoiceLine.description help: Patient-readable description of what is charged.
+%%field InvoiceLine.quantity help: Billable units used in pricing.
+%%field InvoiceLine.unit_price help: Price per unit before discount or tax.
+%%field InvoiceLine.line_amount help: Validated extended amount contributing to invoice totals.
+%%section entity: InvoiceLine; name: Invoice Line; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: invoice_id, clinical_order_id | description, quantity | unit_price, line_amount
+%%index InvoiceLine(invoice_id, clinical_order_id)
+%%rbac role:billing_clerk|claims_officer|finance_manager on InvoiceLine.read
+%%entity Payment help: Receipt of money or remittance applied to an invoice with method, reference, reconciliation, reversal, and accountable cashier.
+%%field Payment.invoice_id help: Invoice balance reduced by the receipt.
+%%field Payment.patient_id help: Patient account credited by the payment.
+%%field Payment.employee_id help: Cashier or poster accountable for the transaction.
+%%field Payment.payment_number help: Receipt reference supplied to the payer.
+%%field Payment.payment_method help: Cash, card, bank, remittance, or other settlement channel.
+%%field Payment.status enum: PaymentStatus
+%%field Payment.status help: Pending, completed, failed, reversed, or refunded standing.
+%%field Payment.amount help: Positive receipt amount in invoice currency.
+%%field Payment.paid_at help: Effective settlement time used for till and ledger reconciliation.
+%%section entity: Payment; name: Payment; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: invoice_id, patient_id | employee_id, payment_number | payment_method, amount | paid_at
+%%index Payment(invoice_id, patient_id)
+%%rbac role:cashier|billing_clerk|finance_manager on Payment.read
+%%entity Claim help: Electronic or manual payer claim assembled from coverage, authorization, diagnoses, procedures, and invoice lines.
+%%field Claim.coverage_id help: Policy under which reimbursement is sought.
+%%field Claim.invoice_id help: Patient account whose eligible charges are claimed.
+%%field Claim.claim_number help: Internal and external correlation reference.
+%%field Claim.status enum: ClaimStatus
+%%field Claim.status help: Preparation, submission, adjudication, appeal, and closure lifecycle.
+%%field Claim.claimed_amount help: Amount submitted before payer adjudication.
+%%field Claim.approved_amount help: Amount payer accepts as reimbursable.
+%%field Claim.settled_amount help: Cash or remittance actually posted.
+%%section entity: Claim; name: Claim; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: coverage_id, invoice_id | claim_number, claimed_amount | approved_amount, settled_amount
+%%index Claim(coverage_id, invoice_id)
+%%rbac role:claims_officer|billing_clerk|finance_manager on Claim.read
+%%entity ClaimDecision help: Payer adjudication event recording decision, reason codes, allowed amount, patient responsibility, and appeal implications.
+%%entity ClaimDecision parent: Claim
+%%field ClaimDecision.claim_id help: Claim to which the adjudication applies.
+%%field ClaimDecision.decision_type help: Approved, partially approved, denied, pended, or reversed outcome.
+%%field ClaimDecision.decided_at help: Payer decision time used for appeal deadlines.
+%%field ClaimDecision.amount help: Amount associated with this decision or remittance.
+%%field ClaimDecision.reason help: Payer explanation and standardized denial codes.
+%%field ClaimDecision.external_reference help: Remittance or clearinghouse reference used for reconciliation.
+%%section entity: ClaimDecision; name: Claim Decision; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: claim_id, decision_type | decided_at, amount | reason, external_reference
+%%index ClaimDecision(claim_id)
+%%rbac role:claims_officer|billing_clerk|finance_manager on ClaimDecision.read
+%%entity Account help: Chart-of-accounts node used for controlled double-entry posting, reporting, and period close.
+%%field Account.account_code help: Ledger code used in journal lines and statutory reports.
+%%field Account.name help: Recognizable account title for posting and review.
+%%field Account.account_type help: Asset, liability, equity, income, or expense classification.
+%%field Account.is_control_account help: Whether direct manual posting is prohibited.
+%%field Account.is_active help: Whether new entries may use the account.
+%%section entity: Account; name: Account; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: account_code, name | account_type, is_control_account | is_active
+%%rbac role:finance_manager|accountant|auditor on Account.read
+%%entity FiscalPeriod help: Accounting period with explicit open, close, and adjustment controls preventing unauthorized back-posting.
+%%field FiscalPeriod.facility_id help: Facility or legal ledger to which the period applies.
+%%field FiscalPeriod.period_name help: Month or period label used in financial statements.
+%%field FiscalPeriod.starts_on help: Inclusive first accounting date.
+%%field FiscalPeriod.ends_on help: Inclusive final accounting date.
+%%field FiscalPeriod.status enum: FiscalPeriodStatus
+%%field FiscalPeriod.status help: Open, soft-closed, closed, or reopened state governed by finance approval.
+%%section entity: FiscalPeriod; name: Fiscal Period; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, period_name | starts_on, ends_on
+%%index FiscalPeriod(facility_id)
+%%rbac role:finance_manager|accountant|auditor on FiscalPeriod.read
+%%entity JournalEntry help: Balanced accounting document generated or entered from a traceable source and posted or reversed without destructive editing.
+%%field JournalEntry.fiscal_period_id help: Accounting period receiving the entry.
+%%field JournalEntry.facility_id help: Ledger and currency context for posting.
+%%field JournalEntry.journal_number help: Permanent reference assigned before posting.
+%%field JournalEntry.status enum: JournalStatus
+%%field JournalEntry.status help: Draft, posted, or reversed lifecycle.
+%%field JournalEntry.entry_date help: Accounting date validated against period status.
+%%field JournalEntry.description help: Business explanation displayed in ledger review.
+%%field JournalEntry.source_reference help: Invoice, payment, stock, payroll, or other origin supporting the entry.
+%%section entity: JournalEntry; name: Journal Entry; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: fiscal_period_id, facility_id | journal_number, entry_date | description, source_reference
+%%index JournalEntry(fiscal_period_id, facility_id)
+%%rbac role:finance_manager|accountant|auditor on JournalEntry.read
+%%entity JournalLine help: Debit or credit line within a journal entry, carrying account, amount, and analytical dimensions needed for balancing.
+%%entity JournalLine parent: JournalEntry
+%%field JournalLine.journal_entry_id help: Journal document that owns this line.
+%%field JournalLine.account_id help: Chart account receiving the debit or credit.
+%%field JournalLine.line_description help: Posting explanation specific to this account line.
+%%field JournalLine.debit_amount help: Debit value; exactly one of debit or credit is normally positive.
+%%field JournalLine.credit_amount help: Credit value; totals must balance before posting.
+%%section entity: JournalLine; name: Journal Line; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: journal_entry_id, account_id | line_description, debit_amount | credit_amount
+%%index JournalLine(journal_entry_id, account_id)
+%%rbac role:finance_manager|accountant|auditor on JournalLine.read
+%%entity ServiceRequest help: Operational request for transport, porter, maintenance, housekeeping, or another support service with assignment and completion evidence.
+%%field ServiceRequest.facility_id help: Facility responsible for fulfilling the request.
+%%field ServiceRequest.patient_id help: Patient benefiting from the request when clinically relevant.
+%%field ServiceRequest.owner_id help: Worker assigned to fulfill the request.
+%%field ServiceRequest.request_number help: Reference visible to requester and service desk.
+%%field ServiceRequest.service_type help: Routing classification for the responsible support team.
+%%field ServiceRequest.status enum: ServiceStatus
+%%field ServiceRequest.status help: Request, assignment, execution, completion, or cancellation lifecycle.
+%%field ServiceRequest.needed_at help: Required time used for priority and escalation.
+%%section entity: ServiceRequest; name: Service Request; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, patient_id | owner_id, request_number | service_type, needed_at
+%%index ServiceRequest(facility_id, patient_id)
+%%rbac role:service_desk|nurse|facility_admin on ServiceRequest.read
+%%entity HousekeepingTask help: Cleaning or terminal-disinfection task generated by bed release, isolation, spill, or scheduled environmental work.
+%%field HousekeepingTask.facility_id help: Facility accountable for environmental services.
+%%field HousekeepingTask.ward_id help: Ward where work is performed.
+%%field HousekeepingTask.bed_id help: Specific bed whose readiness depends on completion.
+%%field HousekeepingTask.owner_id help: Housekeeper assigned to perform the work.
+%%field HousekeepingTask.task_type help: Routine, terminal, isolation, spill, or inspection workflow.
+%%field HousekeepingTask.status enum: ServiceStatus
+%%field HousekeepingTask.status help: Requested through inspected or cancelled lifecycle.
+%%field HousekeepingTask.completed_at help: Time cleaning finished before inspection and bed release.
+%%section entity: HousekeepingTask; name: Housekeeping Task; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, ward_id | bed_id, owner_id | task_type, completed_at
+%%index HousekeepingTask(facility_id, ward_id)
+%%rbac role:housekeeping|bed_manager|nurse on HousekeepingTask.read
+%%entity Complaint help: Patient or representative grievance tracked through acknowledgement, investigation, resolution, appeal, and protected communication.
+%%field Complaint.patient_id help: Person affected, when identification is appropriate.
+%%field Complaint.facility_id help: Facility accountable for the response.
+%%field Complaint.owner_id help: Officer responsible for timely investigation.
+%%field Complaint.complaint_number help: Reference supplied to the complainant.
+%%field Complaint.complaint_type help: Clinical, service, billing, privacy, discrimination, or other routing category.
+%%field Complaint.status enum: ComplaintStatus
+%%field Complaint.status help: Response and appeal lifecycle.
+%%field Complaint.description help: Complainant account retained separately from investigation findings.
+%%field Complaint.due_on help: Regulatory or policy response deadline.
+%%section entity: Complaint; name: Complaint; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | owner_id, complaint_number | complaint_type, description | due_on
+%%index Complaint(patient_id, facility_id)
+%%rbac role:patient_relations|quality_officer|privacy_officer on Complaint.read
+%%entity DataSubjectRequest help: Tracked exercise of access, rectification, restriction, portability, objection, withdrawal, or erasure rights subject to lawful retention.
+%%field DataSubjectRequest.patient_id help: Person whose information rights are being exercised.
+%%field DataSubjectRequest.facility_id help: Controller location responsible for response.
+%%field DataSubjectRequest.owner_id help: Privacy worker accountable for identity verification and fulfillment.
+%%field DataSubjectRequest.request_number help: Reference supplied to the requester and regulator.
+%%field DataSubjectRequest.request_type help: Specific legal right and requested scope.
+%%field DataSubjectRequest.status enum: RequestStatus
+%%field DataSubjectRequest.status help: Verification, assessment, fulfillment, refusal, and closure lifecycle.
+%%field DataSubjectRequest.due_on help: Statutory deadline adjusted only with documented lawful grounds.
+%%field DataSubjectRequest.fulfilled_at help: Time the response or export was completed.
+%%section entity: DataSubjectRequest; name: Data Subject Request; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | owner_id, request_number | request_type, due_on | fulfilled_at
+%%index DataSubjectRequest(patient_id, facility_id)
+%%rbac role:privacy_officer|legal_officer|health_information_manager on DataSubjectRequest.read
+%%entity DataBreach help: Suspected or confirmed confidentiality, integrity, or availability incident with containment, risk assessment, notification, and remediation evidence.
+%%field DataBreach.facility_id help: Controller or covered entity location responsible for response.
+%%field DataBreach.owner_id help: Incident lead accountable for assessment and notification.
+%%field DataBreach.breach_number help: Restricted reference used in executive and regulatory communication.
+%%field DataBreach.severity help: Risk classification based on data, people, likelihood, and harm.
+%%field DataBreach.status enum: BreachStatus
+%%field DataBreach.status help: Detection through containment, notification, remediation, and closure.
+%%field DataBreach.affected_people_count help: Best current count with changes retained in audit history.
+%%field DataBreach.discovered_at help: Time awareness began for legal notification clocks.
+%%field DataBreach.notified_at help: Time competent authorities or affected people were notified.
+%%section entity: DataBreach; name: Data Breach; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, owner_id | breach_number, severity | affected_people_count, discovered_at | notified_at
+%%index DataBreach(facility_id, owner_id)
+%%rbac role:security_admin|privacy_officer|legal_officer on DataBreach.read
+%%entity DowntimeEvent help: Planned or unplanned loss of service with affected scope, continuity activation, restoration, and reconciliation evidence.
+%%field DowntimeEvent.facility_id help: Facility experiencing or coordinating the disruption.
+%%field DowntimeEvent.owner_id help: Incident commander accountable for recovery and closure.
+%%field DowntimeEvent.event_number help: Reference printed on downtime materials and reconciliation logs.
+%%field DowntimeEvent.downtime_type help: Planned, infrastructure, network, cyber, vendor, or clinical-device category.
+%%field DowntimeEvent.severity help: Impact level driving escalation and continuity measures.
+%%field DowntimeEvent.status enum: DowntimeStatus
+%%field DowntimeEvent.status help: Declaration, active operations, restoration, reconciliation, and closure.
+%%field DowntimeEvent.started_at help: Time normal electronic operations became unavailable.
+%%field DowntimeEvent.restored_at help: Time service returned before reconciliation completes.
+%%section entity: DowntimeEvent; name: Downtime Event; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, owner_id | event_number, downtime_type | severity, started_at | restored_at
+%%index DowntimeEvent(facility_id, owner_id)
+%%rbac role:facility_admin|security_admin|clinical_admin on DowntimeEvent.read
+%%entity OfflineReconciliation help: Imported downtime transaction tracked through identity matching, duplicate detection, conflict review, and final acceptance.
+%%field OfflineReconciliation.downtime_event_id help: Disruption during which the offline record was created.
+%%field OfflineReconciliation.patient_id help: Matched patient after identity resolution.
+%%field OfflineReconciliation.source_reference help: Paper form, device queue, or local application identifier.
+%%field OfflineReconciliation.record_type help: Clinical or administrative entity being reconstructed.
+%%field OfflineReconciliation.status enum: ReconciliationStatus
+%%field OfflineReconciliation.status help: Pending match, conflict, accepted, rejected, or duplicate standing.
+%%field OfflineReconciliation.payload_hash help: Cryptographic digest proving source bytes were not altered.
+%%field OfflineReconciliation.reconciled_at help: Time an accountable reviewer finalized the import.
+%%section entity: OfflineReconciliation; name: Offline Reconciliation; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: downtime_event_id, patient_id | source_reference, record_type | payload_hash, reconciled_at
+%%index OfflineReconciliation(downtime_event_id, patient_id)
+%%rbac role:clinical_admin|registration_clerk|nurse|doctor on OfflineReconciliation.read
+%%entity IntegrationMessage help: Privacy-minimized tracking envelope for HL7, FHIR, DICOMweb, claims, or national exchange traffic and retry outcomes.
+%%field IntegrationMessage.facility_id help: Facility context for routing and support ownership.
+%%field IntegrationMessage.correlation_reference help: End-to-end identifier shared across transformations and acknowledgements.
+%%field IntegrationMessage.source_system help: Sending application or organization.
+%%field IntegrationMessage.destination_system help: Intended receiver or endpoint.
+%%field IntegrationMessage.message_type help: ADT, ORM, ORU, FHIR resource, DICOM event, or other contract.
+%%field IntegrationMessage.direction help: Inbound or outbound flow used in monitoring.
+%%field IntegrationMessage.status enum: IntegrationStatus
+%%field IntegrationMessage.status help: Validation, processing, retry, dead-letter, and acknowledgement lifecycle.
+%%field IntegrationMessage.payload_hash help: Digest for traceability without persisting raw protected payload in the session log.
+%%field IntegrationMessage.attempt_count help: Number of delivery or processing attempts.
+%%field IntegrationMessage.next_retry_at help: Scheduled time for the next governed retry.
+%%section entity: IntegrationMessage; name: Integration Message; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, correlation_reference | source_system, destination_system | message_type, direction | payload_hash, attempt_count | next_retry_at
+%%index IntegrationMessage(facility_id)
+%%rbac role:integration_admin|security_admin|clinical_admin on IntegrationMessage.read
+%%entity AiClinicalDraft help: AI-generated draft note or suggestion with model provenance, evidence references, review decision, and prohibition on autonomous signing.
+%%field AiClinicalDraft.patient_id help: Patient context used for generation.
+%%field AiClinicalDraft.encounter_id help: Care episode within which the draft may be reviewed.
+%%field AiClinicalDraft.medical_record_id help: Clinical document created after human acceptance.
+%%field AiClinicalDraft.doctor_id help: Clinician accountable for reviewing the output.
+%%field AiClinicalDraft.model_reference help: Model, version, deployment, and policy reference needed for reproducibility.
+%%field AiClinicalDraft.status enum: AiReviewStatus
+%%field AiClinicalDraft.status help: Human-review lifecycle; only accepted content may be copied to a draft record.
+%%field AiClinicalDraft.draft_text help: Unverified generated content clearly separated from the signed clinical record.
+%%field AiClinicalDraft.reviewed_at help: Time the clinician accepted or rejected the suggestion.
+%%section entity: AiClinicalDraft; name: Ai Clinical Draft; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | medical_record_id, doctor_id | model_reference, draft_text | reviewed_at
+%%index AiClinicalDraft(patient_id, encounter_id)
+%%rbac role:doctor|nurse|clinical_ai_governor on AiClinicalDraft.read
+%%entity ProcedureRecord help: Performed clinical or surgical procedure with coded identity, responsible practitioner, outcome, and provenance separate from the order that requested it.
+%%field ProcedureRecord.patient_id help: Patient who received the procedure.
+%%field ProcedureRecord.encounter_id help: Care episode providing context and accountability.
+%%field ProcedureRecord.doctor_id help: Practitioner responsible for performance or attestation.
+%%field ProcedureRecord.procedure_code help: SNOMED CT, CPT, OPCS, or approved local code with version context.
+%%field ProcedureRecord.status enum: ProcedureStatus
+%%field ProcedureRecord.status help: Preparation, performance, completion, cancellation, or entered-in-error standing.
+%%field ProcedureRecord.performed_at help: Actual procedure time used for chronology and billing.
+%%field ProcedureRecord.outcome help: Clinically relevant result, complication, or follow-up need.
+%%section entity: ProcedureRecord; name: Procedure Record; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | doctor_id, procedure_code | performed_at, outcome
+%%index ProcedureRecord(patient_id, encounter_id)
+%%rbac role:doctor|nurse|clinical_coder on ProcedureRecord.read
+%%entity DischargeSummary help: Signed transition-of-care document consolidating the stay, final diagnoses, procedures, medications, pending results, and follow-up instructions.
+%%field DischargeSummary.admission_id help: Inpatient stay summarized for transition of care.
+%%field DischargeSummary.patient_id help: Patient receiving the discharge document.
+%%field DischargeSummary.doctor_id help: Practitioner accountable for clinical accuracy and signature.
+%%field DischargeSummary.summary_number help: Permanent document reference used in exchange and amendment tracking.
+%%field DischargeSummary.status enum: RecordStatus
+%%field DischargeSummary.status help: Draft, signed, amended, or entered-in-error state.
+%%field DischargeSummary.hospital_course help: Concise account of major events and treatment during the stay.
+%%field DischargeSummary.follow_up_instructions help: Actions, appointments, warnings, and responsible services after discharge.
+%%field DischargeSummary.signed_at help: Time the accountable practitioner finalized the summary.
+%%section entity: DischargeSummary; name: Discharge Summary; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: admission_id, patient_id | doctor_id, summary_number | hospital_course, follow_up_instructions | signed_at
+%%index DischargeSummary(admission_id, patient_id)
+%%rbac role:doctor|nurse|discharge_coordinator|clinical_coder on DischargeSummary.read
+%%entity CarePlan help: Shared plan connecting goals, interventions, responsible team members, review dates, and patient preferences across encounters.
+%%field CarePlan.patient_id help: Patient whose coordinated plan this is.
+%%field CarePlan.encounter_id help: Episode that initiated or materially revised the plan.
+%%field CarePlan.owner_id help: Care coordinator accountable for review and updates.
+%%field CarePlan.plan_number help: Reference used across teams and external exchange.
+%%field CarePlan.status enum: CarePlanStatus
+%%field CarePlan.status help: Draft, active, on-hold, completed, revoked, or entered-in-error standing.
+%%field CarePlan.goals help: Agreed measurable outcomes guiding interventions.
+%%field CarePlan.review_on help: Next multidisciplinary review deadline.
+%%section entity: CarePlan; name: Care Plan; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, encounter_id | owner_id, plan_number | goals, review_on
+%%index CarePlan(patient_id, encounter_id)
+%%rbac role:doctor|nurse|care_coordinator|patient_relations on CarePlan.read
+%%entity ImmunizationRecord help: Administered, refused, deferred, or historical vaccine event with product, lot, route, site, and patient decision evidence.
+%%field ImmunizationRecord.patient_id help: Patient whose immunization history is updated.
+%%field ImmunizationRecord.medication_id help: Formulary vaccine product when stocked locally.
+%%field ImmunizationRecord.employee_id help: Clinician accountable for administration or verification.
+%%field ImmunizationRecord.vaccine_name help: Recognizable antigen or vaccine product.
+%%field ImmunizationRecord.lot_number help: Manufacturer batch needed for recall and adverse-event tracing.
+%%field ImmunizationRecord.status enum: ImmunizationStatus
+%%field ImmunizationRecord.status help: Completed, refused, deferred, entered-in-error, or historical standing.
+%%field ImmunizationRecord.administered_at help: Actual administration time when given.
+%%field ImmunizationRecord.reason help: Reason for refusal, deferral, contraindication, or correction.
+%%section entity: ImmunizationRecord; name: Immunization Record; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, medication_id | employee_id, vaccine_name | lot_number, administered_at | reason
+%%index ImmunizationRecord(patient_id, medication_id)
+%%rbac role:doctor|nurse|pharmacist on ImmunizationRecord.read
+%%entity MealOrder help: Therapeutic meal request for an inpatient, combining diet prescription, allergies, texture, service time, delivery, and omission reasons.
+%%field MealOrder.admission_id help: Inpatient stay receiving the meal.
+%%field MealOrder.owner_id help: Dietitian or kitchen worker accountable for review.
+%%field MealOrder.meal_reference help: Tray and service reference used for bedside verification.
+%%field MealOrder.diet_type help: Therapeutic diet such as diabetic, renal, low-salt, or fasting.
+%%field MealOrder.status enum: MealStatus
+%%field MealOrder.status help: Requested, verified, prepared, delivered, omitted, or cancelled standing.
+%%field MealOrder.service_at help: Meal service time coordinated with procedures and medication.
+%%field MealOrder.special_instructions help: Texture, allergy, cultural, and assistance instructions.
+%%section entity: MealOrder; name: Meal Order; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: admission_id, owner_id | meal_reference, diet_type | service_at, special_instructions
+%%index MealOrder(admission_id, owner_id)
+%%rbac role:dietitian|nurse|kitchen_staff on MealOrder.read
+%%entity AmbulanceTrip help: Emergency or scheduled transport assignment connecting patient, crew, vehicle, origin, destination, timestamps, and clinical handover.
+%%field AmbulanceTrip.patient_id help: Patient transported when identity is known.
+%%field AmbulanceTrip.facility_id help: Facility dispatching or receiving the trip.
+%%field AmbulanceTrip.owner_id help: Dispatcher or lead crew member accountable for the trip.
+%%field AmbulanceTrip.trip_number help: Dispatch reference used in communications and billing.
+%%field AmbulanceTrip.priority help: Emergency response level governing dispatch and escalation.
+%%field AmbulanceTrip.status enum: TripStatus
+%%field AmbulanceTrip.status help: Requested, dispatched, arrived, transporting, completed, or cancelled standing.
+%%field AmbulanceTrip.requested_at help: Time the transport need was received.
+%%field AmbulanceTrip.completed_at help: Time handover and vehicle availability were confirmed.
+%%section entity: AmbulanceTrip; name: Ambulance Trip; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, facility_id | owner_id, trip_number | priority, requested_at | completed_at
+%%index AmbulanceTrip(patient_id, facility_id)
+%%rbac role:dispatcher|paramedic|nurse on AmbulanceTrip.read
+%%entity BiomedicalWasteBatch help: Sealed batch of regulated healthcare waste classified, weighed, labelled, stored, and tracked until authorized handover.
+%%field BiomedicalWasteBatch.facility_id help: Facility legally responsible for the waste.
+%%field BiomedicalWasteBatch.department_id help: Generating department used for accountability and reduction reporting.
+%%field BiomedicalWasteBatch.employee_id help: Worker accountable for classification and sealing.
+%%field BiomedicalWasteBatch.batch_number help: Manifest reference retained through disposal.
+%%field BiomedicalWasteBatch.waste_category help: Jurisdiction-specific color or hazard class controlling packaging and treatment.
+%%field BiomedicalWasteBatch.status enum: WasteStatus
+%%field BiomedicalWasteBatch.status help: Open, sealed, stored, handed-over, treated, or discrepancy standing.
+%%field BiomedicalWasteBatch.weight_kg help: Measured weight used in manifests and compliance reports.
+%%field BiomedicalWasteBatch.sealed_at help: Time custody moved into controlled storage.
+%%section entity: BiomedicalWasteBatch; name: Biomedical Waste Batch; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, department_id | employee_id, batch_number | waste_category, weight_kg | sealed_at
+%%index BiomedicalWasteBatch(facility_id, department_id)
+%%rbac role:waste_officer|housekeeping|facility_admin on BiomedicalWasteBatch.read
+%%entity WasteHandover help: Custody transfer of one waste batch to a licensed carrier or treatment facility with manifest and discrepancy evidence.
+%%entity WasteHandover parent: BiomedicalWasteBatch
+%%field WasteHandover.biomedical_waste_batch_id help: Sealed batch leaving facility custody.
+%%field WasteHandover.employee_id help: Facility representative witnessing the transfer.
+%%field WasteHandover.manifest_reference help: Regulatory movement document linking all parties.
+%%field WasteHandover.carrier_name help: Licensed organization accepting custody.
+%%field WasteHandover.handed_over_at help: Time legal custody transferred.
+%%field WasteHandover.accepted_weight_kg help: Carrier-confirmed weight used to investigate discrepancies.
+%%section entity: WasteHandover; name: Waste Handover; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: biomedical_waste_batch_id, employee_id | manifest_reference, carrier_name | handed_over_at, accepted_weight_kg
+%%index WasteHandover(biomedical_waste_batch_id, employee_id)
+%%rbac role:waste_officer|facility_admin|auditor on WasteHandover.read
+%%entity BreakGlassAccess help: Emergency access episode that records justification, patient scope, elevated privileges, notifications, expiry, and retrospective review.
+%%field BreakGlassAccess.patient_id help: Patient record accessed under emergency override.
+%%field BreakGlassAccess.employee_id help: Clinician accountable for invoking the override.
+%%field BreakGlassAccess.session_log_id help: Authenticated session in which emergency access occurred.
+%%field BreakGlassAccess.justification help: Immediate clinical reason ordinary access was insufficient.
+%%field BreakGlassAccess.purpose_of_use help: Emergency treatment or other approved exceptional purpose.
+%%field BreakGlassAccess.expires_at help: Automatic end of elevated access.
+%%field BreakGlassAccess.reviewed_at help: Time privacy or clinical governance completed retrospective review.
+%%section entity: BreakGlassAccess; name: Break Glass Access; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: patient_id, employee_id | session_log_id, justification | purpose_of_use, expires_at | reviewed_at
+%%index BreakGlassAccess(patient_id, employee_id)
+%%rbac role:privacy_officer|security_admin|clinical_admin on BreakGlassAccess.read
+%%entity AiSystemRegistry help: Governance inventory for each deployed AI capability, its intended use, risk class, owner, approval, version, and monitoring obligations.
+%%field AiSystemRegistry.tenant_id help: Health system responsible for deployment governance.
+%%field AiSystemRegistry.owner_id help: Accountable clinical or technical owner.
+%%field AiSystemRegistry.system_name help: Product and capability name recognizable to users and auditors.
+%%field AiSystemRegistry.model_reference help: Provider, model, version, and deployment identifier.
+%%field AiSystemRegistry.intended_use help: Approved clinical or administrative purpose and excluded uses.
+%%field AiSystemRegistry.risk_class help: Jurisdiction-specific risk classification without assuming one global regime.
+%%field AiSystemRegistry.status enum: AiSystemStatus
+%%field AiSystemRegistry.status help: Evaluation, approved, active, suspended, or decommissioned standing.
+%%field AiSystemRegistry.last_reviewed_on help: Most recent governance and performance review date.
+%%section entity: AiSystemRegistry; name: Ai System Registry; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: tenant_id, owner_id | system_name, model_reference | intended_use, risk_class | last_reviewed_on
+%%index AiSystemRegistry(tenant_id, owner_id)
+%%rbac role:clinical_ai_governor|security_admin|privacy_officer on AiSystemRegistry.read
+%%entity DataResidencyPolicy help: Versioned policy describing permitted storage and processing regions, transfer mechanisms, data classes, exceptions, and enforcement owner.
+%%field DataResidencyPolicy.tenant_id help: Tenant whose data placement this policy governs.
+%%field DataResidencyPolicy.owner_id help: Privacy or security owner accountable for review.
+%%field DataResidencyPolicy.policy_name help: Recognizable name and version for deployment decisions.
+%%field DataResidencyPolicy.data_class help: Clinical, identity, financial, research, or audit scope.
+%%field DataResidencyPolicy.permitted_regions help: Approved hosting and processing regions based on applicable law and contract.
+%%field DataResidencyPolicy.transfer_basis help: Approved legal or contractual mechanism for cross-region processing.
+%%field DataResidencyPolicy.status enum: PolicyStatus
+%%field DataResidencyPolicy.status help: Draft, active, superseded, or retired standing.
+%%field DataResidencyPolicy.effective_on help: Date infrastructure enforcement begins.
+%%section entity: DataResidencyPolicy; name: Data Residency Policy; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: tenant_id, owner_id | policy_name, data_class | permitted_regions, transfer_basis | effective_on
+%%index DataResidencyPolicy(tenant_id, owner_id)
+%%rbac role:tenant_admin|privacy_officer|security_admin on DataResidencyPolicy.read
+%%entity Device help: Medical device or implant identity with UDI, model, ownership, maintenance, status, and patient-use traceability.
+%%field Device.facility_id help: Facility responsible for the device while in service.
+%%field Device.item_id help: Catalog item from which this serialized device derives.
+%%field Device.device_identifier help: UDI or approved serial identifier scanned in clinical use.
+%%field Device.name help: Recognizable device or implant description.
+%%field Device.status enum: DeviceStatus
+%%field Device.status help: Active, inactive, maintenance, recalled, implanted, explanted, or retired standing.
+%%field Device.manufacturer help: Legal manufacturer used for safety notices.
+%%field Device.next_maintenance_on help: Preventive maintenance deadline that may block assignment.
+%%section entity: Device; name: Device; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, item_id | device_identifier, name | manufacturer, next_maintenance_on
+%%index Device(facility_id, item_id)
+%%rbac role:biomedical_engineer|inventory_manager|doctor|nurse on Device.read
+%%entity RecallAlert help: Manufacturer or regulator safety notice matched to items, lots, or devices and tracked through quarantine, patient tracing, and closure.
+%%field RecallAlert.item_id help: Catalog item affected when recall is product-wide.
+%%field RecallAlert.device_id help: Specific serialized device affected when individually identified.
+%%field RecallAlert.alert_number help: Regulator or manufacturer reference used in evidence and communication.
+%%field RecallAlert.severity help: Risk class driving urgency and escalation.
+%%field RecallAlert.status enum: RecallStatus
+%%field RecallAlert.status help: Received, assessing, quarantining, tracing, remediating, or closed standing.
+%%field RecallAlert.issued_on help: Official notice date used for timeliness measures.
+%%field RecallAlert.instructions help: Required quarantine, return, correction, or patient follow-up actions.
+%%section entity: RecallAlert; name: Recall Alert; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: item_id, device_id | alert_number, severity | issued_on, instructions
+%%index RecallAlert(item_id, device_id)
+%%rbac role:biomedical_engineer|inventory_manager|pharmacist|quality_officer on RecallAlert.read
+%%entity ContingencyPlan help: Approved continuity and recovery plan defining affected services, offline procedures, recovery objectives, testing, dependencies, and accountable owners.
+%%field ContingencyPlan.facility_id help: Facility whose essential services the plan protects.
+%%field ContingencyPlan.owner_id help: Incident-management owner accountable for maintenance and exercises.
+%%field ContingencyPlan.plan_name help: Recognizable scenario and version used during activation.
+%%field ContingencyPlan.scenario_type help: Cyber, network, power, application, facility, or supplier disruption.
+%%field ContingencyPlan.recovery_time_hours help: Approved recovery objective based on risk assessment rather than assumed regulation.
+%%field ContingencyPlan.status enum: PlanStatus
+%%field ContingencyPlan.status help: Draft, approved, active, superseded, or retired standing.
+%%field ContingencyPlan.last_tested_on help: Most recent exercise date used to schedule improvement.
+%%field ContingencyPlan.test_findings help: Observed gaps and remediation commitments from the exercise.
+%%section entity: ContingencyPlan; name: Contingency Plan; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: facility_id, owner_id | plan_name, scenario_type | recovery_time_hours, last_tested_on | test_findings
+%%index ContingencyPlan(facility_id, owner_id)
+%%rbac role:facility_admin|security_admin|clinical_admin on ContingencyPlan.read
+%%entity ResearchDatasetRequest help: Governed request for secondary-use data with purpose, legal basis, ethics decision, minimization, secure environment, and expiry.
+%%field ResearchDatasetRequest.tenant_id help: Data holder or controller responsible for governance.
+%%field ResearchDatasetRequest.owner_id help: Research office worker coordinating review and access.
+%%field ResearchDatasetRequest.request_number help: Reference used across ethics, access-body, and secure-environment records.
+%%field ResearchDatasetRequest.purpose help: Specific research, public-health, innovation, or policy purpose limiting reuse.
+%%field ResearchDatasetRequest.legal_basis help: Applicable authorization, permit, consent, or statutory basis.
+%%field ResearchDatasetRequest.status enum: ResearchStatus
+%%field ResearchDatasetRequest.status help: Review, approval, extraction, secure access, expiry, and revocation lifecycle.
+%%field ResearchDatasetRequest.approved_until help: End of authorized access after which credentials and outputs are blocked.
+%%field ResearchDatasetRequest.secure_environment_reference help: Approved SPE or enclave where analysis may occur without raw export.
+%%section entity: ResearchDatasetRequest; name: Research Dataset Request; help: Complete this record with verified information and use its status and references to coordinate the next accountable step.; rows: tenant_id, owner_id | request_number, purpose | legal_basis, approved_until | secure_environment_reference
+%%index ResearchDatasetRequest(tenant_id, owner_id)
+%%rbac role:research_officer|privacy_officer|data_access_committee on ResearchDatasetRequest.read
+%%category name: Governance; description: Governance records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Tenant, Facility, Department, DataResidencyPolicy
+%%category name: Workforce; description: Workforce records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Employee, Doctor
+%%category name: Security; description: Security records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: UserAccount, SessionLog, AuditEvent
+%%category name: Patient Administration; description: Patient Administration records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Patient, Appointment, Admission, Ward, Bed, BedAssignment
+%%category name: Privacy; description: Privacy records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Consent, DataSubjectRequest, DataBreach, BreakGlassAccess
+%%category name: Clinical; description: Clinical records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Encounter, MedicalRecord, Diagnosis, ClinicalOrder, ProcedureRecord, DischargeSummary, CarePlan
+%%category name: Diagnostics; description: Diagnostics records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Specimen, LabObservation, ImagingStudy
+%%category name: Pharmacy; description: Pharmacy records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Medication, Prescription, Dispense, MedicationAdministration
+%%category name: Surgery; description: Surgery records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: OperatingTheatre, SurgicalCase
+%%category name: Blood Bank; description: Blood Bank records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: BloodUnit, Transfusion
+%%category name: Safety and Quality; description: Safety and Quality records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: AllergyIntolerance, InfectionCase, SafetyIncident, CorrectiveAction, ImmunizationRecord
+%%category name: Supply Chain; description: Supply Chain records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Item, Store, StockLot, StockMovement, Device, RecallAlert
+%%category name: Procurement; description: Procurement records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Supplier, PurchaseOrder, GoodsReceipt, SupplierInvoice
+%%category name: Revenue Cycle; description: Revenue Cycle records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Coverage, Preauthorization, Invoice, Payment, Claim
+%%category name: Finance; description: Finance records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: Account, FiscalPeriod, JournalEntry
+%%category name: Operations; description: Operations records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: ServiceRequest, HousekeepingTask, Complaint, MealOrder, AmbulanceTrip, BiomedicalWasteBatch
+%%category name: Resilience; description: Resilience records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: DowntimeEvent, OfflineReconciliation, ContingencyPlan
+%%category name: Interoperability; description: Interoperability records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: IntegrationMessage
+%%category name: Clinical AI; description: Clinical AI records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: AiClinicalDraft, AiSystemRegistry
+%%category name: Research; description: Research records used by accountable hospital teams.; icon: Activity; color: #2563eb; entities: ResearchDatasetRequest
+%%meta name: Tenant Lifecycle
+%%meta kind: workflow
+%%workflow TenantLifecycle entity: Tenant kind: state
+stateDiagram-v2
+[*] --> provisioning
+provisioning --> active : advance
+active --> suspended : advance
+suspended --> retired : advance
+retired --> [*]
+%%rbac role:platform_admin|tenant_admin on Tenant.advance
+%%meta name: UserAccount Lifecycle
+%%meta kind: workflow
+%%workflow UserAccountLifecycle entity: UserAccount kind: state
+stateDiagram-v2
+[*] --> invited
+invited --> active : advance
+active --> locked : advance
+locked --> disabled : advance
+disabled --> [*]
+%%rbac role:tenant_admin|security_admin on UserAccount.advance
+%%meta name: Consent Lifecycle
+%%meta kind: workflow
+%%workflow ConsentLifecycle entity: Consent kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> active : advance
+active --> refused : advance
+refused --> withdrawn : advance
+withdrawn --> expired : advance
+expired --> [*]
+%%rbac role:registration_clerk|doctor|privacy_officer|research_officer on Consent.advance
+%%meta name: Appointment Lifecycle
+%%meta kind: workflow
+%%workflow AppointmentLifecycle entity: Appointment kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> scheduled : advance
+scheduled --> checked_in : advance
+checked_in --> fulfilled : advance
+fulfilled --> cancelled : advance
+cancelled --> no_show : advance
+requested --> cancelled : cancel
+no_show --> [*]
+%%rbac role:scheduler|registration_clerk|doctor|nurse on Appointment.advance
+%%rbac role:scheduler|registration_clerk|doctor|nurse on Appointment.cancel
+%%meta name: Encounter Lifecycle
+%%meta kind: workflow
+%%workflow EncounterLifecycle entity: Encounter kind: state
+stateDiagram-v2
+[*] --> planned
+planned --> arrived : advance
+arrived --> in_progress : advance
+in_progress --> on_hold : advance
+on_hold --> finished : advance
+finished --> cancelled : advance
+planned --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:registration_clerk|doctor|nurse|clinical_coder on Encounter.advance
+%%rbac role:registration_clerk|doctor|nurse|clinical_coder on Encounter.cancel
+%%meta name: Admission Lifecycle
+%%meta kind: workflow
+%%workflow AdmissionLifecycle entity: Admission kind: state
+stateDiagram-v2
+[*] --> planned
+planned --> admitted : advance
+admitted --> transferred : advance
+transferred --> discharge_ready : advance
+discharge_ready --> discharged : advance
+discharged --> cancelled : advance
+planned --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:bed_manager|doctor|nurse|discharge_coordinator on Admission.advance
+%%rbac role:bed_manager|doctor|nurse|discharge_coordinator on Admission.cancel
+%%meta name: Bed Lifecycle
+%%meta kind: workflow
+%%workflow BedLifecycle entity: Bed kind: state
+stateDiagram-v2
+[*] --> available
+available --> reserved : advance
+reserved --> occupied : advance
+occupied --> cleaning : advance
+cleaning --> blocked : advance
+blocked --> maintenance : advance
+maintenance --> [*]
+%%rbac role:bed_manager|nurse|housekeeping on Bed.advance
+%%meta name: BedAssignment Lifecycle
+%%meta kind: workflow
+%%workflow BedAssignmentLifecycle entity: BedAssignment kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> reserved : advance
+reserved --> active : advance
+active --> released : advance
+released --> cancelled : advance
+requested --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:bed_manager|nurse on BedAssignment.advance
+%%rbac role:bed_manager|nurse on BedAssignment.cancel
+%%meta name: MedicalRecord Lifecycle
+%%meta kind: workflow
+%%workflow MedicalRecordLifecycle entity: MedicalRecord kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> signed : advance
+signed --> amended : advance
+amended --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|clinical_coder|privacy_officer on MedicalRecord.advance
+%%meta name: Diagnosis Lifecycle
+%%meta kind: workflow
+%%workflow DiagnosisLifecycle entity: Diagnosis kind: state
+stateDiagram-v2
+[*] --> provisional
+provisional --> confirmed : advance
+confirmed --> resolved : advance
+resolved --> refuted : advance
+refuted --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|clinical_coder on Diagnosis.advance
+%%meta name: ClinicalOrder Lifecycle
+%%meta kind: workflow
+%%workflow ClinicalOrderLifecycle entity: ClinicalOrder kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> placed : advance
+placed --> accepted : advance
+accepted --> in_progress : advance
+in_progress --> completed : advance
+completed --> cancelled : advance
+cancelled --> rejected : advance
+draft --> cancelled : cancel
+rejected --> [*]
+%%rbac role:doctor|nurse|pharmacist|laboratory_scientist|radiology_technologist on ClinicalOrder.advance
+%%rbac role:doctor|nurse|pharmacist|laboratory_scientist|radiology_technologist on ClinicalOrder.cancel
+%%meta name: Specimen Lifecycle
+%%meta kind: workflow
+%%workflow SpecimenLifecycle entity: Specimen kind: state
+stateDiagram-v2
+[*] --> ordered
+ordered --> collected : advance
+collected --> received : advance
+received --> processing : advance
+processing --> completed : advance
+completed --> rejected : advance
+rejected --> [*]
+%%rbac role:nurse|phlebotomist|laboratory_scientist on Specimen.advance
+%%meta name: LabObservation Lifecycle
+%%meta kind: workflow
+%%workflow LabObservationLifecycle entity: LabObservation kind: state
+stateDiagram-v2
+[*] --> preliminary
+preliminary --> verified : advance
+verified --> corrected : advance
+corrected --> cancelled : advance
+preliminary --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:doctor|nurse|laboratory_scientist on LabObservation.advance
+%%rbac role:doctor|nurse|laboratory_scientist on LabObservation.cancel
+%%meta name: ImagingStudy Lifecycle
+%%meta kind: workflow
+%%workflow ImagingStudyLifecycle entity: ImagingStudy kind: state
+stateDiagram-v2
+[*] --> preliminary
+preliminary --> verified : advance
+verified --> corrected : advance
+corrected --> cancelled : advance
+preliminary --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:doctor|radiologist|radiology_technologist on ImagingStudy.advance
+%%rbac role:doctor|radiologist|radiology_technologist on ImagingStudy.cancel
+%%meta name: Prescription Lifecycle
+%%meta kind: workflow
+%%workflow PrescriptionLifecycle entity: Prescription kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> signed : advance
+signed --> verified : advance
+verified --> dispensing : advance
+dispensing --> completed : advance
+completed --> stopped : advance
+stopped --> cancelled : advance
+draft --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:doctor|pharmacist|nurse on Prescription.advance
+%%rbac role:doctor|pharmacist|nurse on Prescription.cancel
+%%meta name: Dispense Lifecycle
+%%meta kind: workflow
+%%workflow DispenseLifecycle entity: Dispense kind: state
+stateDiagram-v2
+[*] --> queued
+queued --> reviewing : advance
+reviewing --> prepared : advance
+prepared --> issued : advance
+issued --> partially_issued : advance
+partially_issued --> rejected : advance
+rejected --> cancelled : advance
+queued --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:pharmacist|pharmacy_technician on Dispense.advance
+%%rbac role:pharmacist|pharmacy_technician on Dispense.cancel
+%%meta name: MedicationAdministration Lifecycle
+%%meta kind: workflow
+%%workflow MedicationAdministrationLifecycle entity: MedicationAdministration kind: state
+stateDiagram-v2
+[*] --> scheduled
+scheduled --> due : advance
+due --> given : advance
+given --> withheld : advance
+withheld --> missed : advance
+missed --> refused : advance
+refused --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:nurse|doctor|pharmacist on MedicationAdministration.advance
+%%meta name: SurgicalCase Lifecycle
+%%meta kind: workflow
+%%workflow SurgicalCaseLifecycle entity: SurgicalCase kind: state
+stateDiagram-v2
+[*] --> planned
+planned --> scheduled : advance
+scheduled --> ready : advance
+ready --> in_progress : advance
+in_progress --> recovery : advance
+recovery --> completed : advance
+completed --> cancelled : advance
+planned --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:surgeon|anesthesiologist|theatre_manager|nurse on SurgicalCase.advance
+%%rbac role:surgeon|anesthesiologist|theatre_manager|nurse on SurgicalCase.cancel
+%%meta name: BloodUnit Lifecycle
+%%meta kind: workflow
+%%workflow BloodUnitLifecycle entity: BloodUnit kind: state
+stateDiagram-v2
+[*] --> available
+available --> reserved : advance
+reserved --> issued : advance
+issued --> transfused : advance
+transfused --> quarantined : advance
+quarantined --> expired : advance
+expired --> discarded : advance
+discarded --> [*]
+%%rbac role:blood_bank_scientist|nurse|doctor on BloodUnit.advance
+%%meta name: Transfusion Lifecycle
+%%meta kind: workflow
+%%workflow TransfusionLifecycle entity: Transfusion kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> crossmatched : advance
+crossmatched --> issued : advance
+issued --> started : advance
+started --> completed : advance
+completed --> stopped : advance
+stopped --> reaction_review : advance
+reaction_review --> [*]
+%%rbac role:doctor|nurse|blood_bank_scientist on Transfusion.advance
+%%meta name: AllergyIntolerance Lifecycle
+%%meta kind: workflow
+%%workflow AllergyIntoleranceLifecycle entity: AllergyIntolerance kind: state
+stateDiagram-v2
+[*] --> active
+active --> inactive : advance
+inactive --> resolved : advance
+resolved --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|pharmacist on AllergyIntolerance.advance
+%%meta name: InfectionCase Lifecycle
+%%meta kind: workflow
+%%workflow InfectionCaseLifecycle entity: InfectionCase kind: state
+stateDiagram-v2
+[*] --> suspected
+suspected --> probable : advance
+probable --> confirmed : advance
+confirmed --> resolved : advance
+resolved --> excluded : advance
+excluded --> [*]
+%%rbac role:infection_control_officer|doctor|nurse on InfectionCase.advance
+%%meta name: SafetyIncident Lifecycle
+%%meta kind: workflow
+%%workflow SafetyIncidentLifecycle entity: SafetyIncident kind: state
+stateDiagram-v2
+[*] --> reported
+reported --> triaged : advance
+triaged --> investigating : advance
+investigating --> action_required : advance
+action_required --> resolved : advance
+resolved --> closed : advance
+closed --> [*]
+%%rbac role:quality_officer|risk_manager|department_manager on SafetyIncident.advance
+%%meta name: CorrectiveAction Lifecycle
+%%meta kind: workflow
+%%workflow CorrectiveActionLifecycle entity: CorrectiveAction kind: state
+stateDiagram-v2
+[*] --> open
+open --> assigned : advance
+assigned --> in_progress : advance
+in_progress --> verification : advance
+verification --> effective : advance
+effective --> ineffective : advance
+ineffective --> closed : advance
+closed --> [*]
+%%rbac role:quality_officer|risk_manager|department_manager on CorrectiveAction.advance
+%%meta name: StockLot Lifecycle
+%%meta kind: workflow
+%%workflow StockLotLifecycle entity: StockLot kind: state
+stateDiagram-v2
+[*] --> available
+available --> quarantined : advance
+quarantined --> recalled : advance
+recalled --> expired : advance
+expired --> depleted : advance
+depleted --> [*]
+%%rbac role:inventory_manager|pharmacist|nurse on StockLot.advance
+%%meta name: PurchaseOrder Lifecycle
+%%meta kind: workflow
+%%workflow PurchaseOrderLifecycle entity: PurchaseOrder kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> submitted : advance
+submitted --> approved : advance
+approved --> ordered : advance
+ordered --> partially_received : advance
+partially_received --> received : advance
+received --> cancelled : advance
+cancelled --> closed : advance
+draft --> cancelled : cancel
+closed --> [*]
+%%rbac role:procurement_officer|procurement_manager|accounts_payable on PurchaseOrder.advance
+%%rbac role:procurement_officer|procurement_manager|accounts_payable on PurchaseOrder.cancel
+%%meta name: GoodsReceipt Lifecycle
+%%meta kind: workflow
+%%workflow GoodsReceiptLifecycle entity: GoodsReceipt kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> inspected : advance
+inspected --> posted : advance
+posted --> partially_accepted : advance
+partially_accepted --> rejected : advance
+rejected --> reversed : advance
+reversed --> [*]
+%%rbac role:inventory_manager|procurement_officer|accounts_payable on GoodsReceipt.advance
+%%meta name: SupplierInvoice Lifecycle
+%%meta kind: workflow
+%%workflow SupplierInvoiceLifecycle entity: SupplierInvoice kind: state
+stateDiagram-v2
+[*] --> received
+received --> matching : advance
+matching --> approved : advance
+approved --> on_hold : advance
+on_hold --> paid : advance
+paid --> disputed : advance
+disputed --> credited : advance
+credited --> [*]
+%%rbac role:accounts_payable|procurement_officer|finance_manager on SupplierInvoice.advance
+%%meta name: Coverage Lifecycle
+%%meta kind: workflow
+%%workflow CoverageLifecycle entity: Coverage kind: state
+stateDiagram-v2
+[*] --> pending_verification
+pending_verification --> active : advance
+active --> inactive : advance
+inactive --> expired : advance
+expired --> [*]
+%%rbac role:insurance_clerk|billing_clerk|claims_officer on Coverage.advance
+%%meta name: Preauthorization Lifecycle
+%%meta kind: workflow
+%%workflow PreauthorizationLifecycle entity: Preauthorization kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> submitted : advance
+submitted --> approved : advance
+approved --> partially_approved : advance
+partially_approved --> denied : advance
+denied --> expired : advance
+expired --> cancelled : advance
+draft --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:insurance_clerk|doctor|claims_officer on Preauthorization.advance
+%%rbac role:insurance_clerk|doctor|claims_officer on Preauthorization.cancel
+%%meta name: Invoice Lifecycle
+%%meta kind: workflow
+%%workflow InvoiceLifecycle entity: Invoice kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> issued : advance
+issued --> partially_paid : advance
+partially_paid --> paid : advance
+paid --> disputed : advance
+disputed --> void : advance
+void --> refunded : advance
+refunded --> [*]
+%%rbac role:billing_clerk|cashier|finance_manager on Invoice.advance
+%%meta name: Payment Lifecycle
+%%meta kind: workflow
+%%workflow PaymentLifecycle entity: Payment kind: state
+stateDiagram-v2
+[*] --> pending
+pending --> completed : advance
+completed --> failed : advance
+failed --> reversed : advance
+reversed --> refunded : advance
+refunded --> [*]
+%%rbac role:cashier|billing_clerk|finance_manager on Payment.advance
+%%meta name: Claim Lifecycle
+%%meta kind: workflow
+%%workflow ClaimLifecycle entity: Claim kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> ready : advance
+ready --> submitted : advance
+submitted --> accepted : advance
+accepted --> partially_adjudicated : advance
+partially_adjudicated --> paid : advance
+paid --> denied : advance
+denied --> appealed : advance
+appealed --> closed : advance
+closed --> [*]
+%%rbac role:claims_officer|billing_clerk|finance_manager on Claim.advance
+%%meta name: FiscalPeriod Lifecycle
+%%meta kind: workflow
+%%workflow FiscalPeriodLifecycle entity: FiscalPeriod kind: state
+stateDiagram-v2
+[*] --> open
+open --> soft_closed : advance
+soft_closed --> closed : advance
+closed --> reopened : advance
+reopened --> [*]
+%%rbac role:finance_manager|accountant|auditor on FiscalPeriod.advance
+%%meta name: JournalEntry Lifecycle
+%%meta kind: workflow
+%%workflow JournalEntryLifecycle entity: JournalEntry kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> posted : advance
+posted --> reversed : advance
+reversed --> [*]
+%%rbac role:finance_manager|accountant|auditor on JournalEntry.advance
+%%meta name: ServiceRequest Lifecycle
+%%meta kind: workflow
+%%workflow ServiceRequestLifecycle entity: ServiceRequest kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> assigned : advance
+assigned --> in_progress : advance
+in_progress --> completed : advance
+completed --> cancelled : advance
+requested --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:service_desk|nurse|facility_admin on ServiceRequest.advance
+%%rbac role:service_desk|nurse|facility_admin on ServiceRequest.cancel
+%%meta name: HousekeepingTask Lifecycle
+%%meta kind: workflow
+%%workflow HousekeepingTaskLifecycle entity: HousekeepingTask kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> assigned : advance
+assigned --> in_progress : advance
+in_progress --> completed : advance
+completed --> cancelled : advance
+requested --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:housekeeping|bed_manager|nurse on HousekeepingTask.advance
+%%rbac role:housekeeping|bed_manager|nurse on HousekeepingTask.cancel
+%%meta name: Complaint Lifecycle
+%%meta kind: workflow
+%%workflow ComplaintLifecycle entity: Complaint kind: state
+stateDiagram-v2
+[*] --> received
+received --> acknowledged : advance
+acknowledged --> investigating : advance
+investigating --> resolved : advance
+resolved --> appealed : advance
+appealed --> closed : advance
+closed --> [*]
+%%rbac role:patient_relations|quality_officer|privacy_officer on Complaint.advance
+%%meta name: DataSubjectRequest Lifecycle
+%%meta kind: workflow
+%%workflow DataSubjectRequestLifecycle entity: DataSubjectRequest kind: state
+stateDiagram-v2
+[*] --> received
+received --> identity_verified : advance
+identity_verified --> assessing : advance
+assessing --> fulfilled : advance
+fulfilled --> partially_fulfilled : advance
+partially_fulfilled --> refused : advance
+refused --> closed : advance
+closed --> [*]
+%%rbac role:privacy_officer|legal_officer|health_information_manager on DataSubjectRequest.advance
+%%meta name: DataBreach Lifecycle
+%%meta kind: workflow
+%%workflow DataBreachLifecycle entity: DataBreach kind: state
+stateDiagram-v2
+[*] --> suspected
+suspected --> confirmed : advance
+confirmed --> contained : advance
+contained --> assessing : advance
+assessing --> notified : advance
+notified --> remediating : advance
+remediating --> closed : advance
+closed --> [*]
+%%rbac role:security_admin|privacy_officer|legal_officer on DataBreach.advance
+%%meta name: DowntimeEvent Lifecycle
+%%meta kind: workflow
+%%workflow DowntimeEventLifecycle entity: DowntimeEvent kind: state
+stateDiagram-v2
+[*] --> declared
+declared --> active : advance
+active --> restoring : advance
+restoring --> reconciling : advance
+reconciling --> closed : advance
+closed --> [*]
+%%rbac role:facility_admin|security_admin|clinical_admin on DowntimeEvent.advance
+%%meta name: OfflineReconciliation Lifecycle
+%%meta kind: workflow
+%%workflow OfflineReconciliationLifecycle entity: OfflineReconciliation kind: state
+stateDiagram-v2
+[*] --> pending_match
+pending_match --> conflict : advance
+conflict --> accepted : advance
+accepted --> rejected : advance
+rejected --> duplicate : advance
+duplicate --> [*]
+%%rbac role:clinical_admin|registration_clerk|nurse|doctor on OfflineReconciliation.advance
+%%meta name: IntegrationMessage Lifecycle
+%%meta kind: workflow
+%%workflow IntegrationMessageLifecycle entity: IntegrationMessage kind: state
+stateDiagram-v2
+[*] --> received
+received --> validated : advance
+validated --> processed : advance
+processed --> retry_scheduled : advance
+retry_scheduled --> dead_letter : advance
+dead_letter --> acknowledged : advance
+acknowledged --> [*]
+%%rbac role:integration_admin|security_admin|clinical_admin on IntegrationMessage.advance
+%%meta name: AiClinicalDraft Lifecycle
+%%meta kind: workflow
+%%workflow AiClinicalDraftLifecycle entity: AiClinicalDraft kind: state
+stateDiagram-v2
+[*] --> generated
+generated --> under_review : advance
+under_review --> accepted : advance
+accepted --> rejected : advance
+rejected --> superseded : advance
+superseded --> [*]
+%%rbac role:doctor|nurse|clinical_ai_governor on AiClinicalDraft.advance
+%%meta name: ProcedureRecord Lifecycle
+%%meta kind: workflow
+%%workflow ProcedureRecordLifecycle entity: ProcedureRecord kind: state
+stateDiagram-v2
+[*] --> preparation
+preparation --> in_progress : advance
+in_progress --> completed : advance
+completed --> cancelled : advance
+cancelled --> entered_in_error : advance
+preparation --> cancelled : cancel
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|clinical_coder on ProcedureRecord.advance
+%%rbac role:doctor|nurse|clinical_coder on ProcedureRecord.cancel
+%%meta name: DischargeSummary Lifecycle
+%%meta kind: workflow
+%%workflow DischargeSummaryLifecycle entity: DischargeSummary kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> signed : advance
+signed --> amended : advance
+amended --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|discharge_coordinator|clinical_coder on DischargeSummary.advance
+%%meta name: CarePlan Lifecycle
+%%meta kind: workflow
+%%workflow CarePlanLifecycle entity: CarePlan kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> active : advance
+active --> on_hold : advance
+on_hold --> completed : advance
+completed --> revoked : advance
+revoked --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|care_coordinator|patient_relations on CarePlan.advance
+%%meta name: ImmunizationRecord Lifecycle
+%%meta kind: workflow
+%%workflow ImmunizationRecordLifecycle entity: ImmunizationRecord kind: state
+stateDiagram-v2
+[*] --> completed
+completed --> refused : advance
+refused --> deferred : advance
+deferred --> historical : advance
+historical --> entered_in_error : advance
+entered_in_error --> [*]
+%%rbac role:doctor|nurse|pharmacist on ImmunizationRecord.advance
+%%meta name: MealOrder Lifecycle
+%%meta kind: workflow
+%%workflow MealOrderLifecycle entity: MealOrder kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> verified : advance
+verified --> prepared : advance
+prepared --> delivered : advance
+delivered --> omitted : advance
+omitted --> cancelled : advance
+requested --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:dietitian|nurse|kitchen_staff on MealOrder.advance
+%%rbac role:dietitian|nurse|kitchen_staff on MealOrder.cancel
+%%meta name: AmbulanceTrip Lifecycle
+%%meta kind: workflow
+%%workflow AmbulanceTripLifecycle entity: AmbulanceTrip kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> dispatched : advance
+dispatched --> arrived : advance
+arrived --> transporting : advance
+transporting --> completed : advance
+completed --> cancelled : advance
+requested --> cancelled : cancel
+cancelled --> [*]
+%%rbac role:dispatcher|paramedic|nurse on AmbulanceTrip.advance
+%%rbac role:dispatcher|paramedic|nurse on AmbulanceTrip.cancel
+%%meta name: BiomedicalWasteBatch Lifecycle
+%%meta kind: workflow
+%%workflow BiomedicalWasteBatchLifecycle entity: BiomedicalWasteBatch kind: state
+stateDiagram-v2
+[*] --> open
+open --> sealed : advance
+sealed --> stored : advance
+stored --> handed_over : advance
+handed_over --> treated : advance
+treated --> discrepancy : advance
+discrepancy --> [*]
+%%rbac role:waste_officer|housekeeping|facility_admin on BiomedicalWasteBatch.advance
+%%meta name: AiSystemRegistry Lifecycle
+%%meta kind: workflow
+%%workflow AiSystemRegistryLifecycle entity: AiSystemRegistry kind: state
+stateDiagram-v2
+[*] --> evaluation
+evaluation --> approved : advance
+approved --> active : advance
+active --> suspended : advance
+suspended --> decommissioned : advance
+decommissioned --> [*]
+%%rbac role:clinical_ai_governor|security_admin|privacy_officer on AiSystemRegistry.advance
+%%meta name: DataResidencyPolicy Lifecycle
+%%meta kind: workflow
+%%workflow DataResidencyPolicyLifecycle entity: DataResidencyPolicy kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> active : advance
+active --> superseded : advance
+superseded --> retired : advance
+retired --> [*]
+%%rbac role:tenant_admin|privacy_officer|security_admin on DataResidencyPolicy.advance
+%%meta name: Device Lifecycle
+%%meta kind: workflow
+%%workflow DeviceLifecycle entity: Device kind: state
+stateDiagram-v2
+[*] --> active
+active --> inactive : advance
+inactive --> maintenance : advance
+maintenance --> recalled : advance
+recalled --> implanted : advance
+implanted --> explanted : advance
+explanted --> retired : advance
+retired --> [*]
+%%rbac role:biomedical_engineer|inventory_manager|doctor|nurse on Device.advance
+%%meta name: RecallAlert Lifecycle
+%%meta kind: workflow
+%%workflow RecallAlertLifecycle entity: RecallAlert kind: state
+stateDiagram-v2
+[*] --> received
+received --> assessing : advance
+assessing --> quarantining : advance
+quarantining --> tracing : advance
+tracing --> remediating : advance
+remediating --> closed : advance
+closed --> [*]
+%%rbac role:biomedical_engineer|inventory_manager|pharmacist|quality_officer on RecallAlert.advance
+%%meta name: ContingencyPlan Lifecycle
+%%meta kind: workflow
+%%workflow ContingencyPlanLifecycle entity: ContingencyPlan kind: state
+stateDiagram-v2
+[*] --> draft
+draft --> approved : advance
+approved --> active : advance
+active --> superseded : advance
+superseded --> retired : advance
+retired --> [*]
+%%rbac role:facility_admin|security_admin|clinical_admin on ContingencyPlan.advance
+%%meta name: ResearchDatasetRequest Lifecycle
+%%meta kind: workflow
+%%workflow ResearchDatasetRequestLifecycle entity: ResearchDatasetRequest kind: state
+stateDiagram-v2
+[*] --> requested
+requested --> ethics_review : advance
+ethics_review --> approved : advance
+approved --> extracting : advance
+extracting --> available_in_spe : advance
+available_in_spe --> expired : advance
+expired --> revoked : advance
+revoked --> [*]
+%%rbac role:research_officer|privacy_officer|data_access_committee on ResearchDatasetRequest.advance
+%%meta name: Hospital Safety Rules
+%%meta kind: rules
+%%rule medicationAdministrationSafety on MedicationAdministration event: beforeUpdate priority: 10
+flowchart TD
+A([Administration requested]) --> B{status == given?}
+B -->|Yes| C[Require verified dose and time]
+B -->|No| D[Record outcome reason]
+C --> Z([Decision complete])
+D --> Z
+%%action requireDose validation-error when: dose_given == null message: A given medication must record the actual dose.
+%%meta name: Admission Discharge Orchestration
+%%meta kind: workflow
+%%workflow AdmissionDischarge entity: Admission kind: saga
+flowchart TD
+A([Discharge approved]) --> B[Set discharge marker]
+B --> C[Close admission]
+C --> Z([Discharged])
+%%step B Formula target: dischargeMarker operation: set value: approved
+%%step C UpdateEntity field: status value: discharged
+%%meta name: Patient Tenant Scope
+%%meta kind: workflow
+%%workflow PatientTenantScope entity: Patient kind: hook
+flowchart TD
+A[Query requested] --> B[Apply tenant scope]
+B --> C[Return authorized rows]
+%%hook beforeQuery enforceTenantScope on Patient[field: tenant_id]
