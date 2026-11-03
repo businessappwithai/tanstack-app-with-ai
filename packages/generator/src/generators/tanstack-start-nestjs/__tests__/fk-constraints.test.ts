@@ -39,8 +39,23 @@ describe("buildFkConstraints", () => {
         parentTable: "bus_advisor",
         column: "advisor_id",
         name: "fk_bus_client_advisor_id",
+        onDelete: "SET NULL",
       },
     ]);
+  });
+
+  it("refuses a parent's delete (RESTRICT) where the child's column is required", () => {
+    // Found by driving a generated app: ClassPack -> Payment declared
+    // `ON DELETE SET NULL` on a NOT NULL `class_pack_id`, so deleting any pack
+    // that had a payment failed with a not-null violation.
+    const required = {
+      name: "Payment",
+      tableName: "bus_payment",
+      attributes: [{ name: "class_pack_id", required: true }],
+    };
+    const pack = entity("ClassPack", ["id"]);
+    const [constraint] = buildFkConstraints([pack, required], [oneToMany("ClassPack", "Payment")]);
+    expect(constraint?.onDelete).toBe("RESTRICT");
   });
 
   it("skips a relationship whose child names the column something else", () => {

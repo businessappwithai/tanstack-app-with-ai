@@ -79,6 +79,9 @@ function hasLabelSource(entity: (typeof entities)[number]): boolean {
       (field) =>
         !field.isForeignKey &&
         field.name !== "id" &&
+        // A closed vocabulary (a status) says what a record is doing, not which
+        // record it is — the dictionary does not offer it as a display value.
+        !(field.enumValues && field.enumValues.length > 0) &&
         (field.type === "string" || field.type === "text")
     )
   );

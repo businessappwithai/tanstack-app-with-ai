@@ -15,24 +15,27 @@ import type { Relationship } from "@appwithai/core/types";
  * So a constraint is only emitted where both tables exist and the child really
  * carries the column.
  */
+export interface FkConstraint {
+  childTable: string;
+  parentTable: string;
+  column: string;
+  name: string;
+  onDelete: "RESTRICT" | "SET NULL";
+}
+
 export function buildFkConstraints(
   busEntities: Array<{
     tableName: string;
     originalName?: string;
     name: string;
-    attributes?: Array<{ name: string; columnName?: string }>;
+    attributes?: Array<{ name: string; columnName?: string; required?: boolean }>;
   }>,
   relationships: Relationship[]
-): Array<{ childTable: string; parentTable: string; column: string; name: string }> {
+): FkConstraint[] {
   const byName = new Map(
     busEntities.map((entity) => [(entity.originalName || entity.name).toLowerCase(), entity])
   );
-  const constraints: Array<{
-    childTable: string;
-    parentTable: string;
-    column: string;
-    name: string;
-  }> = [];
+  const constraints: FkConstraint[] = [];
   const seen = new Set<string>();
 
   for (const relationship of relationships) {
@@ -42,15 +45,26 @@ export function buildFkConstraints(
     if (!parent || !child) continue;
 
     const column = `${parent.tableName.replace(/^bus_/, "")}_id`;
-    const carriesColumn = (child.attributes ?? []).some(
-      (attribute) => (attribute.columnName || attribute.name) === column
+    const attribute = (child.attributes ?? []).find(
+      (candidate) => (candidate.columnName || candidate.name) === column
     );
-    if (!carriesColumn) continue;
+    if (!attribute) continue;
 
     const name = `fk_${child.tableName}_${column}`;
     if (seen.has(name)) continue;
     seen.add(name);
-    constraints.push({ childTable: child.tableName, parentTable: parent.tableName, column, name });
+        // A required column cannot be set to NULL: `ON DELETE SET NULL` on a NOT NULL
+    // column made every delete of a parent that had children fail with a
+    // not-null violation naming the child's column. RESTRICT refuses it for the
+    // right reason; only an optional reference is cleared.
+    const onDelete = attribute.required ? "RESTRICT" : "SET NULL";
+    constraints.push({
+      childTable: child.tableName,
+      parentTable: parent.tableName,
+      column,
+      name,
+      onDelete,
+    });
   }
   return constraints;
 }

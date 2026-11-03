@@ -2624,8 +2624,11 @@ function findRetiredMoves(source, stateFieldOf) {
   const sections = [];
   const retiredSagas = new Set;
   for (let i = 0;i < lines.length; i++) {
-    const saga = SAGA.exec(lines[i].trim());
+    const trimmedLine = lines[i].trim();
+    const saga = SAGA.exec(trimmedLine);
     if (!saga)
+      continue;
+    if (/\bstatus:\s*\S/.test(trimmedLine))
       continue;
     const [, name = "", entity = ""] = saga;
     const field = stateFieldOf(entity);

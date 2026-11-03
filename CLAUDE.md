@@ -65,7 +65,7 @@ FIRST, before any other tool. When in doubt, invoke the skill.
 | Design system / plan review | `/design-consultation` or `/plan-design-review` |
 | Full review pipeline | `/autoplan` |
 | Bugs / errors | `/investigate` |
-| QA / testing site behavior | `/qa` or `/qa-only` |
+| **Any QA / testing request** (modelling tool, generated app, recent changes) | `qa-lifecycle-workflows` — **mandatory**; never `/qa` or `/qa-only` |
 | Code review / diff check | `/review` |
 | Visual polish | `/design-review` |
 | Ship / deploy / PR | `/ship` or `/land-and-deploy` |
@@ -81,7 +81,7 @@ FIRST, before any other tool. When in doubt, invoke the skill.
 | Build and test a workflow in a generated app, browser only | `browser-workflow-builder` |
 | Write a new EML model, or change an existing `.mmd` | `model-working-session` |
 | Generate, build or run an application from a model | `generate-and-run-app` |
-| QA lifecycle, workflows, rules, RBAC end-to-end | `qa-lifecycle-workflows` |
+| QA lifecycle, workflows, rules, RBAC end-to-end | `qa-lifecycle-workflows` (same skill — it is the only QA skill) |
 | Before committing, pushing or merging | `ship-checks` |
 
 Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.

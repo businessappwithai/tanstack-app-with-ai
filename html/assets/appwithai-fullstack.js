@@ -15375,14 +15375,21 @@ function buildFkConstraints(busEntities, relationships) {
     if (!parent || !child)
       continue;
     const column = `${parent.tableName.replace(/^bus_/, "")}_id`;
-    const carriesColumn = (child.attributes ?? []).some((attribute) => (attribute.columnName || attribute.name) === column);
-    if (!carriesColumn)
+    const attribute = (child.attributes ?? []).find((candidate) => (candidate.columnName || candidate.name) === column);
+    if (!attribute)
       continue;
     const name = `fk_${child.tableName}_${column}`;
     if (seen.has(name))
       continue;
     seen.add(name);
-    constraints.push({ childTable: child.tableName, parentTable: parent.tableName, column, name });
+    const onDelete = attribute.required ? "RESTRICT" : "SET NULL";
+    constraints.push({
+      childTable: child.tableName,
+      parentTable: parent.tableName,
+      column,
+      name,
+      onDelete
+    });
   }
   return constraints;
 }
@@ -18413,6 +18420,12 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     } catch (_e) {
       console.warn("Admin system configuration page template not found");
     }
+    try {
+      const accessControlsContent = await this.component("src/routes/admin/access-controls.tsx");
+      await writeFile(join(adminDir, "access-controls.tsx"), accessControlsContent);
+    } catch (_e) {
+      console.warn("Admin access controls page template not found");
+    }
     const adminSubdirs = [
       { src: "src/routes/admin/table", dest: "src/routes/admin/table" },
       { src: "src/routes/admin/window", dest: "src/routes/admin/window" },
@@ -18681,6 +18694,28 @@ class BunE2ETestGenerator extends BaseGenerator {
     }
     return found;
   }
+  transforms() {
+    const found = [];
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph;
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode")
+          continue;
+        for (const row of node.content?.rules ?? []) {
+          const column = (row.o5 ?? "").trim().replace(/^'(.*)'$/, "$1");
+          if (row.o1 === "'transform'" && column) {
+            found.push({ tableName: rule.tableName, column });
+          }
+        }
+      }
+    }
+    return found;
+  }
   buildContext(entities, relationships) {
     entities = this.withUniqueTogether(this.withValueCeilings(entities));
     return {
@@ -18709,6 +18744,7 @@ class BunE2ETestGenerator extends BaseGenerator {
         y: report.y ?? ""
       })),
       refusals: this.refusals(),
+      transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
       ...this.accessContext(entities),
       now: new Date().toISOString()
@@ -20612,7 +20648,7 @@ ${contents}
 
   <section id="overview">
     <h2>What this application is</h2>
-${options.description && options.description !== "A generated full-stack application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
+${options.description && options.description !== "Generated application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
 ` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${model.categories.length ? `, grouped into ${model.categories.length} areas of the business` : ""}. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated from the same description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
 ${model.categories.length ? `    <table>
@@ -22920,8 +22956,11 @@ function findRetiredMoves(source, stateFieldOf) {
   const sections = [];
   const retiredSagas = new Set;
   for (let i = 0;i < lines.length; i++) {
-    const saga = SAGA.exec(lines[i].trim());
+    const trimmedLine = lines[i].trim();
+    const saga = SAGA.exec(trimmedLine);
     if (!saga)
+      continue;
+    if (/\bstatus:\s*\S/.test(trimmedLine))
       continue;
     const [, name = "", entity = ""] = saga;
     const field = stateFieldOf(entity);

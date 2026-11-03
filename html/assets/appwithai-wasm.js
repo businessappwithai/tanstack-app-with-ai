@@ -8713,8 +8713,11 @@ function findRetiredMoves(source, stateFieldOf) {
   const sections = [];
   const retiredSagas = new Set;
   for (let i = 0;i < lines.length; i++) {
-    const saga = SAGA.exec(lines[i].trim());
+    const trimmedLine = lines[i].trim();
+    const saga = SAGA.exec(trimmedLine);
     if (!saga)
+      continue;
+    if (/\bstatus:\s*\S/.test(trimmedLine))
       continue;
     const [, name = "", entity = ""] = saga;
     const field = stateFieldOf(entity);
@@ -17859,6 +17862,13 @@ export function busRoutes(model) {
       if (!(error instanceof SagaFailure)) throw error;
       // The rollback took the failed run with it; put it back for Run History.
       await recordFailedSaga(db, entity, current, error, user);
+      // Write the failure reason so the form can show it beside the action buttons.
+      try {
+        await db.query(
+          \`UPDATE \${ident(entity.tableName)} SET doc_status_message = $1 WHERE id = $2\`,
+          [error.reason ?? error.message, params.id]
+        );
+      } catch (_) { /* best effort */ }
       return json(
         {
           statusCode: 422,
@@ -28416,7 +28426,7 @@ function reportActions(panel, report, { user, entities, reload }) {
 }
 `
 });
-var RUNTIME_BYTES = 678646;
+var RUNTIME_BYTES = 678960;
 
 // packages/core/src/types/bus-entity.types.ts
 function attributeTypeToReferenceId(type) {
@@ -30587,7 +30597,7 @@ ${contents}
 
   <section id="overview">
     <h2>What this application is</h2>
-${options.description && options.description !== "A generated full-stack application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
+${options.description && options.description !== "Generated application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
 ` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${model.categories.length ? `, grouped into ${model.categories.length} areas of the business` : ""}. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated from the same description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
 ${model.categories.length ? `    <table>

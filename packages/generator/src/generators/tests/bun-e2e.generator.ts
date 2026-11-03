@@ -318,6 +318,38 @@ export class BunE2ETestGenerator extends BaseGenerator {
     return found;
   }
 
+  /**
+   * Every column a compiled `transform` rule overwrites after a write.
+   *
+   * A suite that stores a distinctive value in such a column and reads it back
+   * is asserting against the rule, not the API: `stampCashReference` rewrites
+   * `reference` on every cash payment, so the text-search case never found its
+   * needle. The harness keeps free-text probes off these columns.
+   */
+  private transforms(): Array<{ tableName: string; column: string }> {
+    const found: Array<{ tableName: string; column: string }> = [];
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph: {
+        nodes?: Array<{ type?: string; content?: { rules?: Array<Record<string, string>> } }>;
+      };
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode") continue;
+        for (const row of node.content?.rules ?? []) {
+          const column = (row.o5 ?? "").trim().replace(/^'(.*)'$/, "$1");
+          if (row.o1 === "'transform'" && column) {
+            found.push({ tableName: rule.tableName, column });
+          }
+        }
+      }
+    }
+    return found;
+  }
+
   // ── context ───────────────────────────────────────────────────────────────
 
   private buildContext(
@@ -353,6 +385,7 @@ export class BunE2ETestGenerator extends BaseGenerator {
         y: report.y ?? "",
       })),
       refusals: this.refusals(),
+      transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
       ...this.accessContext(entities),
       now: new Date().toISOString(),
