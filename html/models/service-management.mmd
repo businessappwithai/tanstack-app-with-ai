@@ -1,0 +1,2238 @@
+%%meta name: Unified Salesforce Service Management System
+%%meta kind: erd
+%%meta version: 1.0.0
+%%enum TenantStatus: onboarding, active, suspended, closed
+%%enum ActiveStatus: draft, active, inactive, retired
+%%enum UserType: employee, contractor, partner, administrator
+%%enum UserStatus: invited, active, locked, suspended, terminated
+%%enum RoleName: service_agent, service_manager, knowledge_manager, incident_manager, change_manager, dispatcher, field_technician, inventory_manager, workforce_manager, quality_manager, integration_admin, security_admin, ai_governor, customer
+%%enum AccountTier: standard, premium, strategic
+%%enum AccountStatus: prospect, active, on_hold, closed
+%%enum ChannelType: email, voice, chat, messaging, social, web, portal, api
+%%enum AddressType: billing, service, shipping, correspondence
+%%enum ProductType: equipment, subscription, service, spare_part
+%%enum AssetStatus: ordered, installed, active, suspended, retired, returned
+%%enum CoverageLevel: parts, labour, parts_and_labour, replacement, comprehensive
+%%enum WarrantyStatus: pending, active, expired, suspended, void
+%%enum ContractStatus: draft, pending_approval, active, expiring, expired, terminated
+%%enum EntitlementStatus: draft, active, exhausted, expired, suspended
+%%enum Priority: low, medium, high, critical
+%%enum QueueType: case, conversation, voice, field_work, approval
+%%enum AvailabilityType: available, existing_work_only, unavailable
+%%enum RoutingModel: least_active, most_available, skills_based, priority_based, external
+%%enum CaseStatus: new, assigned, in_progress, waiting_customer, waiting_internal, resolved, closed, reopened, cancelled
+%%enum DataClassification: public, internal, confidential, restricted
+%%enum ParticipantRole: requester, decision_maker, observer, specialist, approver
+%%enum MilestoneType: first_response, next_response, resolution, onsite_arrival
+%%enum MilestoneStatus: active, paused, met, breached, cancelled
+%%enum ArticleType: faq, procedure, troubleshooting, policy, known_error
+%%enum ArticleStatus: draft, review, approved, published, retired, rejected
+%%enum Severity: sev1, sev2, sev3, sev4
+%%enum IncidentStatus: detected, triaged, investigating, mitigating, monitoring, restored, review, closed
+%%enum ProblemStatus: identified, investigating, known_error, remediation_planned, resolved, closed
+%%enum ChangeType: standard, normal, emergency
+%%enum RiskLevel: low, medium, high, critical
+%%enum ChangeStatus: draft, assessment, approval, scheduled, implementing, validating, completed, failed, rolled_back, cancelled
+%%enum SwarmStatus: forming, active, blocked, resolved, dissolved
+%%enum MemberStatus: invited, accepted, declined, active, released
+%%enum ConversationStatus: waiting, active, transferred, ended, abandoned
+%%enum SenderType: customer, agent, bot, system
+%%enum DeliveryStatus: queued, sent, delivered, read, failed, bounced
+%%enum BotSessionStatus: active, waiting, handed_off, completed, failed
+%%enum SurveyType: case_closure, appointment, customer_effort, relationship
+%%enum Sentiment: positive, neutral, negative, mixed
+%%enum ResourceType: employee, contractor, crew, equipment
+%%enum ResourceStatus: available, unavailable, leave, inactive
+%%enum WorkOrderStatus: draft, planned, scheduled, dispatched, in_progress, completed, closed, cancelled
+%%enum AppointmentStatus: requested, scheduled, dispatched, en_route, onsite, completed, cannot_complete, cancelled
+%%enum AssignmentRole: primary, assistant, crew_lead, equipment
+%%enum LocationType: warehouse, depot, van, customer_site, quarantine
+%%enum ProductRequestStatus: draft, submitted, approved, reserved, partially_fulfilled, fulfilled, cancelled
+%%enum ReturnStatus: requested, authorised, in_transit, received, inspecting, disposed, closed, cancelled
+%%enum ReturnReason: defective, wrong_item, excess, repair, replacement, loaner_return
+%%enum Disposition: restock, repair, refurbish, scrap, vendor_return, customer_return
+%%enum ShiftType: productive, training, meeting, leave, on_call
+%%enum ShiftStatus: proposed, published, accepted, changed, completed, cancelled
+%%enum QualityStatus: assigned, scored, disputed, calibration, final
+%%enum IntegrationType: rest, event, telephony, email, identity, data
+%%enum AuthenticationType: oauth2, mutual_tls, api_key, basic, signed_event, none
+%%enum EventStatus: pending, processing, succeeded, retrying, dead_lettered, cancelled
+%%enum AuditAction: view, export, create, update, delete, approve, reject, login, permission_change
+%%enum ConsentPurpose: service_updates, marketing, recording, analytics, ai_processing
+%%enum ConsentStatus: pending, granted, denied, withdrawn, expired
+%%enum AiAgentType: employee_assistant, customer_agent, routing_agent, operations_agent
+%%enum AiAgentStatus: draft, testing, approved, active, suspended, retired
+%%enum AiOutcome: accepted, edited, rejected, escalated, blocked
+%%enum ContactRequestStatus: queued, assigned, completed, expired, cancelled
+%%enum AgentWorkStatus: pending, offered, accepted, declined, active, completed, cancelled
+%%enum SkillType: product, language, technical, regulatory, channel
+%%enum VoiceCallStatus: offered, ringing, connected, on_hold, completed, abandoned, failed
+%%enum KnowledgeUsage: suggested, viewed, attached, sent, resolved
+%%enum ApprovalType: change, emergency_change, return_exception, knowledge_publish, ai_deployment
+%%enum ApprovalStatus: pending, approved, rejected, withdrawn, expired
+%%enum ConfigurationType: business_service, application, server, database, network, device
+%%enum EnvironmentType: production, test, development, shared
+%%enum ConfigurationItemStatus: planned, active, degraded, maintenance, retired
+%%enum ServiceRequestType: information, access, equipment, software, standard_service
+%%enum ServiceRequestStatus: submitted, approval, approved, fulfilling, completed, closed, rejected, cancelled
+%%enum ReleaseStatus: planning, approval, scheduled, deploying, validating, completed, failed, rolled_back, cancelled
+%%enum QuestionType: rating, single_choice, multiple_choice, text, nps
+%%enum SurveyInvitationStatus: queued, sent, opened, completed, expired, bounced
+erDiagram
+    Tenant {
+      string id PK
+      string name
+      string region
+      string status
+    }
+    BusinessUnit {
+      string id PK
+      string name
+      string tenant_id FK
+      string timezone
+      string status
+    }
+    User {
+      string id PK
+      string name
+      email email UK
+      string business_unit_id FK OPTIONAL
+      string presence_status_id FK OPTIONAL
+      string user_type
+      string status
+    }
+    RoleAssignment {
+      string id PK
+      string user_id FK
+      string business_unit_id FK OPTIONAL
+      string role_name
+      date valid_from
+      date valid_until OPTIONAL
+    }
+    Account {
+      string id PK
+      string name
+      string tenant_id FK
+      string account_number UK
+      string tier
+      string status
+    }
+    Contact {
+      string id PK
+      string name
+      string account_id FK
+      email email
+      phone mobile OPTIONAL
+      string preferred_channel
+    }
+    Address {
+      string id PK
+      string name
+      string account_id FK
+      string address_type
+      string city
+      string country_code
+    }
+    Product {
+      string id PK
+      string name
+      string product_code UK
+      string product_type
+      boolean serviceable
+      string status
+    }
+    Asset {
+      string id PK
+      string name
+      string account_id FK
+      string product_id FK
+      string serial_number UK
+      date installation_date OPTIONAL
+      string status
+    }
+    Warranty {
+      string id PK
+      string name
+      string asset_id FK
+      date start_date
+      date end_date
+      string coverage_level
+      string status
+    }
+    ServiceContract {
+      string id PK
+      string name
+      string account_id FK
+      date start_date
+      date end_date
+      decimal annual_value
+      string status
+    }
+    Entitlement {
+      string id PK
+      string name
+      string service_contract_id FK OPTIONAL
+      string account_id FK
+      string milestone_policy_id FK
+      integer case_limit OPTIONAL
+      string status
+    }
+    MilestonePolicy {
+      string id PK
+      string name
+      integer first_response_minutes
+      integer resolution_minutes
+      string priority
+      boolean pause_on_customer
+    }
+    ServiceChannel {
+      string id PK
+      string name
+      string channel_type
+      string address
+      string business_unit_id FK
+      string status
+    }
+    Queue {
+      string id PK
+      string name
+      string business_unit_id FK
+      string queue_type
+      integer maximum_wait_minutes
+      string status
+    }
+    PresenceStatus {
+      string id PK
+      string name
+      string availability
+      integer capacity_percent
+      boolean productive
+    }
+    RoutingConfiguration {
+      string id PK
+      string name
+      string queue_id FK
+      string routing_model
+      integer capacity_weight
+      integer priority_weight
+      string status
+    }
+    Case {
+      string id PK
+      string name
+      string case_number UK
+      string account_id FK
+      string contact_id FK
+      string asset_id FK OPTIONAL
+      string entitlement_id FK OPTIONAL
+      string queue_id FK
+      string owner_id FK OPTIONAL
+      string origin
+      string priority
+      string status
+      text description
+      datetime closed_at OPTIONAL
+    }
+    CaseComment {
+      string id PK
+      string case_id FK
+      string author_id FK
+      text body
+      boolean public
+    }
+    CaseAttachment {
+      string id PK
+      string case_id FK
+      string file_name
+      url storage_url
+      string classification
+    }
+    CaseParticipant {
+      string id PK
+      string case_id FK
+      string contact_id FK OPTIONAL
+      string user_id FK OPTIONAL
+      string participant_role
+    }
+    CaseMilestone {
+      string id PK
+      string case_id FK
+      string milestone_type
+      datetime target_at
+      datetime completed_at OPTIONAL
+      string status
+    }
+    KnowledgeArticle {
+      string id PK
+      string name
+      string article_number UK
+      string article_type
+      string owner_id FK
+      string status
+    }
+    KnowledgeVersion {
+      string id PK
+      string knowledge_article_id FK
+      integer version_number
+      text summary
+      text content
+      string language_code
+    }
+    Incident {
+      string id PK
+      string name
+      string major_incident_number UK
+      string owner_id FK
+      string severity
+      string status
+      text impact_statement
+    }
+    Problem {
+      string id PK
+      string name
+      string owner_id FK
+      string priority
+      string status
+      text root_cause OPTIONAL
+      text workaround OPTIONAL
+    }
+    ChangeRequest {
+      string id PK
+      string name
+      string problem_id FK OPTIONAL
+      string owner_id FK
+      string change_type
+      string risk_level
+      string status
+      text rollback_plan
+    }
+    Swarm {
+      string id PK
+      string name
+      string case_id FK OPTIONAL
+      string incident_id FK OPTIONAL
+      string lead_id FK
+      string status
+    }
+    SwarmMember {
+      string id PK
+      string swarm_id FK
+      string user_id FK
+      string expertise
+      string member_status
+    }
+    Conversation {
+      string id PK
+      string name
+      string service_channel_id FK
+      string contact_id FK OPTIONAL
+      string case_id FK OPTIONAL
+      string owner_id FK OPTIONAL
+      string status
+    }
+    Message {
+      string id PK
+      string conversation_id FK
+      string sender_type
+      text body
+      string delivery_status
+      datetime sent_at
+    }
+    BotSession {
+      string id PK
+      string name
+      string conversation_id FK
+      string ai_agent_id FK
+      string handoff_reason OPTIONAL
+      string status
+    }
+    Survey {
+      string id PK
+      string name
+      string survey_type
+      integer expiry_days
+      string status
+    }
+    SurveyResponse {
+      string id PK
+      string survey_id FK
+      string case_id FK OPTIONAL
+      string contact_id FK OPTIONAL
+      integer score
+      text comment OPTIONAL
+      string sentiment
+    }
+    ServiceTerritory {
+      string id PK
+      string name
+      string business_unit_id FK
+      string timezone
+      string status
+    }
+    ServiceResource {
+      string id PK
+      string name
+      string user_id FK
+      string service_territory_id FK
+      string resource_type
+      integer daily_capacity_minutes
+      string status
+    }
+    WorkOrder {
+      string id PK
+      string name
+      string work_order_number UK
+      string case_id FK OPTIONAL
+      string asset_id FK OPTIONAL
+      string address_id FK
+      string priority
+      string status
+      text work_summary
+    }
+    WorkOrderLineItem {
+      string id PK
+      string work_order_id FK
+      string product_id FK OPTIONAL
+      text instruction
+      decimal planned_quantity
+      decimal actual_quantity OPTIONAL
+    }
+    ServiceAppointment {
+      string id PK
+      string name
+      string work_order_id FK
+      string service_territory_id FK
+      datetime window_start
+      datetime window_end
+      string status
+    }
+    ResourceAssignment {
+      string id PK
+      string service_appointment_id FK
+      string service_resource_id FK
+      string assignment_role
+      datetime assigned_start
+      datetime assigned_end
+    }
+    Location {
+      string id PK
+      string name
+      string business_unit_id FK
+      string location_type
+      string status
+    }
+    InventoryItem {
+      string id PK
+      string name
+      string location_id FK
+      string product_id FK
+      decimal on_hand_quantity
+      decimal reserved_quantity
+      decimal reorder_point
+    }
+    ProductRequest {
+      string id PK
+      string name
+      string work_order_id FK OPTIONAL
+      string requesting_location_id FK
+      string priority
+      string status
+    }
+    ProductRequestLine {
+      string id PK
+      string product_request_id FK
+      string product_id FK
+      decimal requested_quantity
+      decimal fulfilled_quantity OPTIONAL
+    }
+    ReturnOrder {
+      string id PK
+      string name
+      string return_number UK
+      string account_id FK
+      string case_id FK OPTIONAL
+      string status
+      string return_reason
+    }
+    ReturnOrderLine {
+      string id PK
+      string return_order_id FK
+      string product_id FK
+      string asset_id FK OPTIONAL
+      decimal quantity
+      string disposition
+    }
+    Forecast {
+      string id PK
+      string name
+      string queue_id FK
+      datetime interval_start
+      integer expected_volume
+      decimal expected_handle_minutes
+      integer required_agents
+    }
+    Shift {
+      string id PK
+      string name
+      string user_id FK
+      datetime start_at
+      datetime end_at
+      string shift_type
+      string status
+    }
+    QualityReview {
+      string id PK
+      string name
+      string case_id FK OPTIONAL
+      string conversation_id FK OPTIONAL
+      string user_id FK
+      string reviewed_by_id FK
+      decimal score
+      string status
+    }
+    CoachingSession {
+      string id PK
+      string name
+      string user_id FK
+      string quality_review_id FK OPTIONAL
+      string coached_by_id FK
+      date session_date
+      text action_plan
+    }
+    IntegrationEndpoint {
+      string id PK
+      string name
+      url endpoint_url
+      string integration_type
+      string authentication_type
+      string status
+    }
+    IntegrationEvent {
+      string id PK
+      string name
+      string integration_endpoint_id FK
+      string event_type
+      string correlation_key
+      string status
+      integer attempt_count
+    }
+    AuditEvent {
+      string id PK
+      string name
+      string user_id FK OPTIONAL
+      string entity_name
+      string record_key
+      string action_type
+      json change_detail
+    }
+    Consent {
+      string id PK
+      string name
+      string contact_id FK
+      string purpose
+      string channel_type
+      string status
+      datetime effective_at
+    }
+    AiAgent {
+      string id PK
+      string name
+      string owner_id FK
+      string agent_type
+      string model_name
+      string risk_level
+      string status
+    }
+    AiInteraction {
+      string id PK
+      string name
+      string ai_agent_id FK
+      string case_id FK OPTIONAL
+      string user_id FK OPTIONAL
+      string outcome
+      decimal confidence OPTIONAL
+      text rationale OPTIONAL
+    }
+    BusinessHours {
+      string id PK
+      string name
+      string timezone
+      json weekly_schedule
+      json holiday_calendar
+      string status
+    }
+    ContractLineItem {
+      string id PK
+      string service_contract_id FK
+      string product_id FK
+      string asset_id FK OPTIONAL
+      decimal quantity
+      decimal unit_price
+      date start_date
+      date end_date
+    }
+    ContactRequest {
+      string id PK
+      string name
+      string contact_id FK OPTIONAL
+      string service_channel_id FK
+      string preferred_channel
+      datetime requested_at
+      string status
+    }
+    AgentWork {
+      string id PK
+      string name
+      string queue_id FK
+      string user_id FK
+      string case_id FK OPTIONAL
+      string conversation_id FK OPTIONAL
+      integer capacity_weight
+      string status
+    }
+    Skill {
+      string id PK
+      string name
+      string skill_type
+      string status
+    }
+    SkillRequirement {
+      string id PK
+      string routing_configuration_id FK
+      string skill_id FK
+      integer minimum_level
+      boolean droppable
+      integer drop_after_minutes OPTIONAL
+    }
+    ServiceResourceSkill {
+      string id PK
+      string service_resource_id FK
+      string skill_id FK
+      integer skill_level
+      date valid_until OPTIONAL
+    }
+    EmailMessage {
+      string id PK
+      string name
+      string case_id FK
+      string contact_id FK OPTIONAL
+      email from_address
+      email to_address
+      text body
+      string delivery_status
+    }
+    VoiceCall {
+      string id PK
+      string name
+      string case_id FK OPTIONAL
+      string contact_id FK OPTIONAL
+      string owner_id FK OPTIONAL
+      datetime started_at
+      integer duration_seconds OPTIONAL
+      string status
+    }
+    VoiceCallRecording {
+      string id PK
+      string voice_call_id FK
+      url recording_url
+      integer duration_seconds
+      string classification
+      string consent_status
+    }
+    CaseArticle {
+      string id PK
+      string case_id FK
+      string knowledge_article_id FK
+      boolean helpful
+      string usage_type
+    }
+    DataCategory {
+      string id PK
+      string name
+      string data_category_id FK OPTIONAL
+      string category_group
+      string status
+    }
+    ArticleCategory {
+      string id PK
+      string knowledge_version_id FK
+      string data_category_id FK
+      boolean primary_category
+    }
+    WorkType {
+      string id PK
+      string name
+      string product_id FK OPTIONAL
+      integer estimated_minutes
+      text work_instructions
+      string status
+    }
+    ApprovalRequest {
+      string id PK
+      string name
+      string change_request_id FK OPTIONAL
+      string return_order_id FK OPTIONAL
+      string approved_by_id FK OPTIONAL
+      string approval_type
+      string status
+      text decision_reason OPTIONAL
+    }
+    ConfigurationItem {
+      string id PK
+      string name
+      string asset_id FK OPTIONAL
+      string configuration_type
+      string environment
+      string status
+      string criticality
+    }
+    ServiceRequest {
+      string id PK
+      string name
+      string contact_id FK
+      string owner_id FK OPTIONAL
+      string request_type
+      string priority
+      string status
+    }
+    Release {
+      string id PK
+      string name
+      string change_request_id FK
+      string owner_id FK
+      datetime planned_start
+      datetime planned_end
+      string status
+    }
+    SurveyQuestion {
+      string id PK
+      string survey_id FK
+      string prompt
+      string question_type
+      boolean required
+      integer display_order
+    }
+    SurveyInvitation {
+      string id PK
+      string name
+      string survey_id FK
+      string contact_id FK
+      string case_id FK OPTIONAL
+      datetime expires_at
+      string status
+    }
+  Tenant ||--o{ BusinessUnit : "tenant"
+  BusinessUnit ||--o{ User : "business_unit"
+  PresenceStatus ||--o{ User : "presence_status"
+  User ||--o{ RoleAssignment : "user"
+  BusinessUnit ||--o{ RoleAssignment : "business_unit"
+  Tenant ||--o{ Account : "tenant"
+  Account ||--o{ Contact : "account"
+  Account ||--o{ Address : "account"
+  Account ||--o{ Asset : "account"
+  Product ||--o{ Asset : "product"
+  Asset ||--o{ Warranty : "asset"
+  Account ||--o{ ServiceContract : "account"
+  ServiceContract ||--o{ Entitlement : "service_contract"
+  Account ||--o{ Entitlement : "account"
+  MilestonePolicy ||--o{ Entitlement : "milestone_policy"
+  BusinessUnit ||--o{ ServiceChannel : "business_unit"
+  BusinessUnit ||--o{ Queue : "business_unit"
+  Queue ||--o{ RoutingConfiguration : "queue"
+  Account ||--o{ Case : "account"
+  Contact ||--o{ Case : "contact"
+  Asset ||--o{ Case : "asset"
+  Entitlement ||--o{ Case : "entitlement"
+  Queue ||--o{ Case : "queue"
+  User ||--o{ Case : "owner"
+  Case ||--o{ CaseComment : "case"
+  User ||--o{ CaseComment : "author"
+  Case ||--o{ CaseAttachment : "case"
+  Case ||--o{ CaseParticipant : "case"
+  Contact ||--o{ CaseParticipant : "contact"
+  User ||--o{ CaseParticipant : "user"
+  Case ||--o{ CaseMilestone : "case"
+  User ||--o{ KnowledgeArticle : "owner"
+  KnowledgeArticle ||--o{ KnowledgeVersion : "knowledge_article"
+  User ||--o{ Incident : "owner"
+  User ||--o{ Problem : "owner"
+  Problem ||--o{ ChangeRequest : "problem"
+  User ||--o{ ChangeRequest : "owner"
+  Case ||--o{ Swarm : "case"
+  Incident ||--o{ Swarm : "incident"
+  User ||--o{ Swarm : "lead"
+  Swarm ||--o{ SwarmMember : "swarm"
+  User ||--o{ SwarmMember : "user"
+  ServiceChannel ||--o{ Conversation : "service_channel"
+  Contact ||--o{ Conversation : "contact"
+  Case ||--o{ Conversation : "case"
+  User ||--o{ Conversation : "owner"
+  Conversation ||--o{ Message : "conversation"
+  Conversation ||--o{ BotSession : "conversation"
+  AiAgent ||--o{ BotSession : "ai_agent"
+  Survey ||--o{ SurveyResponse : "survey"
+  Case ||--o{ SurveyResponse : "case"
+  Contact ||--o{ SurveyResponse : "contact"
+  BusinessUnit ||--o{ ServiceTerritory : "business_unit"
+  User ||--o{ ServiceResource : "user"
+  ServiceTerritory ||--o{ ServiceResource : "service_territory"
+  Case ||--o{ WorkOrder : "case"
+  Asset ||--o{ WorkOrder : "asset"
+  Address ||--o{ WorkOrder : "address"
+  WorkOrder ||--o{ WorkOrderLineItem : "work_order"
+  Product ||--o{ WorkOrderLineItem : "product"
+  WorkOrder ||--o{ ServiceAppointment : "work_order"
+  ServiceTerritory ||--o{ ServiceAppointment : "service_territory"
+  ServiceAppointment ||--o{ ResourceAssignment : "service_appointment"
+  ServiceResource ||--o{ ResourceAssignment : "service_resource"
+  BusinessUnit ||--o{ Location : "business_unit"
+  Location ||--o{ InventoryItem : "location"
+  Product ||--o{ InventoryItem : "product"
+  WorkOrder ||--o{ ProductRequest : "work_order"
+  Location ||--o{ ProductRequest : "requesting_location"
+  ProductRequest ||--o{ ProductRequestLine : "product_request"
+  Product ||--o{ ProductRequestLine : "product"
+  Account ||--o{ ReturnOrder : "account"
+  Case ||--o{ ReturnOrder : "case"
+  ReturnOrder ||--o{ ReturnOrderLine : "return_order"
+  Product ||--o{ ReturnOrderLine : "product"
+  Asset ||--o{ ReturnOrderLine : "asset"
+  Queue ||--o{ Forecast : "queue"
+  User ||--o{ Shift : "user"
+  Case ||--o{ QualityReview : "case"
+  Conversation ||--o{ QualityReview : "conversation"
+  User ||--o{ QualityReview : "user"
+  User ||--o{ CoachingSession : "user"
+  QualityReview ||--o{ CoachingSession : "quality_review"
+  IntegrationEndpoint ||--o{ IntegrationEvent : "integration_endpoint"
+  User ||--o{ AuditEvent : "user"
+  Contact ||--o{ Consent : "contact"
+  User ||--o{ AiAgent : "owner"
+  AiAgent ||--o{ AiInteraction : "ai_agent"
+  Case ||--o{ AiInteraction : "case"
+  User ||--o{ AiInteraction : "user"
+  ServiceContract ||--o{ ContractLineItem : "service_contract"
+  Product ||--o{ ContractLineItem : "product"
+  Asset ||--o{ ContractLineItem : "asset"
+  Contact ||--o{ ContactRequest : "contact"
+  ServiceChannel ||--o{ ContactRequest : "service_channel"
+  Queue ||--o{ AgentWork : "queue"
+  User ||--o{ AgentWork : "user"
+  Case ||--o{ AgentWork : "case"
+  Conversation ||--o{ AgentWork : "conversation"
+  RoutingConfiguration ||--o{ SkillRequirement : "routing_configuration"
+  Skill ||--o{ SkillRequirement : "skill"
+  ServiceResource ||--o{ ServiceResourceSkill : "service_resource"
+  Skill ||--o{ ServiceResourceSkill : "skill"
+  Case ||--o{ EmailMessage : "case"
+  Contact ||--o{ EmailMessage : "contact"
+  Case ||--o{ VoiceCall : "case"
+  Contact ||--o{ VoiceCall : "contact"
+  User ||--o{ VoiceCall : "owner"
+  VoiceCall ||--o{ VoiceCallRecording : "voice_call"
+  Case ||--o{ CaseArticle : "case"
+  KnowledgeArticle ||--o{ CaseArticle : "knowledge_article"
+  DataCategory ||--o{ DataCategory : "data_category"
+  KnowledgeVersion ||--o{ ArticleCategory : "knowledge_version"
+  DataCategory ||--o{ ArticleCategory : "data_category"
+  Product ||--o{ WorkType : "product"
+  ChangeRequest ||--o{ ApprovalRequest : "change_request"
+  ReturnOrder ||--o{ ApprovalRequest : "return_order"
+  User ||--o{ ApprovalRequest : "approved_by"
+  Asset ||--o{ ConfigurationItem : "asset"
+  Contact ||--o{ ServiceRequest : "contact"
+  User ||--o{ ServiceRequest : "owner"
+  ChangeRequest ||--o{ Release : "change_request"
+  User ||--o{ Release : "owner"
+  Survey ||--o{ SurveyQuestion : "survey"
+  Survey ||--o{ SurveyInvitation : "survey"
+  Contact ||--o{ SurveyInvitation : "contact"
+  Case ||--o{ SurveyInvitation : "case"
+%%entity Tenant help: A separately governed service organisation whose data, users, policies, and reporting are isolated from every other tenant.
+%%entity Tenant icon: Building2
+%%field Tenant.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Tenant.region help: The data-residency region whose security, retention, and processing rules govern this tenant.
+%%field Tenant.status enum: TenantStatus
+%%field Tenant.status help: Whether this tenant is onboarding, active, suspended, or closed.
+%%section entity: Tenant; name: Tenant workspace; help: Complete the operational facts used to route, fulfil, govern, and report this tenant without overwriting its history.; rows: name, region | status
+%%entity BusinessUnit help: An operating division, brand, region, or service centre with its own queues, hours, managers, and performance targets.
+%%entity BusinessUnit icon: Network
+%%field BusinessUnit.name help: The concise business label agents use to find this record in lookups and lists.
+%%field BusinessUnit.tenant_id help: The tenant that owns this operating unit and its service records.
+%%field BusinessUnit.timezone help: The IANA time zone used for working hours, routing, milestones, and reports.
+%%field BusinessUnit.status enum: ActiveStatus
+%%field BusinessUnit.status help: Whether this operating unit may receive and process service work.
+%%section entity: BusinessUnit; name: BusinessUnit workspace; help: Complete the operational facts used to route, fulfil, govern, and report this businessunit without overwriting its history.; rows: name, tenant_id | timezone, status
+%%entity User help: A named employee, contractor, partner, or administrator who signs in, owns work, approves decisions, or appears in the audit trail.
+%%entity User icon: UserCog
+%%field User.name help: The concise business label agents use to find this record in lookups and lists.
+%%field User.email help: The verified sign-in and notification address for the employee or partner user.
+%%field User.business_unit_id help: The operating unit whose queues and records this user normally works.
+%%field User.presence_status_id help: The current workforce availability state used by routing and capacity.
+%%field User.user_type enum: UserType
+%%field User.user_type help: The workforce relationship that controls available permissions and licensing.
+%%field User.status enum: UserStatus
+%%field User.status help: Whether sign-in, assignment, and record actions are permitted.
+%%section entity: User; name: User workspace; help: Complete the operational facts used to route, fulfil, govern, and report this user without overwriting its history.; rows: name, email | business_unit_id, presence_status_id | user_type, status
+%%entity RoleAssignment help: A time-bounded grant connecting a user to a governed service role, optionally limited to one operating unit.
+%%entity RoleAssignment icon: BadgeCheck
+%%field RoleAssignment.user_id help: The person receiving the role for the stated scope.
+%%field RoleAssignment.business_unit_id help: The operating unit that limits this assignment; blank means tenant-wide.
+%%field RoleAssignment.role_name enum: RoleName
+%%field RoleAssignment.role_name help: The governed job role used by access rules, approvals, and reporting.
+%%field RoleAssignment.valid_from help: The first business date on which the assignment may grant access.
+%%field RoleAssignment.valid_until help: The last business date of access; blank means it remains active until revoked.
+%%section entity: RoleAssignment; name: RoleAssignment workspace; help: Complete the operational facts used to route, fulfil, govern, and report this roleassignment without overwriting its history.; rows: user_id, business_unit_id | role_name, valid_from | valid_until
+%%entity Account help: A customer organisation or household whose contacts, products, contracts, entitlements, cases, and service history are managed together.
+%%entity Account icon: Landmark
+%%field Account.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Account.tenant_id help: The tenant responsible for this customer relationship.
+%%field Account.account_number help: The stable customer number shared with billing, commerce, and integration systems.
+%%field Account.tier enum: AccountTier
+%%field Account.tier help: The commercial service tier used for entitlement, routing, and priority decisions.
+%%field Account.status enum: AccountStatus
+%%field Account.status help: Whether service may be delivered to this customer.
+%%section entity: Account; name: Account workspace; help: Complete the operational facts used to route, fulfil, govern, and report this account without overwriting its history.; rows: name, tenant_id | account_number, tier | status
+%%entity Contact help: A customer, consumer, or authorised representative who requests help and receives service communications.
+%%entity Contact icon: ContactRound
+%%field Contact.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Contact.account_id help: The customer account this person represents for service purposes.
+%%field Contact.email help: The address used for case correspondence and identity verification.
+%%field Contact.mobile help: The verified telephone number used for callbacks, messaging, and urgent updates.
+%%field Contact.preferred_channel enum: ChannelType
+%%field Contact.preferred_channel help: The channel this person prefers when an agent replies.
+%%section entity: Contact; name: Contact workspace; help: Complete the operational facts used to route, fulfil, govern, and report this contact without overwriting its history.; rows: name, account_id | email, mobile | preferred_channel
+%%entity Address help: A reusable customer location retained separately so service, shipping, billing, and historic addresses are not overwritten.
+%%entity Address icon: MapPinHouse
+%%field Address.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Address.account_id help: The customer account that owns and validates this service location.
+%%field Address.address_type enum: AddressType
+%%field Address.address_type help: Whether the location is for billing, service delivery, shipping, or correspondence.
+%%field Address.city help: The locality used for territory matching and travel planning.
+%%field Address.country_code help: The ISO country code used for residency, tax, and regulatory decisions.
+%%section entity: Address; name: Address workspace; help: Complete the operational facts used to route, fulfil, govern, and report this address without overwriting its history.; rows: name, account_id | address_type, city | country_code
+%%entity Product help: A sellable or serviceable catalogue item that gives assets, parts, warranties, and work instructions a consistent identity.
+%%entity Product icon: PackageSearch
+%%field Product.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Product.product_code help: The stable catalogue code used by sales, installed assets, parts, and warranties.
+%%field Product.product_type enum: ProductType
+%%field Product.product_type help: Whether the catalogue item is equipment, subscription, service, or spare part.
+%%field Product.serviceable help: When enabled, cases and work orders may diagnose and repair this product.
+%%field Product.status enum: ActiveStatus
+%%field Product.status help: Whether the item is active for new service transactions.
+%%section entity: Product; name: Product workspace; help: Complete the operational facts used to route, fulfil, govern, and report this product without overwriting its history.; rows: name, product_code | product_type, serviceable | status
+%%entity Asset help: A specific product instance installed, subscribed to, or owned by a customer and tracked through its service life.
+%%entity Asset icon: Cpu
+%%field Asset.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Asset.account_id help: The customer currently entitled to receive service for this installed item.
+%%field Asset.product_id help: The catalogue product that defines the asset model and service capabilities.
+%%field Asset.serial_number help: The manufacturer serial number used to identify the physical or licensed instance.
+%%field Asset.installation_date help: The date service responsibility began at the customer site.
+%%field Asset.status enum: AssetStatus
+%%field Asset.status help: The operational service state of the installed item.
+%%section entity: Asset; name: Asset workspace; help: Complete the operational facts used to route, fulfil, govern, and report this asset without overwriting its history.; rows: name, account_id | product_id, serial_number | installation_date, status
+%%entity Warranty help: A manufacturer or seller promise defining the dates and service costs covered for one asset.
+%%entity Warranty icon: ShieldCheck
+%%field Warranty.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Warranty.asset_id help: The installed asset whose covered defects and dates are governed here.
+%%field Warranty.start_date help: The first date on which eligible service costs may be claimed.
+%%field Warranty.end_date help: The last covered date before contract or billable service is required.
+%%field Warranty.coverage_level enum: CoverageLevel
+%%field Warranty.coverage_level help: The parts, labour, travel, or replacement commitment included.
+%%field Warranty.status enum: WarrantyStatus
+%%field Warranty.status help: Whether coverage is pending, active, expired, suspended, or void.
+%%section entity: Warranty; name: Warranty workspace; help: Complete the operational facts used to route, fulfil, govern, and report this warranty without overwriting its history.; rows: name, asset_id | start_date, end_date | coverage_level, status
+%%entity ServiceContract help: A commercial agreement defining purchased support dates, value, renewal, and the entitlements available to an account.
+%%entity ServiceContract icon: FileSignature
+%%field ServiceContract.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ServiceContract.account_id help: The customer whose purchased support terms are recorded here.
+%%field ServiceContract.start_date help: The contractual start of paid service availability.
+%%field ServiceContract.end_date help: The contractual end after which renewal or billable service applies.
+%%field ServiceContract.annual_value help: The contracted annual value in the agreement currency for service reporting.
+%%field ServiceContract.status enum: ContractStatus
+%%field ServiceContract.status help: The commercial lifecycle of the signed service agreement.
+%%section entity: ServiceContract; name: ServiceContract workspace; help: Complete the operational facts used to route, fulfil, govern, and report this servicecontract without overwriting its history.; rows: name, account_id | start_date, end_date | annual_value, status
+%%entity Entitlement help: A customer-specific right to receive a defined level and quantity of support under a contract or exception.
+%%entity Entitlement icon: TicketCheck
+%%field Entitlement.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Entitlement.service_contract_id help: The commercial agreement funding this service promise; blank supports standalone entitlements.
+%%field Entitlement.account_id help: The customer allowed to invoke these service terms.
+%%field Entitlement.milestone_policy_id help: The response and resolution clock policy applied to eligible cases.
+%%field Entitlement.case_limit help: The maximum cases allowed in the entitlement period; blank means unlimited.
+%%field Entitlement.status enum: EntitlementStatus
+%%field Entitlement.status help: Whether agents may apply this entitlement to new service work.
+%%section entity: Entitlement; name: Entitlement workspace; help: Complete the operational facts used to route, fulfil, govern, and report this entitlement without overwriting its history.; rows: name, service_contract_id | account_id, milestone_policy_id | case_limit, status
+%%entity MilestonePolicy help: A reusable SLA clock definition for first response and resolution, including priority and permitted pauses.
+%%entity MilestonePolicy icon: TimerReset
+%%field MilestonePolicy.name help: The concise business label agents use to find this record in lookups and lists.
+%%field MilestonePolicy.first_response_minutes help: The working-time allowance before the first meaningful agent response is breached.
+%%field MilestonePolicy.resolution_minutes help: The working-time allowance before the case must be resolved.
+%%field MilestonePolicy.priority enum: Priority
+%%field MilestonePolicy.priority help: The case priority for which these clock targets apply.
+%%field MilestonePolicy.pause_on_customer help: When enabled, clocks stop while a documented customer response is awaited.
+%%section entity: MilestonePolicy; name: MilestonePolicy workspace; help: Complete the operational facts used to route, fulfil, govern, and report this milestonepolicy without overwriting its history.; rows: name, first_response_minutes | resolution_minutes, priority | pause_on_customer
+%%entity ServiceChannel help: A configured email, voice, chat, messaging, social, web, or API entry point through which customer work arrives.
+%%entity ServiceChannel icon: MessagesSquare
+%%field ServiceChannel.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ServiceChannel.channel_type enum: ChannelType
+%%field ServiceChannel.channel_type help: The interaction medium accepted through this configured entry point.
+%%field ServiceChannel.address help: The email address, phone number, handle, or endpoint customers use to reach it.
+%%field ServiceChannel.business_unit_id help: The operating unit accountable for conversations entering through this channel.
+%%field ServiceChannel.status enum: ActiveStatus
+%%field ServiceChannel.status help: Whether new work may enter from this channel.
+%%section entity: ServiceChannel; name: ServiceChannel workspace; help: Complete the operational facts used to route, fulfil, govern, and report this servicechannel without overwriting its history.; rows: name, channel_type | address, business_unit_id | status
+%%entity Queue help: A managed backlog that holds eligible service work until routing assigns it to an available user.
+%%entity Queue icon: ListTodo
+%%field Queue.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Queue.business_unit_id help: The operating unit that owns this backlog and its staffing commitments.
+%%field Queue.queue_type enum: QueueType
+%%field Queue.queue_type help: The work family this queue may receive.
+%%field Queue.maximum_wait_minutes help: The alert threshold for the oldest unaccepted item in this queue.
+%%field Queue.status enum: ActiveStatus
+%%field Queue.status help: Whether routing may place new work into the queue.
+%%section entity: Queue; name: Queue workspace; help: Complete the operational facts used to route, fulfil, govern, and report this queue without overwriting its history.; rows: name, business_unit_id | queue_type, maximum_wait_minutes | status
+%%entity PresenceStatus help: A workforce availability state used by omnichannel routing, capacity, adherence, and occupancy reporting.
+%%entity PresenceStatus icon: RadioTower
+%%field PresenceStatus.name help: The concise business label agents use to find this record in lookups and lists.
+%%field PresenceStatus.availability enum: AvailabilityType
+%%field PresenceStatus.availability help: Whether this presence state permits new work, existing work only, or no work.
+%%field PresenceStatus.capacity_percent help: The percentage of normal routing capacity available while this state is selected.
+%%field PresenceStatus.productive help: Whether time in this state counts as productive workforce activity.
+%%section entity: PresenceStatus; name: PresenceStatus workspace; help: Complete the operational facts used to route, fulfil, govern, and report this presencestatus without overwriting its history.; rows: name, availability | capacity_percent, productive
+%%entity RoutingConfiguration help: The capacity, priority, skills, and assignment strategy used to distribute queued work to eligible users.
+%%entity RoutingConfiguration icon: Route
+%%field RoutingConfiguration.name help: The concise business label agents use to find this record in lookups and lists.
+%%field RoutingConfiguration.queue_id help: The backlog whose items are evaluated by this routing configuration.
+%%field RoutingConfiguration.routing_model enum: RoutingModel
+%%field RoutingConfiguration.routing_model help: Whether work is pushed by least-active, skills, priority, or external routing.
+%%field RoutingConfiguration.capacity_weight help: The capacity units consumed when one item of this work is assigned.
+%%field RoutingConfiguration.priority_weight help: The relative urgency used when several eligible items await assignment.
+%%field RoutingConfiguration.status enum: ActiveStatus
+%%field RoutingConfiguration.status help: Whether the router may use this configuration.
+%%section entity: RoutingConfiguration; name: RoutingConfiguration workspace; help: Complete the operational facts used to route, fulfil, govern, and report this routingconfiguration without overwriting its history.; rows: name, queue_id | routing_model, capacity_weight | priority_weight, status
+%%entity Case help: The central customer-service request that coordinates ownership, communications, SLA clocks, knowledge, incidents, field work, and resolution.
+%%entity Case icon: CircleHelp
+%%field Case.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Case.case_number help: The customer-facing reference quoted in every conversation and integration.
+%%field Case.account_id help: The customer organisation responsible for the request and its service terms.
+%%field Case.contact_id help: The person who raised the request or is authorised to discuss it.
+%%field Case.asset_id help: The installed item affected by the reported issue.
+%%field Case.entitlement_id help: The service promise and SLA clocks applied to this request.
+%%field Case.queue_id help: The backlog accountable for accepting and progressing the request.
+%%field Case.owner_id help: The user currently responsible for the next service action.
+%%field Case.origin enum: ChannelType
+%%field Case.origin help: The channel through which the request first entered service.
+%%field Case.priority enum: Priority
+%%field Case.priority help: The business urgency used for routing, SLA, and escalation.
+%%field Case.status enum: CaseStatus
+%%field Case.status help: The controlled lifecycle from intake through closure and possible reopening.
+%%field Case.description help: The customer-visible summary of the issue, impact, and requested outcome.
+%%field Case.closed_at help: The moment the agreed resolution was completed and the case locked.
+%%section entity: Case; name: Case workspace; help: Complete the operational facts used to route, fulfil, govern, and report this case without overwriting its history.; rows: name, case_number | account_id, contact_id | asset_id, entitlement_id | queue_id, owner_id | origin, priority | description, closed_at
+%%entity CaseComment help: A timestamped internal or customer-visible update forming the durable working history of a case.
+%%entity CaseComment icon: MessageCircleMore
+%%entity CaseComment parent: Case
+%%field CaseComment.case_id help: The service request whose chronological history includes this note.
+%%field CaseComment.author_id help: The user who recorded the note and is accountable for its accuracy.
+%%field CaseComment.body help: The substantive update, investigation detail, or customer communication retained in the timeline.
+%%field CaseComment.public help: When enabled, the customer may see this comment in the portal or outbound transcript.
+%%section entity: CaseComment; name: CaseComment workspace; help: Complete the operational facts used to route, fulfil, govern, and report this casecomment without overwriting its history.; rows: case_id, author_id | body, public
+%%entity CaseAttachment help: A protected file or image supplied as case evidence, diagnostic material, or proof of resolution.
+%%entity CaseAttachment icon: Paperclip
+%%entity CaseAttachment parent: Case
+%%field CaseAttachment.case_id help: The service request that gives this evidence its context and retention rule.
+%%field CaseAttachment.file_name help: The original document name displayed to agents and customers.
+%%field CaseAttachment.storage_url help: The protected object-store location from which authorised users retrieve the content.
+%%field CaseAttachment.classification enum: DataClassification
+%%field CaseAttachment.classification help: The sensitivity level used for access, malware handling, and retention.
+%%section entity: CaseAttachment; name: CaseAttachment workspace; help: Complete the operational facts used to route, fulfil, govern, and report this caseattachment without overwriting its history.; rows: case_id, file_name | storage_url, classification
+%%entity CaseParticipant help: A customer or workforce participant added to a case for collaboration, visibility, approval, or notifications.
+%%entity CaseParticipant icon: UsersRound
+%%entity CaseParticipant parent: Case
+%%field CaseParticipant.case_id help: The service request on which this person collaborates or receives updates.
+%%field CaseParticipant.contact_id help: The external customer representative participating in the case.
+%%field CaseParticipant.user_id help: The internal employee or partner participating in the case.
+%%field CaseParticipant.participant_role enum: ParticipantRole
+%%field CaseParticipant.participant_role help: The responsibility this participant has for decisions or communication.
+%%section entity: CaseParticipant; name: CaseParticipant workspace; help: Complete the operational facts used to route, fulfil, govern, and report this caseparticipant without overwriting its history.; rows: case_id, contact_id | user_id, participant_role
+%%entity CaseMilestone help: A concrete SLA clock on one case, retaining its calculated deadline, pauses, completion, and breach outcome.
+%%entity CaseMilestone icon: ClockAlert
+%%entity CaseMilestone parent: Case
+%%field CaseMilestone.case_id help: The service request whose contractual clock is measured.
+%%field CaseMilestone.milestone_type enum: MilestoneType
+%%field CaseMilestone.milestone_type help: The promised event being measured, such as first response or resolution.
+%%field CaseMilestone.target_at help: The calculated deadline after working hours, pauses, and entitlement terms.
+%%field CaseMilestone.completed_at help: The time the qualifying event stopped the clock; blank means it remains open.
+%%field CaseMilestone.status enum: MilestoneStatus
+%%field CaseMilestone.status help: Whether the clock is active, paused, met, breached, or cancelled.
+%%section entity: CaseMilestone; name: CaseMilestone workspace; help: Complete the operational facts used to route, fulfil, govern, and report this casemilestone without overwriting its history.; rows: case_id, milestone_type | target_at, completed_at | status
+%%entity KnowledgeArticle help: A governed support answer or procedure that agents, bots, and customers can discover and reuse.
+%%entity KnowledgeArticle icon: BookOpenCheck
+%%field KnowledgeArticle.name help: The concise business label agents use to find this record in lookups and lists.
+%%field KnowledgeArticle.article_number help: The stable reference agents and customers use when citing this knowledge.
+%%field KnowledgeArticle.article_type enum: ArticleType
+%%field KnowledgeArticle.article_type help: The template and governance path for FAQ, procedure, troubleshooting, or policy content.
+%%field KnowledgeArticle.owner_id help: The knowledge manager accountable for accuracy, review, and retirement.
+%%field KnowledgeArticle.status enum: ArticleStatus
+%%field KnowledgeArticle.status help: The editorial lifecycle controlling who may see and use the article.
+%%section entity: KnowledgeArticle; name: KnowledgeArticle workspace; help: Complete the operational facts used to route, fulfil, govern, and report this knowledgearticle without overwriting its history.; rows: name, article_number | article_type, owner_id
+%%entity KnowledgeVersion help: An immutable language-specific revision of a knowledge article retained for approval, publication, rollback, and audit.
+%%entity KnowledgeVersion icon: FileClock
+%%field KnowledgeVersion.knowledge_article_id help: The governed article whose historical content this version preserves.
+%%field KnowledgeVersion.version_number help: The increasing publication revision used to distinguish approved content over time.
+%%field KnowledgeVersion.summary help: The searchable abstract explaining the issue addressed and intended audience.
+%%field KnowledgeVersion.content help: The complete approved answer, procedure, warnings, and validation steps.
+%%field KnowledgeVersion.language_code help: The language and locale used for search, translation, and audience delivery.
+%%section entity: KnowledgeVersion; name: KnowledgeVersion workspace; help: Complete the operational facts used to route, fulfil, govern, and report this knowledgeversion without overwriting its history.; rows: knowledge_article_id, version_number | summary, content | language_code
+%%entity Incident help: A service disruption managed across many customer cases with command, restoration, communications, and post-incident review.
+%%entity Incident icon: Siren
+%%field Incident.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Incident.major_incident_number help: The bridge and communication reference used across affected cases and teams.
+%%field Incident.owner_id help: The incident commander accountable for restoration and stakeholder updates.
+%%field Incident.severity enum: Severity
+%%field Incident.severity help: The operational impact tier governing mobilisation and update cadence.
+%%field Incident.status enum: IncidentStatus
+%%field Incident.status help: The restoration lifecycle from detection through review.
+%%field Incident.impact_statement help: The confirmed customer, service, geography, and business impact communicated to stakeholders.
+%%section entity: Incident; name: Incident workspace; help: Complete the operational facts used to route, fulfil, govern, and report this incident without overwriting its history.; rows: name, major_incident_number | owner_id, severity | impact_statement
+%%entity Problem help: A recurring or significant underlying cause investigated beyond individual incidents and documented with workarounds and permanent fixes.
+%%entity Problem icon: SearchX
+%%field Problem.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Problem.owner_id help: The problem manager accountable for root-cause analysis and permanent remediation.
+%%field Problem.priority enum: Priority
+%%field Problem.priority help: The urgency of removing recurrence based on impact and frequency.
+%%field Problem.status enum: ProblemStatus
+%%field Problem.status help: The investigation lifecycle from identification through known error and closure.
+%%field Problem.root_cause help: The evidence-backed underlying cause confirmed by analysis.
+%%field Problem.workaround help: The safe temporary method agents use until permanent remediation is deployed.
+%%section entity: Problem; name: Problem workspace; help: Complete the operational facts used to route, fulfil, govern, and report this problem without overwriting its history.; rows: name, owner_id | priority, status | root_cause, workaround
+%%entity ChangeRequest help: A controlled production modification with risk, approvals, implementation evidence, validation, and a tested rollback plan.
+%%entity ChangeRequest icon: GitPullRequestArrow
+%%field ChangeRequest.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ChangeRequest.problem_id help: The analysed problem whose permanent fix this controlled change implements.
+%%field ChangeRequest.owner_id help: The change owner accountable for planning, evidence, implementation, and rollback.
+%%field ChangeRequest.change_type enum: ChangeType
+%%field ChangeRequest.change_type help: Whether the change is standard, normal, or emergency and therefore which approval path applies.
+%%field ChangeRequest.risk_level enum: RiskLevel
+%%field ChangeRequest.risk_level help: The assessed likelihood and consequence that determine approvals and controls.
+%%field ChangeRequest.status enum: ChangeStatus
+%%field ChangeRequest.status help: The governed lifecycle from draft through review, deployment, and closure.
+%%field ChangeRequest.rollback_plan help: The tested steps and decision point for restoring the prior service state.
+%%section entity: ChangeRequest; name: ChangeRequest workspace; help: Complete the operational facts used to route, fulfil, govern, and report this changerequest without overwriting its history.; rows: name, problem_id | owner_id, change_type | risk_level, rollback_plan
+%%entity Swarm help: A temporary cross-functional expert team assembled around a difficult case or incident without transferring customer ownership.
+%%entity Swarm icon: Orbit
+%%field Swarm.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Swarm.case_id help: The customer case whose complex issue requires cross-functional expertise.
+%%field Swarm.incident_id help: The major incident whose restoration work this expert group supports.
+%%field Swarm.lead_id help: The user coordinating goals, decisions, updates, and dissolution.
+%%field Swarm.status enum: SwarmStatus
+%%field Swarm.status help: Whether the swarm is forming, active, blocked, resolved, or dissolved.
+%%section entity: Swarm; name: Swarm workspace; help: Complete the operational facts used to route, fulfil, govern, and report this swarm without overwriting its history.; rows: name, case_id | incident_id, lead_id | status
+%%entity SwarmMember help: A specialist invited to a swarm with an explicit expertise need and participation state.
+%%entity SwarmMember icon: UserRoundPlus
+%%entity SwarmMember parent: Swarm
+%%field SwarmMember.swarm_id help: The temporary expert team receiving this contribution.
+%%field SwarmMember.user_id help: The specialist invited to contribute expertise or execute an action.
+%%field SwarmMember.expertise help: The capability or system knowledge for which this member was selected.
+%%field SwarmMember.member_status enum: MemberStatus
+%%field SwarmMember.member_status help: Whether the invitation is pending, accepted, declined, active, or released.
+%%section entity: SwarmMember; name: SwarmMember workspace; help: Complete the operational facts used to route, fulfil, govern, and report this swarmmember without overwriting its history.; rows: swarm_id, user_id | expertise, member_status
+%%entity Conversation help: A continuous customer dialogue across chat, messaging, voice, email, or social interactions that may create or update a case.
+%%entity Conversation icon: MessagesSquare
+%%field Conversation.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Conversation.service_channel_id help: The configured channel through which this customer dialogue is conducted.
+%%field Conversation.contact_id help: The identified customer participant after verification or matching.
+%%field Conversation.case_id help: The service request created from or linked to this dialogue.
+%%field Conversation.owner_id help: The user currently responsible for live or asynchronous replies.
+%%field Conversation.status enum: ConversationStatus
+%%field Conversation.status help: Whether the dialogue is waiting, active, transferred, ended, or abandoned.
+%%section entity: Conversation; name: Conversation workspace; help: Complete the operational facts used to route, fulfil, govern, and report this conversation without overwriting its history.; rows: name, service_channel_id | contact_id, case_id | owner_id, status
+%%entity Message help: One inbound or outbound item in a service conversation, including sender, delivery outcome, and channel timing.
+%%entity Message icon: Send
+%%field Message.conversation_id help: The dialogue timeline to which this inbound or outbound item belongs.
+%%field Message.sender_type enum: SenderType
+%%field Message.sender_type help: Whether the sender is a customer, agent, bot, or external system.
+%%field Message.body help: The communication content retained for context, quality, and compliance.
+%%field Message.delivery_status enum: DeliveryStatus
+%%field Message.delivery_status help: Whether the channel accepted, delivered, read, or failed the message.
+%%field Message.sent_at help: The channel timestamp used to order the transcript and measure response time.
+%%section entity: Message; name: Message workspace; help: Complete the operational facts used to route, fulfil, govern, and report this message without overwriting its history.; rows: conversation_id, sender_type | body, delivery_status | sent_at
+%%entity BotSession help: A governed automated service session that records containment, escalation, handoff context, and final outcome.
+%%entity BotSession icon: BotMessageSquare
+%%field BotSession.name help: The concise business label agents use to find this record in lookups and lists.
+%%field BotSession.conversation_id help: The customer dialogue in which automated assistance is operating.
+%%field BotSession.ai_agent_id help: The governed AI agent and version responsible for the automated actions.
+%%field BotSession.handoff_reason help: The safety, confidence, customer, or capability reason human assistance was requested.
+%%field BotSession.status enum: BotSessionStatus
+%%field BotSession.status help: Whether automation is active, waiting, handed off, completed, or failed.
+%%section entity: BotSession; name: BotSession workspace; help: Complete the operational facts used to route, fulfil, govern, and report this botsession without overwriting its history.; rows: name, conversation_id | ai_agent_id, handoff_reason | status
+%%entity Survey help: A governed feedback questionnaire sent at defined service journey points to measure satisfaction and effort.
+%%entity Survey icon: ClipboardList
+%%field Survey.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Survey.survey_type enum: SurveyType
+%%field Survey.survey_type help: The journey point measured, such as case closure, appointment, or relationship health.
+%%field Survey.expiry_days help: The number of days after invitation during which a response is accepted.
+%%field Survey.status enum: ActiveStatus
+%%field Survey.status help: Whether this survey design is draft, active, paused, or retired.
+%%section entity: Survey; name: Survey workspace; help: Complete the operational facts used to route, fulfil, govern, and report this survey without overwriting its history.; rows: name, survey_type | expiry_days, status
+%%entity SurveyResponse help: A customer rating and comment linked to the service journey that triggered the invitation.
+%%entity SurveyResponse icon: SmilePlus
+%%entity SurveyResponse parent: Survey
+%%field SurveyResponse.survey_id help: The questionnaire whose wording and scale govern this response.
+%%field SurveyResponse.case_id help: The resolved service request whose experience is being evaluated.
+%%field SurveyResponse.contact_id help: The customer participant who supplied the feedback when identified.
+%%field SurveyResponse.score help: The selected rating on the survey definition scale.
+%%field SurveyResponse.comment help: The customer explanation used for recovery, coaching, and improvement.
+%%field SurveyResponse.sentiment enum: Sentiment
+%%field SurveyResponse.sentiment help: The derived or selected sentiment classification used in trend analysis.
+%%section entity: SurveyResponse; name: SurveyResponse workspace; help: Complete the operational facts used to route, fulfil, govern, and report this surveyresponse without overwriting its history.; rows: survey_id, case_id | contact_id, score | comment, sentiment
+%%entity ServiceTerritory help: A geographic or logical field-service area used to match appointments, resources, skills, travel, and operating hours.
+%%entity ServiceTerritory icon: MapPinned
+%%field ServiceTerritory.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ServiceTerritory.business_unit_id help: The operating unit accountable for this geographic service area.
+%%field ServiceTerritory.timezone help: The local time zone used for appointment windows and technician schedules.
+%%field ServiceTerritory.status enum: ActiveStatus
+%%field ServiceTerritory.status help: Whether work may be scheduled inside this territory.
+%%section entity: ServiceTerritory; name: ServiceTerritory workspace; help: Complete the operational facts used to route, fulfil, govern, and report this serviceterritory without overwriting its history.; rows: name, business_unit_id | timezone, status
+%%entity ServiceResource help: A technician, crew, contractor, or equipment resource that can be scheduled to fulfil field-service appointments.
+%%entity ServiceResource icon: HardHat
+%%field ServiceResource.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ServiceResource.user_id help: The workforce user who performs and reports field-service work.
+%%field ServiceResource.service_territory_id help: The primary area in which this resource may be scheduled.
+%%field ServiceResource.resource_type enum: ResourceType
+%%field ServiceResource.resource_type help: Whether the resource is an employee, contractor, crew, or equipment unit.
+%%field ServiceResource.daily_capacity_minutes help: The schedulable productive time available on a normal working day.
+%%field ServiceResource.status enum: ResourceStatus
+%%field ServiceResource.status help: Whether dispatch may assign new appointments to this resource.
+%%section entity: ServiceResource; name: ServiceResource workspace; help: Complete the operational facts used to route, fulfil, govern, and report this serviceresource without overwriting its history.; rows: name, user_id | service_territory_id, resource_type | daily_capacity_minutes, status
+%%entity WorkOrder help: A field-service job that translates a customer need into controlled labour, parts, appointments, and completion evidence.
+%%entity WorkOrder icon: Wrench
+%%field WorkOrder.name help: The concise business label agents use to find this record in lookups and lists.
+%%field WorkOrder.work_order_number help: The field-service reference shared by dispatch, technician, customer, and integrations.
+%%field WorkOrder.case_id help: The customer case that requires onsite or depot work.
+%%field WorkOrder.asset_id help: The installed item to inspect, maintain, repair, replace, or decommission.
+%%field WorkOrder.address_id help: The validated location where the work must be performed.
+%%field WorkOrder.priority enum: Priority
+%%field WorkOrder.priority help: The dispatch urgency used for scheduling and escalation.
+%%field WorkOrder.status enum: WorkOrderStatus
+%%field WorkOrder.status help: The fulfilment lifecycle from planning through completion or cancellation.
+%%field WorkOrder.work_summary help: The scope, symptoms, safety constraints, and expected service outcome.
+%%section entity: WorkOrder; name: WorkOrder workspace; help: Complete the operational facts used to route, fulfil, govern, and report this workorder without overwriting its history.; rows: name, work_order_number | case_id, asset_id | address_id, priority | work_summary
+%%entity WorkOrderLineItem help: An executable task, labour allowance, or part requirement inside a work order.
+%%entity WorkOrderLineItem icon: ListChecks
+%%entity WorkOrderLineItem parent: WorkOrder
+%%field WorkOrderLineItem.work_order_id help: The field job whose executable task list contains this item.
+%%field WorkOrderLineItem.product_id help: The part or service product expected to be consumed or performed.
+%%field WorkOrderLineItem.instruction help: The technician-facing task, acceptance criteria, and safety notes.
+%%field WorkOrderLineItem.planned_quantity help: The expected labour hours, units, or part quantity required.
+%%field WorkOrderLineItem.actual_quantity help: The quantity confirmed by the technician after completion.
+%%section entity: WorkOrderLineItem; name: WorkOrderLineItem workspace; help: Complete the operational facts used to route, fulfil, govern, and report this workorderlineitem without overwriting its history.; rows: work_order_id, product_id | instruction, planned_quantity | actual_quantity
+%%entity ServiceAppointment help: A customer visit window for fulfilling a work order, with dispatch, travel, execution, and completion states.
+%%entity ServiceAppointment icon: CalendarClock
+%%field ServiceAppointment.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ServiceAppointment.work_order_id help: The field job whose work is reserved in this visit.
+%%field ServiceAppointment.service_territory_id help: The territory whose hours, travel, and resources constrain scheduling.
+%%field ServiceAppointment.window_start help: The earliest customer-approved arrival time.
+%%field ServiceAppointment.window_end help: The latest customer-approved arrival time.
+%%field ServiceAppointment.status enum: AppointmentStatus
+%%field ServiceAppointment.status help: The scheduling and execution lifecycle from requested through completion.
+%%section entity: ServiceAppointment; name: ServiceAppointment workspace; help: Complete the operational facts used to route, fulfil, govern, and report this serviceappointment without overwriting its history.; rows: name, work_order_id | service_territory_id, window_start | window_end
+%%entity ResourceAssignment help: A capacity reservation linking a qualified field resource to one appointment and time interval.
+%%entity ResourceAssignment icon: CalendarCheck2
+%%field ResourceAssignment.service_appointment_id help: The visit receiving this scheduled resource.
+%%field ResourceAssignment.service_resource_id help: The technician, crew, or equipment allocated to fulfil the visit.
+%%field ResourceAssignment.assignment_role enum: AssignmentRole
+%%field ResourceAssignment.assignment_role help: The responsibility performed by this resource on the appointment.
+%%field ResourceAssignment.assigned_start help: The reserved start used for overlap and capacity checks.
+%%field ResourceAssignment.assigned_end help: The reserved finish used for overlap and capacity checks.
+%%section entity: ResourceAssignment; name: ResourceAssignment workspace; help: Complete the operational facts used to route, fulfil, govern, and report this resourceassignment without overwriting its history.; rows: service_appointment_id, service_resource_id | assignment_role, assigned_start | assigned_end
+%%entity Location help: A physical or virtual place where service parts are stored, issued, returned, quarantined, or counted.
+%%entity Location icon: Warehouse
+%%field Location.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Location.business_unit_id help: The operating unit accountable for stock and transactions at this place.
+%%field Location.location_type enum: LocationType
+%%field Location.location_type help: Whether this is a warehouse, depot, van, customer site, or quarantine area.
+%%field Location.status enum: ActiveStatus
+%%field Location.status help: Whether stock may be received, reserved, transferred, or issued here.
+%%section entity: Location; name: Location workspace; help: Complete the operational facts used to route, fulfil, govern, and report this location without overwriting its history.; rows: name, business_unit_id | location_type, status
+%%entity InventoryItem help: The quantity position for one service part at one stock location, including reservations and replenishment threshold.
+%%entity InventoryItem icon: Boxes
+%%entity InventoryItem parent: Location
+%%field InventoryItem.name help: The concise business label agents use to find this record in lookups and lists.
+%%field InventoryItem.location_id help: The stock location currently responsible for this available balance.
+%%field InventoryItem.product_id help: The spare-part product whose quantity is controlled.
+%%field InventoryItem.on_hand_quantity help: The physically confirmed stock balance before reservations and allocations.
+%%field InventoryItem.reserved_quantity help: The portion committed to open work and unavailable for other demand.
+%%field InventoryItem.reorder_point help: The available-balance threshold that should trigger replenishment.
+%%section entity: InventoryItem; name: InventoryItem workspace; help: Complete the operational facts used to route, fulfil, govern, and report this inventoryitem without overwriting its history.; rows: name, location_id | product_id, on_hand_quantity | reserved_quantity, reorder_point
+%%entity ProductRequest help: A controlled request to reserve, transfer, ship, or replenish parts needed for service work.
+%%entity ProductRequest icon: PackagePlus
+%%field ProductRequest.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ProductRequest.work_order_id help: The field job creating demand for these service parts.
+%%field ProductRequest.requesting_location_id help: The destination location or van that needs the parts.
+%%field ProductRequest.priority enum: Priority
+%%field ProductRequest.priority help: The fulfilment urgency aligned with the service commitment.
+%%field ProductRequest.status enum: ProductRequestStatus
+%%field ProductRequest.status help: The request lifecycle from draft through fulfilment or cancellation.
+%%section entity: ProductRequest; name: ProductRequest workspace; help: Complete the operational facts used to route, fulfil, govern, and report this productrequest without overwriting its history.; rows: name, work_order_id | requesting_location_id, priority
+%%entity ProductRequestLine help: A requested service part and quantity inside a product request, including partial fulfilment.
+%%entity ProductRequestLine icon: PackageOpen
+%%entity ProductRequestLine parent: ProductRequest
+%%field ProductRequestLine.product_request_id help: The parts request that owns this demanded line.
+%%field ProductRequestLine.product_id help: The service part required to fulfil the work.
+%%field ProductRequestLine.requested_quantity help: The quantity needed at the destination.
+%%field ProductRequestLine.fulfilled_quantity help: The quantity actually reserved, transferred, or shipped.
+%%section entity: ProductRequestLine; name: ProductRequestLine workspace; help: Complete the operational facts used to route, fulfil, govern, and report this productrequestline without overwriting its history.; rows: product_request_id, product_id | requested_quantity, fulfilled_quantity
+%%entity ReturnOrder help: A controlled reverse-logistics transaction for customer equipment, defective parts, loaners, or replacement units.
+%%entity ReturnOrder icon: Undo2
+%%field ReturnOrder.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ReturnOrder.return_number help: The customer and warehouse reference used for labels, receipts, and credits.
+%%field ReturnOrder.account_id help: The customer returning service parts, equipment, or replacement units.
+%%field ReturnOrder.case_id help: The service request authorising or explaining the return.
+%%field ReturnOrder.status enum: ReturnStatus
+%%field ReturnOrder.status help: The reverse-logistics lifecycle from authorisation through receipt and disposition.
+%%field ReturnOrder.return_reason enum: ReturnReason
+%%field ReturnOrder.return_reason help: The commercial or service reason governing inspection and disposition.
+%%section entity: ReturnOrder; name: ReturnOrder workspace; help: Complete the operational facts used to route, fulfil, govern, and report this returnorder without overwriting its history.; rows: name, return_number | account_id, case_id | return_reason
+%%entity ReturnOrderLine help: An authorised item inside a return order with quantity, serial context, inspection, and final disposition.
+%%entity ReturnOrderLine icon: PackageX
+%%entity ReturnOrderLine parent: ReturnOrder
+%%field ReturnOrderLine.return_order_id help: The return authorisation that owns this item.
+%%field ReturnOrderLine.product_id help: The catalogue item expected back.
+%%field ReturnOrderLine.asset_id help: The serialized installed item being returned when applicable.
+%%field ReturnOrderLine.quantity help: The number of units authorised for return.
+%%field ReturnOrderLine.disposition enum: Disposition
+%%field ReturnOrderLine.disposition help: The decided outcome after inspection, such as restock, repair, scrap, or vendor return.
+%%section entity: ReturnOrderLine; name: ReturnOrderLine workspace; help: Complete the operational facts used to route, fulfil, govern, and report this returnorderline without overwriting its history.; rows: return_order_id, product_id | asset_id, quantity | disposition
+%%entity Forecast help: A queue-level workload and staffing prediction used to plan shifts, service levels, and capacity.
+%%entity Forecast icon: ChartNoAxesCombined
+%%field Forecast.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Forecast.queue_id help: The work queue whose demand is forecast for staffing.
+%%field Forecast.interval_start help: The beginning of the planning interval in the queue time zone.
+%%field Forecast.expected_volume help: The predicted number of offered work items during the interval.
+%%field Forecast.expected_handle_minutes help: The predicted average productive minutes needed for one item.
+%%field Forecast.required_agents help: The staffing level calculated to meet service-level and occupancy targets.
+%%section entity: Forecast; name: Forecast workspace; help: Complete the operational facts used to route, fulfil, govern, and report this forecast without overwriting its history.; rows: name, queue_id | interval_start, expected_volume | expected_handle_minutes, required_agents
+%%entity Shift help: A published workforce schedule interval used for coverage, adherence, leave, and capacity planning.
+%%entity Shift icon: CalendarRange
+%%field Shift.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Shift.user_id help: The workforce member expected to work this planned interval.
+%%field Shift.start_at help: The scheduled start in the operating unit time zone.
+%%field Shift.end_at help: The scheduled finish used for coverage and adherence.
+%%field Shift.shift_type enum: ShiftType
+%%field Shift.shift_type help: The productive, training, meeting, leave, or on-call purpose of this interval.
+%%field Shift.status enum: ShiftStatus
+%%field Shift.status help: Whether the shift is proposed, published, accepted, changed, or completed.
+%%section entity: Shift; name: Shift workspace; help: Complete the operational facts used to route, fulfil, govern, and report this shift without overwriting its history.; rows: name, user_id | start_at, end_at | shift_type, status
+%%entity QualityReview help: A governed evaluation of an agent interaction for accuracy, compliance, empathy, process, and coaching.
+%%entity QualityReview icon: ScanSearch
+%%field QualityReview.name help: The concise business label agents use to find this record in lookups and lists.
+%%field QualityReview.case_id help: The case whose handling and documentation are being evaluated.
+%%field QualityReview.conversation_id help: The interaction transcript or recording sampled for evaluation.
+%%field QualityReview.user_id help: The agent whose service performance is scored.
+%%field QualityReview.reviewed_by_id help: The authorised evaluator accountable for consistent scoring.
+%%field QualityReview.score help: The weighted quality result on the approved evaluation form.
+%%field QualityReview.status enum: QualityStatus
+%%field QualityReview.status help: Whether the review is assigned, scored, disputed, calibrated, or final.
+%%section entity: QualityReview; name: QualityReview workspace; help: Complete the operational facts used to route, fulfil, govern, and report this qualityreview without overwriting its history.; rows: name, case_id | conversation_id, user_id | reviewed_by_id, score | status
+%%entity CoachingSession help: A documented development conversation translating service evidence into agreed actions and follow-up.
+%%entity CoachingSession icon: GraduationCap
+%%field CoachingSession.name help: The concise business label agents use to find this record in lookups and lists.
+%%field CoachingSession.user_id help: The employee receiving targeted feedback and development actions.
+%%field CoachingSession.quality_review_id help: The evaluated interaction providing evidence for this coaching.
+%%field CoachingSession.coached_by_id help: The manager or coach accountable for the discussion and follow-up.
+%%field CoachingSession.session_date help: The date on which feedback and agreed actions were discussed.
+%%field CoachingSession.action_plan help: The specific behaviour, support, due dates, and evidence agreed for improvement.
+%%section entity: CoachingSession; name: CoachingSession workspace; help: Complete the operational facts used to route, fulfil, govern, and report this coachingsession without overwriting its history.; rows: name, user_id | quality_review_id, coached_by_id | session_date, action_plan
+%%entity IntegrationEndpoint help: A governed external-system connection with protocol, authentication, ownership, and operational status.
+%%entity IntegrationEndpoint icon: PlugZap
+%%field IntegrationEndpoint.name help: The concise business label agents use to find this record in lookups and lists.
+%%field IntegrationEndpoint.endpoint_url help: The approved target or source address used by this integration.
+%%field IntegrationEndpoint.integration_type enum: IntegrationType
+%%field IntegrationEndpoint.integration_type help: Whether the endpoint serves REST, event, telephony, email, identity, or another protocol.
+%%field IntegrationEndpoint.authentication_type enum: AuthenticationType
+%%field IntegrationEndpoint.authentication_type help: The credential mechanism approved for this connection.
+%%field IntegrationEndpoint.status enum: ActiveStatus
+%%field IntegrationEndpoint.status help: Whether traffic may be sent or received through this endpoint.
+%%section entity: IntegrationEndpoint; name: IntegrationEndpoint workspace; help: Complete the operational facts used to route, fulfil, govern, and report this integrationendpoint without overwriting its history.; rows: name, endpoint_url | integration_type, authentication_type | status
+%%entity IntegrationEvent help: A durable inbound or outbound business event with traceability, delivery attempts, replay, and dead-letter outcome.
+%%entity IntegrationEvent icon: Webhook
+%%field IntegrationEvent.name help: The concise business label agents use to find this record in lookups and lists.
+%%field IntegrationEvent.integration_endpoint_id help: The governed connection that produced or should receive this event.
+%%field IntegrationEvent.event_type help: The business event name used for subscription and replay.
+%%field IntegrationEvent.correlation_key help: The trace value joining this delivery to the originating service transaction.
+%%field IntegrationEvent.status enum: EventStatus
+%%field IntegrationEvent.status help: Whether delivery is pending, processing, succeeded, retrying, dead-lettered, or cancelled.
+%%field IntegrationEvent.attempt_count help: The delivery attempts made before success or dead-letter handling.
+%%section entity: IntegrationEvent; name: IntegrationEvent workspace; help: Complete the operational facts used to route, fulfil, govern, and report this integrationevent without overwriting its history.; rows: name, integration_endpoint_id | event_type, correlation_key | status, attempt_count
+%%entity AuditEvent help: An immutable security and business audit fact proving who or what acted on a record, when, and what changed.
+%%entity AuditEvent icon: ScrollText
+%%field AuditEvent.name help: The concise business label agents use to find this record in lookups and lists.
+%%field AuditEvent.user_id help: The authenticated user responsible for the action; blank denotes a trusted system process.
+%%field AuditEvent.entity_name help: The governed record type affected by the action.
+%%field AuditEvent.record_key help: The immutable business or technical key used to locate the affected record.
+%%field AuditEvent.action_type enum: AuditAction
+%%field AuditEvent.action_type help: The security-relevant read, export, create, change, delete, approval, or access action.
+%%field AuditEvent.change_detail help: The protected before-and-after facts needed for investigation without copying unrestricted payloads.
+%%section entity: AuditEvent; name: AuditEvent workspace; help: Complete the operational facts used to route, fulfil, govern, and report this auditevent without overwriting its history.; rows: name, user_id | entity_name, record_key | action_type, change_detail
+%%entity Consent help: A purpose-specific, evidenced customer communication or data-processing choice with effective time and withdrawal history.
+%%entity Consent icon: ShieldUser
+%%field Consent.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Consent.contact_id help: The person whose communication or processing choice is recorded.
+%%field Consent.purpose enum: ConsentPurpose
+%%field Consent.purpose help: The specific service, channel, or processing purpose covered by this decision.
+%%field Consent.channel_type enum: ChannelType
+%%field Consent.channel_type help: The communication channel to which this choice applies.
+%%field Consent.status enum: ConsentStatus
+%%field Consent.status help: Whether consent is granted, denied, withdrawn, expired, or pending proof.
+%%field Consent.effective_at help: The time from which agents and automations must honour this choice.
+%%section entity: Consent; name: Consent workspace; help: Complete the operational facts used to route, fulfil, govern, and report this consent without overwriting its history.; rows: name, contact_id | purpose, channel_type | status, effective_at
+%%entity AiAgent help: A governed AI service agent with accountable ownership, approved model, capabilities, risk tier, and deployment state.
+%%entity AiAgent icon: BrainCircuit
+%%field AiAgent.name help: The concise business label agents use to find this record in lookups and lists.
+%%field AiAgent.owner_id help: The accountable product or service owner who approves capability and risk changes.
+%%field AiAgent.agent_type enum: AiAgentType
+%%field AiAgent.agent_type help: Whether the agent assists employees, serves customers, routes work, or executes operations.
+%%field AiAgent.model_name help: The approved model and release used to produce decisions or content.
+%%field AiAgent.risk_level enum: RiskLevel
+%%field AiAgent.risk_level help: The assessed consequence tier governing testing, oversight, and human approval.
+%%field AiAgent.status enum: AiAgentStatus
+%%field AiAgent.status help: Whether the agent is draft, testing, approved, active, suspended, or retired.
+%%section entity: AiAgent; name: AiAgent workspace; help: Complete the operational facts used to route, fulfil, govern, and report this aiagent without overwriting its history.; rows: name, owner_id | agent_type, model_name | risk_level, status
+%%entity AiInteraction help: A traceable AI recommendation or action recording context, confidence, human oversight, outcome, and review evidence.
+%%entity AiInteraction icon: Sparkles
+%%field AiInteraction.name help: The concise business label agents use to find this record in lookups and lists.
+%%field AiInteraction.ai_agent_id help: The governed agent and model configuration that produced this interaction.
+%%field AiInteraction.case_id help: The customer service request whose work was assisted or automated.
+%%field AiInteraction.user_id help: The employee supervising, accepting, editing, or rejecting the AI output.
+%%field AiInteraction.outcome enum: AiOutcome
+%%field AiInteraction.outcome help: Whether the output was accepted, edited, rejected, escalated, or blocked.
+%%field AiInteraction.confidence help: The calibrated confidence used only where the approved policy permits automated action.
+%%field AiInteraction.rationale help: The user-facing evidence or policy explanation retained for review.
+%%section entity: AiInteraction; name: AiInteraction workspace; help: Complete the operational facts used to route, fulfil, govern, and report this aiinteraction without overwriting its history.; rows: name, ai_agent_id | case_id, user_id | outcome, confidence | rationale
+%%entity BusinessHours help: A reusable working-time calendar that makes SLA, routing, staffing, and field-service deadlines consistent across time zones and holidays.
+%%entity BusinessHours icon: Clock3
+%%field BusinessHours.name help: The concise business label agents use to find this record in lookups and lists.
+%%field BusinessHours.timezone help: The IANA time zone in which working intervals and holidays are interpreted.
+%%field BusinessHours.weekly_schedule help: The service opening intervals used to calculate SLA clocks and appointment availability.
+%%field BusinessHours.holiday_calendar help: The non-working dates excluded from contractual response and resolution time.
+%%field BusinessHours.status enum: ActiveStatus
+%%field BusinessHours.status help: Whether this calendar may be assigned to active service policies.
+%%section entity: BusinessHours; name: BusinessHours workspace; help: Complete the operational facts used to route, fulfil, govern, and report this businesshours without overwriting its history.; rows: name, timezone | weekly_schedule, holiday_calendar | status
+%%entity ContractLineItem help: A product, service, or asset coverage line inside a service contract, used to generate and validate entitlements.
+%%entity ContractLineItem icon: Rows3
+%%entity ContractLineItem parent: ServiceContract
+%%field ContractLineItem.service_contract_id help: The commercial service agreement that owns this covered line.
+%%field ContractLineItem.product_id help: The product or service whose support is purchased.
+%%field ContractLineItem.asset_id help: The specific installed asset covered when the agreement is serialized.
+%%field ContractLineItem.quantity help: The contracted units covered by this line.
+%%field ContractLineItem.unit_price help: The net price per covered unit in the agreement currency.
+%%field ContractLineItem.start_date help: The date this line begins granting contractual coverage.
+%%field ContractLineItem.end_date help: The date this line stops granting contractual coverage.
+%%section entity: ContractLineItem; name: ContractLineItem workspace; help: Complete the operational facts used to route, fulfil, govern, and report this contractlineitem without overwriting its history.; rows: service_contract_id, product_id | asset_id, quantity | unit_price, start_date | end_date
+%%entity ContactRequest help: A customer request for a callback or assisted contact that enters routing before a full case or conversation exists.
+%%entity ContactRequest icon: PhoneCall
+%%field ContactRequest.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ContactRequest.contact_id help: The customer requesting contact when identity is already known.
+%%field ContactRequest.service_channel_id help: The callback, web, or messaging entry point that received the request.
+%%field ContactRequest.preferred_channel enum: ChannelType
+%%field ContactRequest.preferred_channel help: The medium through which the customer wants the response.
+%%field ContactRequest.requested_at help: The time from which waiting and callback service levels are measured.
+%%field ContactRequest.status enum: ContactRequestStatus
+%%field ContactRequest.status help: Whether the request is queued, assigned, completed, expired, or cancelled.
+%%section entity: ContactRequest; name: ContactRequest workspace; help: Complete the operational facts used to route, fulfil, govern, and report this contactrequest without overwriting its history.; rows: name, contact_id | service_channel_id, preferred_channel | requested_at, status
+%%entity AgentWork help: The durable omnichannel assignment connecting one routed work item to one agent, including offer, acceptance, capacity, and completion outcomes.
+%%entity AgentWork icon: Headset
+%%field AgentWork.name help: The concise business label agents use to find this record in lookups and lists.
+%%field AgentWork.queue_id help: The queue from which this work assignment was offered.
+%%field AgentWork.user_id help: The agent who received, accepted, declined, or completed the assignment.
+%%field AgentWork.case_id help: The service case routed by this assignment when the work item is a case.
+%%field AgentWork.conversation_id help: The digital interaction routed by this assignment when the work item is a conversation.
+%%field AgentWork.capacity_weight help: The capacity units consumed while this work remains active.
+%%field AgentWork.status enum: AgentWorkStatus
+%%field AgentWork.status help: The assignment lifecycle from pending offer through completion or decline.
+%%section entity: AgentWork; name: AgentWork workspace; help: Complete the operational facts used to route, fulfil, govern, and report this agentwork without overwriting its history.; rows: name, queue_id | user_id, case_id | conversation_id, capacity_weight | status
+%%entity Skill help: A named workforce capability used to match service demand with qualified agents, technicians, and expert swarm members.
+%%entity Skill icon: BadgeHelp
+%%field Skill.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Skill.skill_type enum: SkillType
+%%field Skill.skill_type help: Whether the capability represents product, language, technical, regulatory, or channel expertise.
+%%field Skill.status enum: ActiveStatus
+%%field Skill.status help: Whether routing and workforce planning may require this skill.
+%%section entity: Skill; name: Skill workspace; help: Complete the operational facts used to route, fulfil, govern, and report this skill without overwriting its history.; rows: name, skill_type | status
+%%entity SkillRequirement help: A required or relaxable skill on routed work, including the minimum proficiency and the wait before the requirement may be dropped.
+%%entity SkillRequirement icon: ListFilterPlus
+%%entity SkillRequirement parent: RoutingConfiguration
+%%field SkillRequirement.routing_configuration_id help: The routing strategy whose work requires this capability.
+%%field SkillRequirement.skill_id help: The capability an eligible worker must hold.
+%%field SkillRequirement.minimum_level help: The lowest verified proficiency accepted for assignment.
+%%field SkillRequirement.droppable help: When enabled, routing may relax this requirement after its configured wait threshold.
+%%field SkillRequirement.drop_after_minutes help: The wait time after which this skill may be removed to widen the eligible pool.
+%%section entity: SkillRequirement; name: SkillRequirement workspace; help: Complete the operational facts used to route, fulfil, govern, and report this skillrequirement without overwriting its history.; rows: routing_configuration_id, skill_id | minimum_level, droppable | drop_after_minutes
+%%entity ServiceResourceSkill help: A verified technician capability with proficiency and expiry, used to prevent assignments that are unsafe or unqualified.
+%%entity ServiceResourceSkill icon: Award
+%%entity ServiceResourceSkill parent: ServiceResource
+%%field ServiceResourceSkill.service_resource_id help: The technician or crew whose verified capability is recorded.
+%%field ServiceResourceSkill.skill_id help: The capability available for appointment matching and dispatch.
+%%field ServiceResourceSkill.skill_level help: The verified proficiency used against work requirements.
+%%field ServiceResourceSkill.valid_until help: The certification expiry after which dispatch must not rely on the capability.
+%%section entity: ServiceResourceSkill; name: ServiceResourceSkill workspace; help: Complete the operational facts used to route, fulfil, govern, and report this serviceresourceskill without overwriting its history.; rows: service_resource_id, skill_id | skill_level, valid_until
+%%entity EmailMessage help: An inbound or outbound case email retained as immutable service correspondence with participants and delivery outcome.
+%%entity EmailMessage icon: MailCheck
+%%field EmailMessage.name help: The concise business label agents use to find this record in lookups and lists.
+%%field EmailMessage.case_id help: The service case whose correspondence timeline retains this email.
+%%field EmailMessage.contact_id help: The identified customer sender or recipient.
+%%field EmailMessage.from_address help: The authenticated or supplied sender address retained for investigation.
+%%field EmailMessage.to_address help: The primary service or customer destination.
+%%field EmailMessage.body help: The message content retained under the case communication policy.
+%%field EmailMessage.delivery_status enum: DeliveryStatus
+%%field EmailMessage.delivery_status help: Whether outbound delivery was queued, sent, delivered, bounced, or failed.
+%%section entity: EmailMessage; name: EmailMessage workspace; help: Complete the operational facts used to route, fulfil, govern, and report this emailmessage without overwriting its history.; rows: name, case_id | contact_id, from_address | to_address, body | delivery_status
+%%entity VoiceCall help: A routed inbound, outbound, or callback voice interaction with agent ownership, call timing, disposition, and case context.
+%%entity VoiceCall icon: Phone
+%%field VoiceCall.name help: The concise business label agents use to find this record in lookups and lists.
+%%field VoiceCall.case_id help: The service case created from or discussed during this call.
+%%field VoiceCall.contact_id help: The identified customer participant after verification or matching.
+%%field VoiceCall.owner_id help: The agent responsible for the live call and wrap-up.
+%%field VoiceCall.started_at help: The telephony start time used for answer, handle, and billing metrics.
+%%field VoiceCall.duration_seconds help: The connected duration excluding or including hold according to the configured metric.
+%%field VoiceCall.status enum: VoiceCallStatus
+%%field VoiceCall.status help: The call lifecycle from offered through connected, completed, abandoned, or failed.
+%%section entity: VoiceCall; name: VoiceCall workspace; help: Complete the operational facts used to route, fulfil, govern, and report this voicecall without overwriting its history.; rows: name, case_id | contact_id, owner_id | started_at, duration_seconds | status
+%%entity VoiceCallRecording help: A protected call recording with consent, classification, retention, and quality-review context.
+%%entity VoiceCallRecording icon: MicVocal
+%%entity VoiceCallRecording parent: VoiceCall
+%%field VoiceCallRecording.voice_call_id help: The call whose authorised audio is retained.
+%%field VoiceCallRecording.recording_url help: The protected media location subject to regional access and retention rules.
+%%field VoiceCallRecording.duration_seconds help: The playable recording duration available for quality and compliance review.
+%%field VoiceCallRecording.classification enum: DataClassification
+%%field VoiceCallRecording.classification help: The sensitivity level controlling access, export, redaction, and deletion.
+%%field VoiceCallRecording.consent_status enum: ConsentStatus
+%%field VoiceCallRecording.consent_status help: The recording permission evidenced before or during the call.
+%%section entity: VoiceCallRecording; name: VoiceCallRecording workspace; help: Complete the operational facts used to route, fulfil, govern, and report this voicecallrecording without overwriting its history.; rows: voice_call_id, recording_url | duration_seconds, classification | consent_status
+%%entity CaseArticle help: A traceable link between a case and knowledge, proving which answer was suggested, shared, and useful.
+%%entity CaseArticle icon: BookMarked
+%%entity CaseArticle parent: Case
+%%field CaseArticle.case_id help: The service case where this knowledge was recommended or used.
+%%field CaseArticle.knowledge_article_id help: The governed answer linked to the case outcome.
+%%field CaseArticle.helpful help: Whether the article contributed to diagnosis or resolution according to the agent or customer.
+%%field CaseArticle.usage_type enum: KnowledgeUsage
+%%field CaseArticle.usage_type help: Whether the article was suggested, viewed, attached, sent, or used to resolve.
+%%section entity: CaseArticle; name: CaseArticle workspace; help: Complete the operational facts used to route, fulfil, govern, and report this casearticle without overwriting its history.; rows: case_id, knowledge_article_id | helpful, usage_type
+%%entity DataCategory help: A governed knowledge-taxonomy node used to classify articles and restrict discovery by audience.
+%%entity DataCategory icon: Tags
+%%field DataCategory.name help: The concise business label agents use to find this record in lookups and lists.
+%%field DataCategory.data_category_id help: The broader taxonomy node above this category; blank denotes a category-group root.
+%%field DataCategory.category_group help: The governed taxonomy used for visibility, navigation, and search filtering.
+%%field DataCategory.status enum: ActiveStatus
+%%field DataCategory.status help: Whether new and existing knowledge may be classified under this node.
+%%section entity: DataCategory; name: DataCategory workspace; help: Complete the operational facts used to route, fulfil, govern, and report this datacategory without overwriting its history.; rows: name, data_category_id | category_group, status
+%%entity ArticleCategory help: A version-specific assignment connecting approved knowledge content to a governed taxonomy category.
+%%entity ArticleCategory icon: Tag
+%%entity ArticleCategory parent: KnowledgeVersion
+%%field ArticleCategory.knowledge_version_id help: The article revision whose audience and discovery are classified.
+%%field ArticleCategory.data_category_id help: The governed taxonomy node assigned to the revision.
+%%field ArticleCategory.primary_category help: When enabled, this category is the main navigation and reporting classification.
+%%section entity: ArticleCategory; name: ArticleCategory workspace; help: Complete the operational facts used to route, fulfil, govern, and report this articlecategory without overwriting its history.; rows: knowledge_version_id, data_category_id | primary_category
+%%entity WorkType help: A reusable field-service job template defining expected duration, skills, procedure, and completion requirements.
+%%entity WorkType icon: BriefcaseBusiness
+%%field WorkType.name help: The concise business label agents use to find this record in lookups and lists.
+%%field WorkType.product_id help: The product family for which this standard field procedure applies.
+%%field WorkType.estimated_minutes help: The default duration used for appointment capacity and customer windows.
+%%field WorkType.work_instructions help: The approved procedure, safety controls, completion evidence, and acceptance criteria.
+%%field WorkType.status enum: ActiveStatus
+%%field WorkType.status help: Whether planners may use this standard template on new work.
+%%section entity: WorkType; name: WorkType workspace; help: Complete the operational facts used to route, fulfil, govern, and report this worktype without overwriting its history.; rows: name, product_id | estimated_minutes, work_instructions | status
+%%entity ApprovalRequest help: A governed human decision with accountable approver, authority, evidence, conditions, and immutable outcome.
+%%entity ApprovalRequest icon: Stamp
+%%field ApprovalRequest.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ApprovalRequest.change_request_id help: The controlled change awaiting this decision when approval concerns production risk.
+%%field ApprovalRequest.return_order_id help: The exceptional return awaiting this decision when approval concerns value or policy.
+%%field ApprovalRequest.approved_by_id help: The authorised decision maker who approved or rejected the request.
+%%field ApprovalRequest.approval_type enum: ApprovalType
+%%field ApprovalRequest.approval_type help: The policy reason and authority matrix governing the decision.
+%%field ApprovalRequest.status enum: ApprovalStatus
+%%field ApprovalRequest.status help: The decision lifecycle from pending through approved, rejected, withdrawn, or expired.
+%%field ApprovalRequest.decision_reason help: The evidence and conditions supporting approval or rejection.
+%%section entity: ApprovalRequest; name: ApprovalRequest workspace; help: Complete the operational facts used to route, fulfil, govern, and report this approvalrequest without overwriting its history.; rows: name, change_request_id | return_order_id, approved_by_id | approval_type, status | decision_reason
+%%entity ConfigurationItem help: A governed component in the service configuration graph used for dependency, impact, incident, and change analysis.
+%%entity ConfigurationItem icon: ServerCog
+%%field ConfigurationItem.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ConfigurationItem.asset_id help: The customer or enterprise asset represented by this configuration record.
+%%field ConfigurationItem.configuration_type enum: ConfigurationType
+%%field ConfigurationItem.configuration_type help: The infrastructure, application, service, device, or dependency class.
+%%field ConfigurationItem.environment enum: EnvironmentType
+%%field ConfigurationItem.environment help: The production, test, development, or shared environment in which it operates.
+%%field ConfigurationItem.status enum: ConfigurationItemStatus
+%%field ConfigurationItem.status help: The operational lifecycle used for impact and change analysis.
+%%field ConfigurationItem.criticality enum: Severity
+%%field ConfigurationItem.criticality help: The business-impact tier used for incident and change decisions.
+%%section entity: ConfigurationItem; name: ConfigurationItem workspace; help: Complete the operational facts used to route, fulfil, govern, and report this configurationitem without overwriting its history.; rows: name, asset_id | configuration_type, environment | status, criticality
+%%entity ServiceRequest help: A standard request for information, access, equipment, or service fulfilment distinct from an unplanned incident.
+%%entity ServiceRequest icon: HandPlatter
+%%field ServiceRequest.name help: The concise business label agents use to find this record in lookups and lists.
+%%field ServiceRequest.contact_id help: The employee or customer requesting a published service or access item.
+%%field ServiceRequest.owner_id help: The fulfiller responsible for the next request action.
+%%field ServiceRequest.request_type enum: ServiceRequestType
+%%field ServiceRequest.request_type help: The catalogue request defining questions, approvals, tasks, and target time.
+%%field ServiceRequest.priority enum: Priority
+%%field ServiceRequest.priority help: The urgency used for fulfilment scheduling and escalation.
+%%field ServiceRequest.status enum: ServiceRequestStatus
+%%field ServiceRequest.status help: The request lifecycle from submission through approval, fulfilment, and closure.
+%%section entity: ServiceRequest; name: ServiceRequest workspace; help: Complete the operational facts used to route, fulfil, govern, and report this servicerequest without overwriting its history.; rows: name, contact_id | owner_id, request_type | priority, status
+%%entity Release help: A coordinated deployable package that groups approved change scope, schedule, readiness evidence, implementation, validation, and rollback.
+%%entity Release icon: Rocket
+%%field Release.name help: The concise business label agents use to find this record in lookups and lists.
+%%field Release.change_request_id help: The approved change whose deployable scope this release coordinates.
+%%field Release.owner_id help: The release manager accountable for readiness, schedule, deployment, and rollback.
+%%field Release.planned_start help: The approved deployment-window start communicated to affected teams.
+%%field Release.planned_end help: The approved deployment-window end used for conflict and outage planning.
+%%field Release.status enum: ReleaseStatus
+%%field Release.status help: The release lifecycle from planning through deployment, validation, or rollback.
+%%section entity: Release; name: Release workspace; help: Complete the operational facts used to route, fulfil, govern, and report this release without overwriting its history.; rows: name, change_request_id | owner_id, planned_start | planned_end, status
+%%entity SurveyQuestion help: A versioned feedback prompt with response type, requiredness, order, and scoring intent.
+%%entity SurveyQuestion icon: MessageSquareQuote
+%%entity SurveyQuestion parent: Survey
+%%field SurveyQuestion.survey_id help: The questionnaire whose respondent journey includes this question.
+%%field SurveyQuestion.prompt help: The approved customer-facing wording shown without agent reinterpretation.
+%%field SurveyQuestion.question_type enum: QuestionType
+%%field SurveyQuestion.question_type help: The response control and scoring method, such as rating, choice, text, or NPS.
+%%field SurveyQuestion.required help: When enabled, the respondent must answer before completing the survey.
+%%field SurveyQuestion.display_order help: The stable sequence used to render questions and compare versions.
+%%section entity: SurveyQuestion; name: SurveyQuestion workspace; help: Complete the operational facts used to route, fulfil, govern, and report this surveyquestion without overwriting its history.; rows: survey_id, prompt | question_type, required | display_order
+%%entity SurveyInvitation help: A unique customer survey invitation tied to a journey trigger, recipient, expiry, delivery, and completion outcome.
+%%entity SurveyInvitation icon: MailPlus
+%%field SurveyInvitation.name help: The concise business label agents use to find this record in lookups and lists.
+%%field SurveyInvitation.survey_id help: The approved questionnaire sent to the customer.
+%%field SurveyInvitation.contact_id help: The customer invited to respond.
+%%field SurveyInvitation.case_id help: The service case whose closure or milestone triggered the invitation.
+%%field SurveyInvitation.expires_at help: The deadline after which the response link must no longer accept answers.
+%%field SurveyInvitation.status enum: SurveyInvitationStatus
+%%field SurveyInvitation.status help: Whether the invitation is queued, sent, opened, completed, expired, or bounced.
+%%section entity: SurveyInvitation; name: SurveyInvitation workspace; help: Complete the operational facts used to route, fulfil, govern, and report this surveyinvitation without overwriting its history.; rows: name, survey_id | contact_id, case_id | expires_at, status
+%%category name: Administration; description: Administration records used by authorised service teams.; icon: Layers3; color: #0ea5e9; entities: Tenant, BusinessUnit, User, RoleAssignment, BusinessHours
+%%category name: Customer; description: Customer records used by authorised service teams.; icon: Users; color: #0ea5e9; entities: Account, Contact, Address
+%%category name: Asset; description: Asset records used by authorised service teams.; icon: Wrench; color: #0ea5e9; entities: Product, Asset, Warranty
+%%category name: Entitlement; description: Entitlement records used by authorised service teams.; icon: ShieldCheck; color: #0ea5e9; entities: ServiceContract, Entitlement, MilestonePolicy
+%%category name: Omnichannel; description: Omnichannel records used by authorised service teams.; icon: ChartNoAxesCombined; color: #0ea5e9; entities: ServiceChannel, Queue, PresenceStatus, RoutingConfiguration, ContactRequest, AgentWork, Skill
+%%category name: Case Management; description: Case Management records used by authorised service teams.; icon: Layers3; color: #0ea5e9; entities: Case
+%%category name: Knowledge; description: Knowledge records used by authorised service teams.; icon: Users; color: #0ea5e9; entities: KnowledgeArticle, KnowledgeVersion, DataCategory
+%%category name: IT Service; description: IT Service records used by authorised service teams.; icon: Wrench; color: #0ea5e9; entities: Incident, Problem, ChangeRequest, ConfigurationItem, ServiceRequest, Release
+%%category name: Collaboration; description: Collaboration records used by authorised service teams.; icon: ShieldCheck; color: #0ea5e9; entities: Swarm
+%%category name: Digital Engagement; description: Digital Engagement records used by authorised service teams.; icon: ChartNoAxesCombined; color: #0ea5e9; entities: Conversation, Message, BotSession, EmailMessage, VoiceCall
+%%category name: Feedback; description: Feedback records used by authorised service teams.; icon: Layers3; color: #0ea5e9; entities: Survey, SurveyInvitation
+%%category name: Field Service; description: Field Service records used by authorised service teams.; icon: Users; color: #0ea5e9; entities: ServiceTerritory, ServiceResource, WorkOrder, ServiceAppointment, ResourceAssignment, WorkType
+%%category name: Inventory; description: Inventory records used by authorised service teams.; icon: Wrench; color: #0ea5e9; entities: Location, ProductRequest
+%%category name: Returns; description: Returns records used by authorised service teams.; icon: ShieldCheck; color: #0ea5e9; entities: ReturnOrder
+%%category name: Workforce; description: Workforce records used by authorised service teams.; icon: ChartNoAxesCombined; color: #0ea5e9; entities: Forecast, Shift, QualityReview, CoachingSession
+%%category name: Integration; description: Integration records used by authorised service teams.; icon: Layers3; color: #0ea5e9; entities: IntegrationEndpoint, IntegrationEvent
+%%category name: Governance; description: Governance records used by authorised service teams.; icon: Users; color: #0ea5e9; entities: AuditEvent, Consent, ApprovalRequest
+%%category name: AI Governance; description: AI Governance records used by authorised service teams.; icon: Wrench; color: #0ea5e9; entities: AiAgent, AiInteraction
+%%index BusinessUnit(tenant_id)
+%%index User(business_unit_id)
+%%index User(presence_status_id)
+%%index RoleAssignment(user_id)
+%%index RoleAssignment(business_unit_id)
+%%index Account(tenant_id)
+%%index Contact(account_id)
+%%index Address(account_id)
+%%index Asset(account_id)
+%%index Asset(product_id)
+%%index Warranty(asset_id)
+%%index ServiceContract(account_id)
+%%index Entitlement(service_contract_id)
+%%index Entitlement(account_id)
+%%index Entitlement(milestone_policy_id)
+%%index ServiceChannel(business_unit_id)
+%%index Queue(business_unit_id)
+%%index RoutingConfiguration(queue_id)
+%%index Case(account_id)
+%%index Case(contact_id)
+%%index Case(asset_id)
+%%index Case(entitlement_id)
+%%index Case(queue_id)
+%%index Case(owner_id)
+%%index CaseComment(case_id)
+%%index CaseComment(author_id)
+%%index CaseAttachment(case_id)
+%%index CaseParticipant(case_id)
+%%index CaseParticipant(contact_id)
+%%index CaseParticipant(user_id)
+%%index CaseMilestone(case_id)
+%%index KnowledgeArticle(owner_id)
+%%index KnowledgeVersion(knowledge_article_id)
+%%index Incident(owner_id)
+%%index Problem(owner_id)
+%%index ChangeRequest(problem_id)
+%%index ChangeRequest(owner_id)
+%%index Swarm(case_id)
+%%index Swarm(incident_id)
+%%index Swarm(lead_id)
+%%index SwarmMember(swarm_id)
+%%index SwarmMember(user_id)
+%%index Conversation(service_channel_id)
+%%index Conversation(contact_id)
+%%index Conversation(case_id)
+%%index Conversation(owner_id)
+%%index Message(conversation_id)
+%%index BotSession(conversation_id)
+%%index BotSession(ai_agent_id)
+%%index SurveyResponse(survey_id)
+%%index SurveyResponse(case_id)
+%%index SurveyResponse(contact_id)
+%%index ServiceTerritory(business_unit_id)
+%%index ServiceResource(user_id)
+%%index ServiceResource(service_territory_id)
+%%index WorkOrder(case_id)
+%%index WorkOrder(asset_id)
+%%index WorkOrder(address_id)
+%%index WorkOrderLineItem(work_order_id)
+%%index WorkOrderLineItem(product_id)
+%%index ServiceAppointment(work_order_id)
+%%index ServiceAppointment(service_territory_id)
+%%index ResourceAssignment(service_appointment_id)
+%%index ResourceAssignment(service_resource_id)
+%%index Location(business_unit_id)
+%%index InventoryItem(location_id)
+%%index InventoryItem(product_id)
+%%index ProductRequest(work_order_id)
+%%index ProductRequest(requesting_location_id)
+%%index ProductRequestLine(product_request_id)
+%%index ProductRequestLine(product_id)
+%%index ReturnOrder(account_id)
+%%index ReturnOrder(case_id)
+%%index ReturnOrderLine(return_order_id)
+%%index ReturnOrderLine(product_id)
+%%index ReturnOrderLine(asset_id)
+%%index Forecast(queue_id)
+%%index Shift(user_id)
+%%index QualityReview(case_id)
+%%index QualityReview(conversation_id)
+%%index QualityReview(user_id)
+%%index QualityReview(reviewed_by_id)
+%%index CoachingSession(user_id)
+%%index CoachingSession(quality_review_id)
+%%index CoachingSession(coached_by_id)
+%%index IntegrationEvent(integration_endpoint_id)
+%%index AuditEvent(user_id)
+%%index Consent(contact_id)
+%%index AiAgent(owner_id)
+%%index AiInteraction(ai_agent_id)
+%%index AiInteraction(case_id)
+%%index AiInteraction(user_id)
+%%index ContractLineItem(service_contract_id)
+%%index ContractLineItem(product_id)
+%%index ContractLineItem(asset_id)
+%%index ContactRequest(contact_id)
+%%index ContactRequest(service_channel_id)
+%%index AgentWork(queue_id)
+%%index AgentWork(user_id)
+%%index AgentWork(case_id)
+%%index AgentWork(conversation_id)
+%%index SkillRequirement(routing_configuration_id)
+%%index SkillRequirement(skill_id)
+%%index ServiceResourceSkill(service_resource_id)
+%%index ServiceResourceSkill(skill_id)
+%%index EmailMessage(case_id)
+%%index EmailMessage(contact_id)
+%%index VoiceCall(case_id)
+%%index VoiceCall(contact_id)
+%%index VoiceCall(owner_id)
+%%index VoiceCallRecording(voice_call_id)
+%%index CaseArticle(case_id)
+%%index CaseArticle(knowledge_article_id)
+%%index DataCategory(data_category_id)
+%%index ArticleCategory(knowledge_version_id)
+%%index ArticleCategory(data_category_id)
+%%index WorkType(product_id)
+%%index ApprovalRequest(change_request_id)
+%%index ApprovalRequest(return_order_id)
+%%index ApprovalRequest(approved_by_id)
+%%index ConfigurationItem(asset_id)
+%%index ServiceRequest(contact_id)
+%%index ServiceRequest(owner_id)
+%%index Release(change_request_id)
+%%index Release(owner_id)
+%%index SurveyQuestion(survey_id)
+%%index SurveyInvitation(survey_id)
+%%index SurveyInvitation(contact_id)
+%%index SurveyInvitation(case_id)
+%%index Case(case_number) unique
+%%index Asset(serial_number) unique
+%%index WorkOrder(work_order_number) unique
+%%index ReturnOrder(return_number) unique
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Tenant.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on BusinessUnit.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on User.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on RoleAssignment.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Account.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Contact.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Address.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Product.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Asset.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Warranty.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceContract.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Entitlement.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on MilestonePolicy.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceChannel.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Queue.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on PresenceStatus.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on RoutingConfiguration.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on CaseComment.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on CaseAttachment.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on CaseParticipant.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on CaseMilestone.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeVersion.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Problem.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Swarm.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on SwarmMember.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Conversation.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Message.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on BotSession.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Survey.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on SurveyResponse.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceTerritory.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceResource.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrderLineItem.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ResourceAssignment.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Location.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on InventoryItem.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequestLine.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrderLine.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Forecast.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Shift.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on QualityReview.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on CoachingSession.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on IntegrationEndpoint.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on IntegrationEvent.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on AuditEvent.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Consent.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on AiAgent.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on AiInteraction.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on BusinessHours.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ContractLineItem.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ContactRequest.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on AgentWork.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Skill.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on SkillRequirement.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceResourceSkill.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on EmailMessage.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on VoiceCall.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on VoiceCallRecording.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on CaseArticle.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on DataCategory.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ArticleCategory.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkType.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ApprovalRequest.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ConfigurationItem.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceRequest.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Release.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on SurveyQuestion.read
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on SurveyInvitation.read
+%%rbac role:security_admin on AuditEvent.*
+%%rbac role:ai_governor|security_admin on AiAgent.*
+%%rbac role:knowledge_manager|service_manager on KnowledgeArticle.*
+%%rbac role:change_manager|service_manager on ChangeRequest.*
+%%meta name: Case Lifecycle
+%%meta kind: workflow
+%%workflow CaseLifecycle entity: Case kind: state
+stateDiagram-v2
+  [*] --> new
+  new --> assigned : assign
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.assign
+  assigned --> in_progress : start
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.start
+  in_progress --> waiting_customer : await_customer
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.await_customer
+  waiting_customer --> in_progress : customer_replied
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.customer_replied
+  in_progress --> waiting_internal : await_internal
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.await_internal
+  waiting_internal --> in_progress : internal_replied
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.internal_replied
+  in_progress --> resolved : resolve
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.resolve
+  resolved --> closed : close
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.close
+  closed --> reopened : reopen
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.reopen
+  reopened --> in_progress : resume
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.resume
+  new --> cancelled : cancel
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Case.cancel
+  closed --> [*]
+  cancelled --> [*]
+%%meta name: Incident Lifecycle
+%%meta kind: workflow
+%%workflow IncidentLifecycle entity: Incident kind: state
+stateDiagram-v2
+  [*] --> detected
+  detected --> triaged : triage
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.triage
+  triaged --> investigating : investigate
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.investigate
+  investigating --> mitigating : mitigate
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.mitigate
+  mitigating --> monitoring : monitor
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.monitor
+  monitoring --> restored : restore
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.restore
+  restored --> review : review
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.review
+  review --> closed : close
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on Incident.close
+  closed --> [*]
+%%meta name: ChangeRequest Lifecycle
+%%meta kind: workflow
+%%workflow ChangeRequestLifecycle entity: ChangeRequest kind: state
+stateDiagram-v2
+  [*] --> draft
+  draft --> assessment : submit
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.submit
+  assessment --> approval : assess
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.assess
+  approval --> scheduled : approve
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.approve
+  scheduled --> implementing : implement
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.implement
+  implementing --> validating : validate
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.validate
+  validating --> completed : complete
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.complete
+  implementing --> failed : fail
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.fail
+  failed --> rolled_back : rollback
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.rollback
+  draft --> cancelled : cancel
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ChangeRequest.cancel
+  completed --> [*]
+  rolled_back --> [*]
+  cancelled --> [*]
+%%meta name: KnowledgeArticle Lifecycle
+%%meta kind: workflow
+%%workflow KnowledgeArticleLifecycle entity: KnowledgeArticle kind: state
+stateDiagram-v2
+  [*] --> draft
+  draft --> review : submit
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.submit
+  review --> approved : approve
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.approve
+  review --> rejected : reject
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.reject
+  rejected --> draft : revise
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.revise
+  approved --> published : publish
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.publish
+  published --> retired : retire
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on KnowledgeArticle.retire
+  retired --> [*]
+%%meta name: WorkOrder Lifecycle
+%%meta kind: workflow
+%%workflow WorkOrderLifecycle entity: WorkOrder kind: state
+stateDiagram-v2
+  [*] --> draft
+  draft --> planned : plan
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.plan
+  planned --> scheduled : schedule
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.schedule
+  scheduled --> dispatched : dispatch
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.dispatch
+  dispatched --> in_progress : start
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.start
+  in_progress --> completed : complete
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.complete
+  completed --> closed : close
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.close
+  draft --> cancelled : cancel
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on WorkOrder.cancel
+  closed --> [*]
+  cancelled --> [*]
+%%meta name: ServiceAppointment Lifecycle
+%%meta kind: workflow
+%%workflow ServiceAppointmentLifecycle entity: ServiceAppointment kind: state
+stateDiagram-v2
+  [*] --> requested
+  requested --> scheduled : schedule
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.schedule
+  scheduled --> dispatched : dispatch
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.dispatch
+  dispatched --> en_route : depart
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.depart
+  en_route --> onsite : arrive
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.arrive
+  onsite --> completed : complete
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.complete
+  onsite --> cannot_complete : cannot_complete
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.cannot_complete
+  requested --> cancelled : cancel
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ServiceAppointment.cancel
+  completed --> [*]
+  cannot_complete --> [*]
+  cancelled --> [*]
+%%meta name: ProductRequest Lifecycle
+%%meta kind: workflow
+%%workflow ProductRequestLifecycle entity: ProductRequest kind: state
+stateDiagram-v2
+  [*] --> draft
+  draft --> submitted : submit
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.submit
+  submitted --> approved : approve
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.approve
+  approved --> reserved : reserve
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.reserve
+  reserved --> partially_fulfilled : partial
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.partial
+  partially_fulfilled --> fulfilled : fulfil
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.fulfil
+  reserved --> fulfilled : fulfil
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.fulfil
+  draft --> cancelled : cancel
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ProductRequest.cancel
+  fulfilled --> [*]
+  cancelled --> [*]
+%%meta name: ReturnOrder Lifecycle
+%%meta kind: workflow
+%%workflow ReturnOrderLifecycle entity: ReturnOrder kind: state
+stateDiagram-v2
+  [*] --> requested
+  requested --> authorised : authorise
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.authorise
+  authorised --> in_transit : ship
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.ship
+  in_transit --> received : receive
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.receive
+  received --> inspecting : inspect
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.inspect
+  inspecting --> disposed : dispose
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.dispose
+  disposed --> closed : close
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.close
+  requested --> cancelled : cancel
+%%rbac role:service_agent|service_manager|knowledge_manager|incident_manager|change_manager|dispatcher|field_technician|inventory_manager|workforce_manager|quality_manager|integration_admin|security_admin|ai_governor on ReturnOrder.cancel
+  closed --> [*]
+  cancelled --> [*]
+%%meta name: Service Guardrails
+%%meta kind: rules
+%%rule requireCaseCustomer on Case event: beforeCreate priority: 10
+flowchart TD
+  A([Case proposed]) --> B{account_id and contact_id present?}
+  B -->|Yes| C([Accept case])
+  B -->|No| D([Reject incomplete intake])
+%%action requireCustomer validation-error when: account_id == null message: A case requires an accountable customer account.
+%%rule preventNegativeInventory on InventoryItem event: beforeUpdate priority: 10
+flowchart TD
+  A([Inventory changed]) --> B{reserved_quantity <= on_hand_quantity?}
+  B -->|Yes| C([Accept balance])
+  B -->|No| D([Reject over-reservation])
+%%action stopOverReservation validation-error when: reserved_quantity > on_hand_quantity message: Reserved quantity cannot exceed physical on-hand stock.
+%%rule requireChangeRollback on ChangeRequest event: beforeUpdate priority: 10
+flowchart TD
+  A([Change updated]) --> B{high risk has rollback plan?}
+  B -->|Yes| C([Accept assessment])
+  B -->|No| D([Reject unsafe change])
+%%action stopUnsafeChange validation-error when: risk_level == "high" and rollback_plan == null message: High-risk change requires a tested rollback plan.
+%%rule escalateCriticalCase on Case event: afterUpdate priority: 20
+flowchart TD
+  A([Case updated]) --> B{priority is critical?}
+  B -->|Yes| C[Open escalation event]
+  B -->|No| D([Continue normal service])
+  C --> E([Escalation recorded])
+%%action recordCriticalEscalation trigger-workflow when: priority == "critical" workflow: CriticalCaseEscalation message: Critical case escalation event queued.
+%%meta name: Critical Case Escalation
+%%meta kind: workflow
+%%workflow CriticalCaseEscalation entity: Case kind: saga trigger: rule
+flowchart TD
+  A([Critical case accepted]) --> B[Create escalation event]
+  B --> C([Escalation queued])
+%%step B CreateEntity entity: IntegrationEvent as: escalationEventId fields: {"name":"case_number","event_type":"critical_case_escalated","correlation_key":"case_number","status":"pending","attempt_count":0}
+%%meta name: Case Governance Hooks
+%%meta kind: workflow
+%%workflow CaseGovernance entity: Case kind: hook
+flowchart TD
+  A[Case request] --> B[Scope tenant access]
+  B --> C[Validate entitlement]
+  C --> D[Record audit outcome]
+  D --> E[Case response]
+%%hook beforeQuery scopeCaseTenant on Case[field: account_id]
+%%hook customValidate validateCaseEntitlement on Case[field: entitlement_id]
+%%hook afterUpdate recordCaseAudit on Case
+%%meta name: Service Automation Rules
+%%meta kind: rules
+%%rule escalateBreachedMilestone on CaseMilestone event: afterUpdate priority: 10
+flowchart TD
+  A([Milestone updated]) --> B{status is breached?}
+  B -->|Yes| C[Start breach response]
+  B -->|No| D([Keep monitoring])
+  C --> E([Escalation queued])
+%%action startMilestoneBreach trigger-workflow when: status == "breached" workflow: MilestoneBreachResponse message: SLA breach detected — escalation and audit have been queued.
+%%rule inviteResolvedCaseSurvey on Case event: afterUpdate priority: 30
+flowchart TD
+  A([Case updated]) --> B{status is resolved?}
+  B -->|Yes| C[Prepare feedback invitation]
+  B -->|No| D([No feedback action])
+  C --> E([Invitation queued])
+%%action startClosureSurvey trigger-workflow when: status == "resolved" workflow: CaseClosureFeedback message: Resolved case qualifies for the closure feedback journey.
+%%rule seekHighRiskChangeApproval on ChangeRequest event: afterUpdate priority: 20
+flowchart TD
+  A([Change assessed]) --> B{risk is high or critical?}
+  B -->|Yes| C[Open governed approval]
+  B -->|No| D([Continue standard path])
+  C --> E([Approval requested])
+%%action startChangeApproval trigger-workflow when: risk_level == "high" or risk_level == "critical" workflow: HighRiskChangeApproval message: High-risk change requires an accountable approval decision.
+%%rule notifyMajorIncident on Incident event: afterUpdate priority: 10
+flowchart TD
+  A([Incident updated]) --> B{severity is sev1?}
+  B -->|Yes| C[Start major incident communications]
+  B -->|No| D([Use normal incident cadence])
+  C --> E([Communication event queued])
+%%action startMajorIncidentComms trigger-workflow when: severity == "sev1" workflow: MajorIncidentCommunication message: Major incident communication and audit have been queued.
+%%rule governBotHandoff on BotSession event: afterUpdate priority: 10
+flowchart TD
+  A([Bot session updated]) --> B{handoff requested?}
+  B -->|Yes| C[Preserve context and alert routing]
+  B -->|No| D([Continue governed automation])
+  C --> E([Human handoff queued])
+%%action startHumanHandoff trigger-workflow when: status == "handed_off" workflow: BotHumanHandoff message: Bot context has been preserved for human service.
+%%rule reconcileCompletedAppointment on ServiceAppointment event: afterUpdate priority: 20
+flowchart TD
+  A([Appointment updated]) --> B{visit completed?}
+  B -->|Yes| C[Reconcile field completion]
+  B -->|No| D([No completion action])
+  C --> E([Reconciliation queued])
+%%action startFieldReconciliation trigger-workflow when: status == "completed" workflow: FieldCompletionReconciliation message: Completed visit requires parts, evidence, and customer follow-up reconciliation.
+%%rule auditPublishedKnowledge on KnowledgeArticle event: afterUpdate priority: 20
+flowchart TD
+  A([Article updated]) --> B{article published?}
+  B -->|Yes| C[Record publication and notify search]
+  B -->|No| D([Continue editorial work])
+  C --> E([Publication event queued])
+%%action startKnowledgePublication trigger-workflow when: status == "published" workflow: KnowledgePublicationGovernance message: Published knowledge has been queued for audit and search refresh.
+%%rule reconcileReceivedReturn on ReturnOrder event: afterUpdate priority: 20
+flowchart TD
+  A([Return updated]) --> B{return received?}
+  B -->|Yes| C[Start inspection and stock reconciliation]
+  B -->|No| D([Continue return journey])
+  C --> E([Reconciliation queued])
+%%action startReturnReconciliation trigger-workflow when: status == "received" workflow: ReturnReceiptReconciliation message: Received return requires inspection, disposition, and inventory reconciliation.
+%%rule blockUnconsentedRecording on VoiceCallRecording event: beforeCreate priority: 5
+flowchart TD
+  A([Recording proposed]) --> B{consent granted?}
+  B -->|Yes| C([Accept protected recording])
+  B -->|No| D([Reject recording])
+%%action requireRecordingConsent validation-error when: consent_status != "granted" message: Voice recording requires evidenced customer consent before storage.
+%%rule protectAiAutonomy on AiInteraction event: beforeCreate priority: 5
+flowchart TD
+  A([AI action proposed]) --> B{low confidence action supervised?}
+  B -->|Yes| C([Accept governed interaction])
+  B -->|No| D([Block unsafe action])
+%%action blockLowConfidenceAutonomy validation-error when: confidence < 0.7 and user_id == null message: Low-confidence AI output requires accountable human supervision.
+%%meta name: Milestone Breach Response
+%%meta kind: workflow
+%%workflow MilestoneBreachResponse entity: CaseMilestone kind: saga trigger: rule
+flowchart TD
+  A([SLA milestone breached]) --> B[Create escalation event]
+  B --> C[Write immutable audit fact]
+  C --> D([Breach response queued])
+%%step B CreateEntity entity: IntegrationEvent as: breachEventId fields: {"name":"milestone_type","event_type":"sla_milestone_breached","correlation_key":"case_id","status":"pending","attempt_count":0}
+%%step C CreateEntity entity: AuditEvent as: breachAuditId fields: {"name":"milestone_type","entity_name":"milestone_type","record_key":"case_id","action_type":"update","change_detail":"status"}
+%%meta name: Case Closure Feedback
+%%meta kind: workflow
+%%workflow CaseClosureFeedback entity: Case kind: saga trigger: rule
+flowchart TD
+  A([Case resolved]) --> B[Create feedback invitation]
+  B --> C[Record feedback trigger]
+  C --> D([Feedback journey queued])
+%%step B CreateEntity entity: SurveyInvitation as: surveyInvitationId fields: {"name":"case_number","contact_id":"contact_id","case_id":"id","expires_at":"closed_at","status":"queued"}
+%%step C CreateEntity entity: AuditEvent as: surveyAuditId fields: {"name":"case_number","entity_name":"case_number","record_key":"case_number","action_type":"create","change_detail":"status"}
+%%meta name: High Risk Change Approval
+%%meta kind: workflow
+%%workflow HighRiskChangeApproval entity: ChangeRequest kind: saga trigger: rule
+flowchart TD
+  A([High-risk change assessed]) --> B[Create approval request]
+  B --> C[Record approval audit]
+  C --> D([Approval pending])
+%%step B CreateEntity entity: ApprovalRequest as: approvalRequestId fields: {"name":"name","change_request_id":"id","approval_type":"change","status":"pending","decision_reason":"risk_level"}
+%%step C CreateEntity entity: AuditEvent as: approvalAuditId fields: {"name":"name","entity_name":"name","record_key":"id","action_type":"approve","change_detail":"risk_level"}
+%%meta name: Major Incident Communication
+%%meta kind: workflow
+%%workflow MajorIncidentCommunication entity: Incident kind: saga trigger: rule
+flowchart TD
+  A([Major incident confirmed]) --> B[Queue stakeholder event]
+  B --> C[Record communication audit]
+  C --> D([Communication cadence started])
+%%step B CreateEntity entity: IntegrationEvent as: incidentEventId fields: {"name":"major_incident_number","event_type":"major_incident_declared","correlation_key":"major_incident_number","status":"pending","attempt_count":0}
+%%step C CreateEntity entity: AuditEvent as: incidentAuditId fields: {"name":"major_incident_number","entity_name":"major_incident_number","record_key":"major_incident_number","action_type":"update","change_detail":"impact_statement"}
+%%meta name: Bot Human Handoff
+%%meta kind: workflow
+%%workflow BotHumanHandoff entity: BotSession kind: saga trigger: rule
+flowchart TD
+  A([Bot requests human help]) --> B[Queue handoff event]
+  B --> C[Record AI oversight audit]
+  C --> D([Context ready for agent])
+%%step B CreateEntity entity: IntegrationEvent as: handoffEventId fields: {"name":"name","event_type":"bot_human_handoff","correlation_key":"conversation_id","status":"pending","attempt_count":0}
+%%step C CreateEntity entity: AuditEvent as: handoffAuditId fields: {"name":"name","entity_name":"name","record_key":"conversation_id","action_type":"update","change_detail":"handoff_reason"}
+%%meta name: Field Completion Reconciliation
+%%meta kind: workflow
+%%workflow FieldCompletionReconciliation entity: ServiceAppointment kind: saga trigger: rule
+flowchart TD
+  A([Field visit completed]) --> B[Queue parts reconciliation]
+  B --> C[Record completion audit]
+  C --> D([Field completion reconciled])
+%%step B CreateEntity entity: IntegrationEvent as: fieldEventId fields: {"name":"name","event_type":"field_visit_completed","correlation_key":"work_order_id","status":"pending","attempt_count":0}
+%%step C CreateEntity entity: AuditEvent as: fieldAuditId fields: {"name":"name","entity_name":"name","record_key":"work_order_id","action_type":"update","change_detail":"status"}
+%%meta name: Knowledge Publication Governance
+%%meta kind: workflow
+%%workflow KnowledgePublicationGovernance entity: KnowledgeArticle kind: saga trigger: rule
+flowchart TD
+  A([Knowledge published]) --> B[Queue search refresh]
+  B --> C[Record publication audit]
+  C --> D([Publication governed])
+%%step B CreateEntity entity: IntegrationEvent as: knowledgeEventId fields: {"name":"article_number","event_type":"knowledge_published","correlation_key":"article_number","status":"pending","attempt_count":0}
+%%step C CreateEntity entity: AuditEvent as: knowledgeAuditId fields: {"name":"article_number","entity_name":"article_number","record_key":"article_number","action_type":"approve","change_detail":"status"}
+%%meta name: Return Receipt Reconciliation
+%%meta kind: workflow
+%%workflow ReturnReceiptReconciliation entity: ReturnOrder kind: saga trigger: rule
+flowchart TD
+  A([Return received]) --> B[Queue inspection event]
+  B --> C[Record receipt audit]
+  C --> D([Inspection and stock reconciliation queued])
+%%step B CreateEntity entity: IntegrationEvent as: returnEventId fields: {"name":"return_number","event_type":"return_received","correlation_key":"return_number","status":"pending","attempt_count":0}
+%%step C CreateEntity entity: AuditEvent as: returnAuditId fields: {"name":"return_number","entity_name":"return_number","record_key":"return_number","action_type":"update","change_detail":"status"}
+%%meta name: Service Management Reporting
+%%meta kind: reports
+%%report open-case-backlog title: Open case backlog by priority entity: Case chart: bar x: priority y: open_cases help: Shows managers where unresolved customer demand is concentrated by urgency. sql: SELECT priority, COUNT(*) AS open_cases FROM bus_case WHERE deleted_at IS NULL AND status NOT IN ('closed','cancelled') GROUP BY priority ORDER BY open_cases DESC
+%%report unassigned-cases title: Unassigned active cases entity: Case help: Finds accepted customer work with no accountable agent before it ages or breaches. sql: SELECT case_number, name, priority, status, created_at FROM bus_case WHERE deleted_at IS NULL AND owner_id IS NULL AND status NOT IN ('closed','cancelled') ORDER BY created_at
+%%report case-aging-by-queue title: Case aging by queue entity: Case chart: bar x: queue_name y: average_age_hours help: Compares active backlog age across queues so supervisors can rebalance capacity. sql: SELECT q.name AS queue_name, AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - c.created_at))/3600) AS average_age_hours FROM bus_case c JOIN bus_queue q ON q.id = c.queue_id WHERE c.deleted_at IS NULL AND q.deleted_at IS NULL AND c.status NOT IN ('closed','cancelled') GROUP BY q.name ORDER BY average_age_hours DESC
+%%report sla-breach-rate title: SLA milestone breach rate entity: CaseMilestone chart: bar x: milestone_type y: breach_rate help: Measures the proportion of completed or elapsed service clocks that breached their contractual target. sql: SELECT milestone_type, 100.0 * SUM(CASE WHEN status = 'breached' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0) AS breach_rate FROM bus_case_milestone WHERE deleted_at IS NULL GROUP BY milestone_type ORDER BY breach_rate DESC
+%%report cases-nearing-sla title: Cases approaching SLA deadline entity: CaseMilestone help: Gives agents and managers a forward-looking list of active clocks due within two hours. sql: SELECT c.case_number, m.milestone_type, m.target_at, c.priority, c.status FROM bus_case_milestone m JOIN bus_case c ON c.id = m.case_id WHERE m.deleted_at IS NULL AND c.deleted_at IS NULL AND m.status = 'active' AND m.target_at <= CURRENT_TIMESTAMP + INTERVAL '2 hours' ORDER BY m.target_at
+%%report first-contact-resolution title: First-contact resolution proxy entity: Case chart: line x: month y: resolution_rate help: Tracks resolved cases that did not reopen, grouped by closure month as a service-effectiveness indicator. sql: SELECT DATE_TRUNC('month', closed_at) AS month, 100.0 * SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0) AS resolution_rate FROM bus_case WHERE deleted_at IS NULL AND closed_at IS NOT NULL GROUP BY month ORDER BY month
+%%report channel-demand title: Case demand by origin entity: Case chart: pie x: origin y: case_count help: Shows which customer channels create service demand and informs channel investment and staffing. sql: SELECT origin, COUNT(*) AS case_count FROM bus_case WHERE deleted_at IS NULL GROUP BY origin ORDER BY case_count DESC
+%%report agent-workload title: Active routed work by agent entity: AgentWork chart: bar x: agent_name y: active_items help: Shows current accepted and active omnichannel work so supervisors can identify overload and idle capacity. sql: SELECT u.name AS agent_name, COUNT(*) AS active_items FROM bus_agent_work aw JOIN bus_user u ON u.id = aw.user_id WHERE aw.deleted_at IS NULL AND u.deleted_at IS NULL AND aw.status IN ('accepted','active') GROUP BY u.name ORDER BY active_items DESC
+%%report queue-waiting-work title: Waiting routed work by queue entity: AgentWork chart: bar x: queue_name y: waiting_items help: Highlights queues where offered work has not yet been accepted. sql: SELECT q.name AS queue_name, COUNT(*) AS waiting_items FROM bus_agent_work aw JOIN bus_queue q ON q.id = aw.queue_id WHERE aw.deleted_at IS NULL AND q.deleted_at IS NULL AND aw.status IN ('pending','offered') GROUP BY q.name ORDER BY waiting_items DESC
+%%report conversation-containment title: Automated conversation containment entity: BotSession chart: bar x: status y: sessions help: Compares bot completion, failure, and human handoff volumes to monitor safe automation effectiveness. sql: SELECT status, COUNT(*) AS sessions FROM bus_bot_session WHERE deleted_at IS NULL GROUP BY status ORDER BY sessions DESC
+%%report knowledge-effectiveness title: Knowledge use and helpfulness entity: CaseArticle chart: bar x: usage_type y: helpful_links help: Shows which knowledge delivery paths contribute to case resolution and which need editorial improvement. sql: SELECT usage_type, SUM(CASE WHEN helpful THEN 1 ELSE 0 END) AS helpful_links FROM bus_case_article WHERE deleted_at IS NULL GROUP BY usage_type ORDER BY helpful_links DESC
+%%report stale-published-knowledge title: Published knowledge requiring review entity: KnowledgeArticle help: Lists published articles whose governance activity is oldest so knowledge managers can schedule validation or retirement. sql: SELECT article_number, name, article_type, created_at FROM bus_knowledge_article WHERE deleted_at IS NULL AND status = 'published' ORDER BY created_at
+%%report major-incident-status title: Major incident status and impact entity: Incident chart: bar x: status y: incident_count help: Summarises active disruption volume and lifecycle position for command and executive review. sql: SELECT status, COUNT(*) AS incident_count FROM bus_incident WHERE deleted_at IS NULL GROUP BY status ORDER BY incident_count DESC
+%%report high-risk-change-pipeline title: High-risk change pipeline entity: ChangeRequest chart: bar x: status y: change_count help: Shows high and critical changes awaiting assessment, approval, implementation, validation, or rollback. sql: SELECT status, COUNT(*) AS change_count FROM bus_change_request WHERE deleted_at IS NULL AND risk_level IN ('high','critical') GROUP BY status ORDER BY change_count DESC
+%%report failed-change-rate title: Failed and rolled-back changes entity: ChangeRequest chart: line x: month y: failed_changes help: Tracks unsuccessful production changes over time for reliability and CAB improvement. sql: SELECT DATE_TRUNC('month', created_at) AS month, COUNT(*) AS failed_changes FROM bus_change_request WHERE deleted_at IS NULL AND status IN ('failed','rolled_back') GROUP BY month ORDER BY month
+%%report field-appointment-performance title: Field appointment outcomes entity: ServiceAppointment chart: bar x: status y: appointments help: Compares completed, cancelled, and cannot-complete visits to expose scheduling, parts, or skills problems. sql: SELECT status, COUNT(*) AS appointments FROM bus_service_appointment WHERE deleted_at IS NULL GROUP BY status ORDER BY appointments DESC
+%%report technician-utilisation title: Scheduled technician hours entity: ResourceAssignment chart: bar x: technician y: scheduled_hours help: Measures reserved appointment time by technician for workload balancing and capacity planning. sql: SELECT sr.name AS technician, SUM(EXTRACT(EPOCH FROM (ra.assigned_end - ra.assigned_start))/3600) AS scheduled_hours FROM bus_resource_assignment ra JOIN bus_service_resource sr ON sr.id = ra.service_resource_id WHERE ra.deleted_at IS NULL AND sr.deleted_at IS NULL GROUP BY sr.name ORDER BY scheduled_hours DESC
+%%report parts-below-reorder title: Service parts below reorder point entity: InventoryItem help: Lists stock balances that cannot safely meet expected field demand after current reservations. sql: SELECT l.name AS location, p.name AS product, i.on_hand_quantity, i.reserved_quantity, i.reorder_point FROM bus_inventory_item i JOIN bus_location l ON l.id = i.location_id JOIN bus_product p ON p.id = i.product_id WHERE i.deleted_at IS NULL AND l.deleted_at IS NULL AND p.deleted_at IS NULL AND i.on_hand_quantity - i.reserved_quantity <= i.reorder_point ORDER BY location, product
+%%report return-disposition title: Returned product disposition entity: ReturnOrderLine chart: pie x: disposition y: returned_units help: Shows whether returned units are restocked, repaired, scrapped, sent to vendors, or returned to customers. sql: SELECT disposition, SUM(quantity) AS returned_units FROM bus_return_order_line WHERE deleted_at IS NULL GROUP BY disposition ORDER BY returned_units DESC
+%%report forecast-staffing-gap title: Forecast staffing gap entity: Forecast chart: bar x: interval_start y: required_agents help: Shows required agents by planning interval so workforce managers can compare forecast demand with published shifts. sql: SELECT interval_start, SUM(required_agents) AS required_agents FROM bus_forecast WHERE deleted_at IS NULL GROUP BY interval_start ORDER BY interval_start
+%%report quality-score-by-agent title: Quality score by agent entity: QualityReview chart: bar x: agent_name y: average_score help: Compares calibrated interaction quality while preserving the review evidence behind coaching. sql: SELECT u.name AS agent_name, AVG(qr.score) AS average_score FROM bus_quality_review qr JOIN bus_user u ON u.id = qr.user_id WHERE qr.deleted_at IS NULL AND u.deleted_at IS NULL AND qr.status = 'final' GROUP BY u.name ORDER BY average_score DESC
+%%report customer-satisfaction title: Customer satisfaction trend entity: SurveyResponse chart: line x: month y: average_score help: Tracks customer ratings over time and provides the top-level service outcome measure. sql: SELECT DATE_TRUNC('month', created_at) AS month, AVG(score) AS average_score FROM bus_survey_response WHERE deleted_at IS NULL GROUP BY month ORDER BY month
+%%report negative-feedback-recovery title: Negative feedback requiring recovery entity: SurveyResponse help: Gives service managers the customer comments and cases that need a closed-loop recovery response. sql: SELECT sr.created_at, sr.score, sr.sentiment, sr.comment, c.case_number FROM bus_survey_response sr LEFT JOIN bus_case c ON c.id = sr.case_id WHERE sr.deleted_at IS NULL AND sr.sentiment = 'negative' ORDER BY sr.created_at DESC
+%%report integration-dead-letter title: Failed integration events entity: IntegrationEvent help: Lists dead-lettered and repeatedly failing events with correlation keys for operational recovery. sql: SELECT name, event_type, correlation_key, status, attempt_count, created_at FROM bus_integration_event WHERE deleted_at IS NULL AND status IN ('retrying','dead_lettered') ORDER BY attempt_count DESC, created_at
+%%report ai-oversight-outcomes title: AI outcomes and human oversight entity: AiInteraction chart: bar x: outcome y: interactions help: Shows acceptance, edits, rejection, escalation, and policy blocks across governed AI service interactions. sql: SELECT outcome, COUNT(*) AS interactions FROM bus_ai_interaction WHERE deleted_at IS NULL GROUP BY outcome ORDER BY interactions DESC
+%%report ai-low-confidence-review title: Low-confidence AI interactions entity: AiInteraction help: Lists AI outputs below the supervision threshold for governance review and prompt or policy improvement. sql: SELECT name, case_id, user_id, outcome, confidence, rationale, created_at FROM bus_ai_interaction WHERE deleted_at IS NULL AND confidence < 0.7 ORDER BY confidence, created_at DESC
+%%report consent-exceptions title: Consent exceptions by purpose entity: Consent chart: bar x: purpose y: restricted_contacts help: Counts denied, withdrawn, and expired consent choices that automations and agents must honour. sql: SELECT purpose, COUNT(*) AS restricted_contacts FROM bus_consent WHERE deleted_at IS NULL AND status IN ('denied','withdrawn','expired') GROUP BY purpose ORDER BY restricted_contacts DESC
+%%report audit-sensitive-actions title: Sensitive actions by type entity: AuditEvent chart: bar x: action_type y: action_count help: Summarises exports, deletes, approvals, logins, and permission changes for security review. sql: SELECT action_type, COUNT(*) AS action_count FROM bus_audit_event WHERE deleted_at IS NULL AND action_type IN ('export','delete','approve','reject','login','permission_change') GROUP BY action_type ORDER BY action_count DESC
