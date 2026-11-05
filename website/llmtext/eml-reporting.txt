@@ -1,6 +1,6 @@
 # AppWithAI — the reporting application (chunk `eml-reporting.txt` of https://www.appwithai.org/llms.txt)
 
-> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1 · enhancement-examples.txt §9
+> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1, §7.2 · enhancement-examples.txt §9
 
 ### 7.1 The reporting application — what Enterprise Reporting makes of the same model
 
@@ -89,3 +89,88 @@ shape (`EML290`–`EML296`) and cannot know whether a column it names exists.
 `check-reporting-pack.ts` in the orchestrator is what runs every derived and
 authored query against a schema the generator actually emitted, so a renamed
 column fails CI rather than every report at run time.
+
+### 7.2 Reporting coverage — mandatory, and it is the whole domain
+
+The derived baseline in §7.1 describes the *shape* of the data. It does not
+count here. Only `%%report` lines the author writes count toward the minimums
+below, because only the author knows what the business asks.
+
+**7.2.1 The minimum, per role.** Every role declared in `%%rbac` — one per
+reporting account (§7.1) — gets **at least 50 reports and at least 50 charts**.
+A `%%report` with `chart:` yields one report and one chart, so **50 charted
+`%%report` lines per role meets both numbers**; reports without a chart are
+extra, never a substitute. Fifty is a floor. A role that reads forty tables
+should have far more.
+
+**7.2.2 What counts toward a role.**
+
+- The `%%report` must be one that role **can run**: every `bus_` table its SQL
+  names is on that role's read list (`%%rbac role:<role> on <Entity>.read`, or an
+  entity with no `read` line at all, which is open to every role). A report a role
+  would be refused is not that role's report.
+- It must be a **distinct business question**: it differs from the role's other
+  reports in the measure, the grouping, the population it filters, or the time
+  window — and a person would act on its answer. The same query with another
+  `LIMIT`, `ORDER BY` or column order is one report, not two. Never pad.
+- It has a plain-language `title:` that reads as the question, and a `help:`
+  saying who asks it and what they do with the answer.
+- The generated `administrator` and `user` accounts are not declared roles and
+  need no set of their own — they run everything the declared roles do. A model
+  that *does* declare `administrator` in `%%rbac` owes it its own 50: give it
+  the cross-domain, executive and exception questions.
+- A report several roles can run counts for each of them, but a role's 50 are
+  not met by borrowing another role's: write the questions this role asks.
+
+**7.2.3 Cover the domain, not one corner of it.** Walk every entity the role may
+read and write at least one question about it; then keep adding from these
+families until the role has 50 distinct ones. A role whose reports are all
+"count of X by status" has not covered its domain.
+
+| Family | The question it answers |
+|---|---|
+| Volume and trend | How many, per month and per quarter; this period against the last |
+| Lifecycle | How many sit in each state; how long do they stay; where do they stall |
+| Exceptions | What is overdue, unassigned, blocked, expiring, or missing a required fact |
+| Rankings | The ten largest, the slowest, the most frequent, by owner, customer or site |
+| Money and quantity | Totals, averages, variance, ageing, margin — each over its own measure |
+| Conversion and flow | What share moves from one state to the next; throughput per period |
+| Relationships | Children per parent, parents with none, value rolled up from child records |
+| Quality and compliance | Duplicates, gaps, out-of-policy values, items awaiting approval |
+| Ownership and workload | Per person, per team, per queue; who is overloaded or idle |
+
+A role with a short read list may have to lean on these families harder, but if
+its tables genuinely cannot support 50 distinct questions, that is a modelling
+finding, not a reason to pad: at Gate B widen the role's `read` lines or merge it
+with a neighbouring role, and say which you did.
+
+**7.2.4 How to write them so they can be counted.**
+
+- Name each new report with the role as a prefix, lower-case and hyphenated —
+  `%%report sales-manager-open-pipeline-by-stage …` — so a role's set can be
+  counted by name. The name is the key a report is stored under (`EML292`), so
+  it must be unique across the whole file.
+- Every charted report names both axes, and both must be columns in its
+  `SELECT` list (alias them): `chart: bar x: stage y: total`. Use `line` or
+  `area` for time, `pie` only up to six slices, `bar` otherwise.
+- Every report keeps the rules of §7.1 and the `%%report` entry in the syntax
+  chunk: it only reads, it filters `deleted_at IS NULL`, it joins on the keys
+  directly, and it is one line with `sql:` last.
+- **ENHANCE:** reports already in the file keep their names and count toward a
+  role when the role can run them. Add what is missing to reach 50 per role;
+  never rename, merge or drop an existing `%%report`.
+
+Count a role's set from the delivered bytes — never from memory:
+
+```
+grep -c '^[[:space:]]*%%report <role-slug>-' <file>.mmd
+grep '^[[:space:]]*%%report <role-slug>-' <file>.mmd | grep -c ' chart: '
+```
+
+**7.2.5 Report the coverage.** The delivery states, for each declared role, its
+charted `%%report` count and its uncharted count, as printed by the commands
+above (or, for an ENHANCE file's older reports, counted by reading their SQL and
+saying so). A role below 50 is a failed delivery, not a note. The checker and
+the audit do not count reports yet — they hold each `%%report` to its shape
+(`EML290`–`EML296`) and nothing else — so this count is yours to make and to
+state honestly. Never write a number a count did not produce.

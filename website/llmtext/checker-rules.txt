@@ -1,6 +1,6 @@
 # AppWithAI — validation rules and the delivery checklist (chunk `checker-rules.txt` of https://www.appwithai.org/llms.txt)
 
-> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1 · enhancement-examples.txt §9
+> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1, §7.2 · enhancement-examples.txt §9
 
 ## Rules that govern every delivery
 
@@ -836,12 +836,12 @@ the model matches the business — and for the reasoning behind the ones it can.
    also read it (§6). A model where one role sees all forty tables is the same
    application once, not four times.
 
-18. **If the model carries `%%report` directives, more than one role has them.**
-   A reporting layer that answers one person's questions is that person's saved
-   query. Walk the roles on the `%%rbac` matrix: a role with a read-list and no
-   report can see its records and cannot ask anything about them. Reports are
-   optional — a model without any is complete — but a model with exactly one
-   role's worth is half-finished rather than economical.
+18. **Every declared role has at least 50 charted `%%report` lines.**
+   Reporting is mandatory and covers the whole domain (§7.2): at least 50 reports
+   and 50 charts per role, each a distinct business question over tables that
+   role may read, named with the role as a prefix, counted from the delivered
+   bytes and stated per role. A role with a read-list and no reports can see its
+   records and cannot ask anything about them; a role below fifty is half-finished.
 
 **The handover**
 
