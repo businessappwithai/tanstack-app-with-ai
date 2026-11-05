@@ -25,7 +25,7 @@ import { attachFormSections } from "../parsers/section.parser";
 import { generateApplication, readModelSources } from "../pipeline";
 import { cliLogger } from "../pipeline/logger-port";
 import { compileRbac } from "../rbac";
-import { compileReports } from "../reports";
+import { compileDashboards, compileReports } from "../reports";
 import { compileRules } from "../rules";
 import { runTypeChecks } from "../utils/type-check.js";
 import { compileSagaWorkflows, compileWorkflows } from "../workflows";
@@ -531,6 +531,12 @@ program
         allEntities.map((entity) => entity.name),
         warn
       );
+      // `%%dashboard` groups a role's reports into a dashboard for the reporting pack.
+      const compiledDashboards = compileDashboards(
+        ruleSources.join("\n"),
+        compiledReports.map((report) => report.name),
+        warn
+      );
 
       // ── Entity summary ──────────────────────────────────────────────────
       if (!quiet) {
@@ -655,6 +661,7 @@ program
           sagas: compiledSagas,
           rbac: compiledRbac,
           reports: compiledReports,
+          dashboards: compiledDashboards,
         },
         stackOption,
         projectName: options.name,

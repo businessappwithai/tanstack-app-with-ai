@@ -266,6 +266,40 @@ function parseDirective(line: string, n: number, model: EmlModel): DirectiveResu
       });
       return;
     }
+    case "dashboard": {
+      // `%%dashboard <name> title: <T> role: <role> reports: <a>, <b>, … [help: <why>]`.
+      // `reports:` is a comma list, so it is read up to the next key like any
+      // other value; there is no sql: clause to split off first.
+      const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+      if (!nameMatch) {
+        model.diagnostics.push({
+          severity: "error",
+          code: "EML297",
+          message: `%%dashboard has no name: "${line}"`,
+          line: n,
+        });
+        return;
+      }
+      const [name] = caps(nameMatch, 1);
+      const keys = rest.slice(nameMatch[0].length);
+      const read = (key: string): string | undefined => {
+        const m2 = keys.match(
+          new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:title|role|reports|help):|$)`, "s")
+        );
+        return m2?.[1]?.trim() || undefined;
+      };
+      model.dashboards.push({
+        name,
+        title: read("title") ?? name.replace(/[_-]+/g, " "),
+        role: read("role"),
+        reports: (read("reports") ?? "")
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean),
+        help: read("help"),
+      });
+      return;
+    }
     case "enum": {
       const m = rest.match(/^(\w+)\s*:\s*(.+)$/);
       if (m) {

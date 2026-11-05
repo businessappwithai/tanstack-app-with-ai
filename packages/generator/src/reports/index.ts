@@ -208,3 +208,103 @@ export function compileReports(
 
   return [...byName.values()];
 }
+
+/** One `%%dashboard`, as the reporting pack will carry it. */
+export interface CompiledDashboard {
+  /** Stable identifier — unique across the model, and the pack key. */
+  name: string;
+  /** What the dashboard is called on screen. */
+  title: string;
+  /** The declared `%%rbac` role it is for. */
+  role?: string;
+  /** The `%%report` names it shows, in order. */
+  reports: string[];
+  /** Who opens this dashboard and what they decide from it. */
+  help?: string;
+}
+
+/** The keys `%%dashboard` understands, in the order a value scan has to stop at. */
+const DASHBOARD_KEYS = ["title", "role", "reports", "help"] as const;
+
+/**
+ * Read one `%%dashboard` line.
+ *
+ * Anchored at `^%%` like every directive parser here, so prose that merely
+ * mentions a dashboard is prose. `reports:` is a comma list and ends at the next
+ * key, as any other value does.
+ */
+export function parseDashboardDirective(line: string): CompiledDashboard | { error: string } {
+  const directive = line.trim().match(/^%%+dashboard\s+(.+)$/is);
+  if (!directive?.[1]) return { error: "not a %%dashboard directive" };
+  const rest = directive[1];
+
+  const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+  if (!nameMatch?.[1]) return { error: "has no name" };
+  const name = nameMatch[1];
+  const keys = rest.slice(nameMatch[0].length);
+
+  const read = (key: string): string | undefined => {
+    const stop = DASHBOARD_KEYS.join("|");
+    const found = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:${stop}):|$)`, "is"));
+    return found?.[1]?.trim() || undefined;
+  };
+
+  const reports = (read("reports") ?? "")
+    .split(",")
+    .map((r) => r.trim())
+    .filter(Boolean);
+  if (reports.length === 0) return { error: "names no reports" };
+
+  return {
+    name,
+    title: read("title") ?? name.replace(/[_-]+/g, " "),
+    role: read("role"),
+    reports,
+    help: read("help"),
+  };
+}
+
+/**
+ * Compile every `%%dashboard` in the document.
+ *
+ * A name that is not a `%%report` is dropped from the dashboard with a warning
+ * rather than failing generation: the checker already refuses it (`EML297`), and
+ * a tile that points at nothing would render empty, which reads as no data. A
+ * dashboard left with no reports is skipped altogether.
+ */
+export function compileDashboards(
+  source: string,
+  reportNames: string[],
+  warn: (message: string) => void = () => {}
+): CompiledDashboard[] {
+  const known = new Set(reportNames);
+  const byName = new Map<string, CompiledDashboard>();
+
+  for (const line of source.split("\n")) {
+    if (!/^\s*%%+dashboard\b/i.test(line)) continue;
+
+    const parsed = parseDashboardDirective(line);
+    if ("error" in parsed) {
+      warn(`%%dashboard ${parsed.error} — skipped: ${line.trim().slice(0, 120)}`);
+      continue;
+    }
+    if (byName.has(parsed.name)) {
+      warn(`%%dashboard "${parsed.name}" is declared more than once — keeping the first`);
+      continue;
+    }
+
+    const shown = parsed.reports.filter((name) => known.has(name));
+    for (const name of parsed.reports) {
+      if (!known.has(name)) {
+        warn(`%%dashboard "${parsed.name}" lists "${name}", which is not a %%report — left off`);
+      }
+    }
+    if (shown.length === 0) {
+      warn(`%%dashboard "${parsed.name}" shows no declared report — skipped`);
+      continue;
+    }
+    byName.set(parsed.name, { ...parsed, reports: shown });
+  }
+
+  return [...byName.values()];
+}

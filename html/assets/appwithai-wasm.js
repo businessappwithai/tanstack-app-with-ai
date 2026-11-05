@@ -1525,6 +1525,27 @@ var appwithai_language_default = {
           againstWhichSchema: "The query runs against the *generated application's* database, so it names `bus_` tables. It is not checked against a live schema at author time - the checker has no database - but `check-reporting-pack.ts in the orchestrator` executes every query in the pack against a real generated schema in CI.",
           whereItIsCompiled: "Compiled twice, by two readers, and neither replaces the other. Here, packages/generator/src/reports/index.ts puts each report into the generated application itself: a sys_report row served at /sys/reports and shown under Admin > Analysis in the NestJS stack, and a model.json entry served at /api/reports and shown under Reports in the browser application. Separately, businessappwithai/app-and-report-with-ai-tanstack compiles the same directive with common/build/reporting-pack.ts into a saved query, a report definition and, where chart: is set, a chart, seeded into the Enterprise Reporting platform ahead of the derived baseline. The real platform runs beside a deployed application, under the orchestrator's docker-compose or as the report service of the deployable archive's own compose file, and the browser application previews the same pack; see generatorContract.reportingApplication."
         }
+      },
+      {
+        keyword: "%%dashboard",
+        form: "%%dashboard <name> title: <Title> role: <role> reports: <report-name>, <report-name>, ... [help: <who opens it and what they decide>]",
+        status: "compiled",
+        consumedBy: [
+          "packages/generator/src/reports/index.ts -> compileDashboards -> reporting pack dashboards",
+          "language/cli/src/parser.ts -> model.dashboards",
+          "language/checker.ts (shape: EML297; per-role minimums: EML298, EML299)"
+        ],
+        purpose: "Group a role's own %%report directives into a named dashboard. The reporting pack derives one overview dashboard from structure; that cannot say which questions belong together for the person who asks them. A dashboard belongs to the declared %%rbac role named by role:, shows the %%report directives named by reports: in that order (a charted report as a chart tile, an uncharted one as a table tile), and is served by the reporting platform and its browser preview beside the overview.",
+        examples: [
+          "%%dashboard sales-manager-pipeline-review title: Pipeline review role: sales_manager reports: sales-manager-pipeline-by-stage, sales-manager-pipeline-by-owner, sales-manager-slipped-deals help: The Monday forecast meeting."
+        ],
+        notes: {
+          roleIsRequired: "role: must name a role some %%rbac line declares; a dashboard with no role, or an unknown one, is an error (EML297). A dashboard that no role owns is nobody's.",
+          reportsMustExist: "Every name in reports: must be a %%report in the model (EML297). A dashboard may list a report another role also runs, but it should list reports its own role can run: every table the report names must be on that role's read list, or the tile answers 403.",
+          namesAreKeys: "The name is the pack key and the platform's dashboard name; declared twice is an error (EML297).",
+          coverageMinimums: "Reporting is mandatory and covers the whole domain. Every declared %%rbac role needs at least 50 charted %%report directives it can run - one charted report is a report and a chart - and at least 10 dashboards of its own, each listing at least 3 reports so that ten one-report dashboards cannot stand in for ten. The checker warns below either minimum (EML298 for reports, EML299 for dashboards) and audit-model.mjs fails while a warning stands. A role is counted over the %%report directives whose every bus_ table it may read: %%rbac read (or *) lines decide, an entity with no read line is open to every role, and a role called administrator reads everything.",
+          whereItIsCompiled: "Compiled once, by buildReportingPack, into one reporting dashboard per %%dashboard beside the derived overview. Both the real platform (seeded from the pack) and the browser application's preview (model.json) read that pack."
+        }
       }
     ],
     statusVocabulary: {
@@ -1555,7 +1576,7 @@ var appwithai_language_default = {
         queries: "Saved SQL over the application's bus_ tables, each carrying the tables it reads.",
         reports: "Report definitions over those queries.",
         charts: "Chart definitions (bar, line, pie, area) over those queries.",
-        dashboards: "One overview dashboard: up to four authored charts first, then one tile for each of the six most central entities.",
+        dashboards: "The overview dashboard - up to four authored charts first, then one tile for each of the six most central entities - plus one dashboard per %%dashboard, each carrying the role it is for.",
         access: "One reporting role per declared %%rbac role, plus the administrator, each with the bus_ tables it may read."
       },
       derivedFrom: [
@@ -1588,6 +1609,10 @@ var appwithai_language_default = {
           yields: "the author's own query, report and (with chart:) chart, listed first and placed at the top of the dashboard; a derived item with the same name is dropped in its favour"
         },
         {
+          declares: "%%dashboard",
+          yields: "a dashboard of the named role's own reports, one tile per report in the order listed, beside the overview"
+        },
+        {
           declares: "%%rbac ... .read",
           yields: "the tables each reporting role may read"
         },
@@ -1614,7 +1639,7 @@ var appwithai_language_default = {
         }
       ],
       signIn: "Two applications, two sign-ins, never merged. The application's account for a role is <role>@<app>.example.com and the reporting account is <role>@<app>.reports.example.com; the administrator is admin@admin.com on both sides, as two different accounts in two different user tables. Neither password works on the other side. A role in the application decides what a user may do to a record; a reporting role decides which tables their queries may read. Only read rules narrow a reporting role.",
-      verification: "The checker holds %%report to its shape (EML290-EML296) and cannot see whether a column exists. common/scripts/check-reporting-pack.ts in app-and-report-with-ai-tanstack runs every derived and authored query against a schema the generator actually emitted."
+      verification: "The checker holds %%report to its shape (EML290-EML296), %%dashboard to its shape (EML297) and every declared role to the reporting minimums (EML298, EML299), and cannot see whether a column exists. common/scripts/check-reporting-pack.ts in app-and-report-with-ai-tanstack runs every derived and authored query against a schema the generator actually emitted."
     },
     pipeline: [
       "1. ERD section -> MermaidParser -> Entity[] + Relationship[] -> migrations, DTOs, services, controllers, forms, tables. The same pass reads %%index into entity.indexes and %%enum / %%field enum: into bound enums.",
@@ -6996,6 +7021,63 @@ function compileReports(source, entityNames, warn = () => {}) {
   }
   return [...byName.values()];
 }
+var DASHBOARD_KEYS = ["title", "role", "reports", "help"];
+function parseDashboardDirective(line) {
+  const directive = line.trim().match(/^%%+dashboard\s+(.+)$/is);
+  if (!directive?.[1])
+    return { error: "not a %%dashboard directive" };
+  const rest = directive[1];
+  const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+  if (!nameMatch?.[1])
+    return { error: "has no name" };
+  const name = nameMatch[1];
+  const keys = rest.slice(nameMatch[0].length);
+  const read = (key) => {
+    const stop = DASHBOARD_KEYS.join("|");
+    const found = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:${stop}):|$)`, "is"));
+    return found?.[1]?.trim() || undefined;
+  };
+  const reports = (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+  if (reports.length === 0)
+    return { error: "names no reports" };
+  return {
+    name,
+    title: read("title") ?? name.replace(/[_-]+/g, " "),
+    role: read("role"),
+    reports,
+    help: read("help")
+  };
+}
+function compileDashboards(source, reportNames, warn = () => {}) {
+  const known = new Set(reportNames);
+  const byName = new Map;
+  for (const line of source.split(`
+`)) {
+    if (!/^\s*%%+dashboard\b/i.test(line))
+      continue;
+    const parsed = parseDashboardDirective(line);
+    if ("error" in parsed) {
+      warn(`%%dashboard ${parsed.error} — skipped: ${line.trim().slice(0, 120)}`);
+      continue;
+    }
+    if (byName.has(parsed.name)) {
+      warn(`%%dashboard "${parsed.name}" is declared more than once — keeping the first`);
+      continue;
+    }
+    const shown = parsed.reports.filter((name) => known.has(name));
+    for (const name of parsed.reports) {
+      if (!known.has(name)) {
+        warn(`%%dashboard "${parsed.name}" lists "${name}", which is not a %%report — left off`);
+      }
+    }
+    if (shown.length === 0) {
+      warn(`%%dashboard "${parsed.name}" shows no declared report — skipped`);
+      continue;
+    }
+    byName.set(parsed.name, { ...parsed, reports: shown });
+  }
+  return [...byName.values()];
+}
 
 // packages/generator/src/rules/flowchart-parser.ts
 function parseNodeDef(id, rest) {
@@ -7878,6 +7960,7 @@ function parseModel(sources) {
   const sagas = compileSagaWorkflows(joined, entities.map((entity) => entity.name), warn);
   const rbac = compileRbac(joined, entities.map((entity) => entity.name), workflows, warn);
   const reports = compileReports(joined, entities.map((entity) => entity.name), warn);
+  const dashboards = compileDashboards(joined, reports.map((report) => report.name), warn);
   return {
     entities,
     relationships,
@@ -7888,7 +7971,8 @@ function parseModel(sources) {
     workflows,
     sagas,
     rbac,
-    reports
+    reports,
+    dashboards
   };
 }
 
@@ -7909,6 +7993,7 @@ function emptyModel() {
     indexes: [],
     rules: [],
     reports: [],
+    dashboards: [],
     workflows: [],
     hooks: [],
     guards: [],
@@ -8125,6 +8210,32 @@ function parseDirective(line, n, model) {
         y: read("y"),
         help: read("help"),
         sql: sql.trim()
+      });
+      return;
+    }
+    case "dashboard": {
+      const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+      if (!nameMatch) {
+        model.diagnostics.push({
+          severity: "error",
+          code: "EML297",
+          message: `%%dashboard has no name: "${line}"`,
+          line: n
+        });
+        return;
+      }
+      const [name] = caps(nameMatch, 1);
+      const keys = rest.slice(nameMatch[0].length);
+      const read = (key) => {
+        const m2 = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:title|role|reports|help):|$)`, "s"));
+        return m2?.[1]?.trim() || undefined;
+      };
+      model.dashboards.push({
+        name,
+        title: read("title") ?? name.replace(/[_-]+/g, " "),
+        role: read("role"),
+        reports: (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean),
+        help: read("help")
       });
       return;
     }
@@ -8934,6 +9045,9 @@ function escapeRe(literal) {
 function isForeignKeyColumnName(columnName) {
   return columnName.endsWith("_id") || columnName.endsWith("_by");
 }
+var REPORTS_PER_ROLE = 50;
+var DASHBOARDS_PER_ROLE = 10;
+var DASHBOARD_MIN_REPORTS = 3;
 
 class CheckEngine {
   model;
@@ -9019,6 +9133,8 @@ class CheckEngine {
     this.checkStepDirectives();
     this.checkActionDirectives();
     this.checkReportDirectives();
+    this.checkDashboardDirectives();
+    this.checkReportingCoverage();
     this.checkRuleDirectives();
     this.checkRules();
     this.checkWorkflows();
@@ -10027,6 +10143,108 @@ class CheckEngine {
         this.warn("EML295", `%%report "${report.name}" names entity "${report.entity}", which this model does not declare.`, {
           line: lineNo,
           hint: "entity: is used to group the report with its entity. Correct the name, or drop the key if the report spans several."
+        });
+      }
+    }
+  }
+  static roleKey(role) {
+    return role.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  }
+  static tableOf(entity) {
+    return "bus_" + entity.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase();
+  }
+  rbacReaders() {
+    const roles = new Map;
+    const readers = new Map;
+    for (const { text } of this.src.findAll(/^\s*%%rbac\b/)) {
+      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/);
+      if (!m)
+        continue;
+      const [roleExpr, entity, target] = caps(m, 3);
+      const named = roleExpr.split("|").map((part) => part.trim().replace(/^role:/i, "").trim()).filter(Boolean);
+      for (const role of named)
+        roles.set(CheckEngine.roleKey(role), role);
+      if (["read", "*", "all", "any"].includes(target.toLowerCase())) {
+        const set = readers.get(entity) ?? new Set;
+        for (const role of named)
+          set.add(CheckEngine.roleKey(role));
+        readers.set(entity, set);
+      }
+    }
+    return { roles, readers };
+  }
+  checkDashboardDirectives() {
+    const { roles } = this.rbacReaders();
+    const reportNames = new Set(this.model.reports.map((r) => r.name));
+    const seen = new Set;
+    for (const dashboard of this.model.dashboards) {
+      const lineNo = this.src.findLine(new RegExp(`%%dashboard\\s+${dashboard.name}\\b`));
+      const at = lineNo === undefined ? {} : { line: lineNo };
+      if (seen.has(dashboard.name)) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" is declared more than once.`, {
+          ...at,
+          hint: "Dashboard names are keys, as report names are. Give the second one its own name."
+        });
+      }
+      seen.add(dashboard.name);
+      if (dashboard.reports.length === 0) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" names no reports.`, {
+          ...at,
+          hint: "Add reports: <report-name>, <report-name>, … — the %%report directives it shows."
+        });
+      }
+      for (const name of dashboard.reports) {
+        if (!reportNames.has(name)) {
+          this.error("EML297", `%%dashboard "${dashboard.name}" lists "${name}", which is not a %%report.`, {
+            ...at,
+            hint: "Correct the name, or declare the %%report before listing it."
+          });
+        }
+      }
+      if (!dashboard.role) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" names no role.`, {
+          ...at,
+          hint: "Add role: <role> — a role declared by a %%rbac line. A dashboard belongs to the role that opens it."
+        });
+      } else if (roles.size > 0 && !roles.has(CheckEngine.roleKey(dashboard.role))) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" is for role "${dashboard.role}", which no %%rbac line names.`, {
+          ...at,
+          hint: `Declared roles: ${[...roles.values()].join(", ")}.`
+        });
+      }
+    }
+  }
+  checkReportingCoverage() {
+    const { roles, readers } = this.rbacReaders();
+    if (roles.size === 0)
+      return;
+    const entityOfTable = new Map;
+    for (const e of this.model.entities)
+      entityOfTable.set(CheckEngine.tableOf(e.name), e.name);
+    const canRun = (roleKey, sql) => {
+      if (roleKey === "administrator")
+        return true;
+      for (const table of sql.toLowerCase().match(/\bbus_[a-z0-9_]+/g) ?? []) {
+        const entity = entityOfTable.get(table);
+        if (!entity)
+          continue;
+        const allowed = readers.get(entity);
+        if (allowed && allowed.size > 0 && !allowed.has(roleKey))
+          return false;
+      }
+      return true;
+    };
+    for (const [roleKey, role] of roles) {
+      const charted = this.model.reports.filter((r) => r.chart && canRun(roleKey, r.sql)).length;
+      if (charted < REPORTS_PER_ROLE) {
+        this.warn("EML298", `Role "${role}" can run ${charted} charted %%report directives; the minimum is ${REPORTS_PER_ROLE} reports and ${REPORTS_PER_ROLE} charts per role.`, {
+          hint: `Write ${REPORTS_PER_ROLE - charted} more %%report … chart: … lines over tables ${role} may read — distinct business questions across the whole domain, not variants of one query (reporting section 7.2).`
+        });
+      }
+      const dashboards = this.model.dashboards.filter((d) => d.role && CheckEngine.roleKey(d.role) === roleKey && d.reports.length >= DASHBOARD_MIN_REPORTS).length;
+      if (dashboards < DASHBOARDS_PER_ROLE) {
+        this.warn("EML299", `Role "${role}" has ${dashboards} dashboards of at least ${DASHBOARD_MIN_REPORTS} reports; the minimum is ${DASHBOARDS_PER_ROLE} per role.`, {
+          hint: `Add ${DASHBOARDS_PER_ROLE - dashboards} more %%dashboard <name> title: <T> role: ${role} reports: <report>, <report>, <report> lines — one per job ${role} does (reporting section 7.2).`
         });
       }
     }
@@ -29617,8 +29835,48 @@ function deriveDashboards(ctx, appName, appDescription) {
       name: `${appName} — overview`,
       description: appDescription?.trim() || `The ${headline.length} entities this model puts at the centre of ${appName}, one tile each.`,
       widgets
-    }
+    },
+    ...deriveAuthoredDashboards(ctx)
   ];
+}
+function deriveAuthoredDashboards(ctx) {
+  const charts = new Set(ctx.charts.map((c) => c.key));
+  const reports = new Set(ctx.reports.map((r) => r.key));
+  const specs = [];
+  for (const d of ctx.model.dashboards ?? []) {
+    const widgets = [];
+    let x = 0;
+    let y = 0;
+    for (const name of d.reports) {
+      const key = `authored__${name}`;
+      const title = ctx.model.reports.find((r) => r.name === name)?.title ?? name;
+      if (charts.has(key)) {
+        widgets.push({ chartKey: key, title, x, y, w: 6, h: 4 });
+        x += 6;
+        if (x >= 12) {
+          x = 0;
+          y += 4;
+        }
+      } else if (reports.has(key)) {
+        if (x !== 0) {
+          x = 0;
+          y += 4;
+        }
+        widgets.push({ reportKey: key, title, x, y, w: 12, h: 4 });
+        y += 4;
+      }
+    }
+    if (widgets.length === 0)
+      continue;
+    specs.push({
+      key: `authored__${d.name}`,
+      name: d.title,
+      description: d.help?.trim() ?? (d.role ? `${d.title} — a dashboard for the ${d.role} role, declared in the model as %%dashboard ${d.name}.` : `Declared in the model as %%dashboard ${d.name}.`),
+      ...d.role ? { role: d.role } : {},
+      widgets
+    });
+  }
+  return specs;
 }
 function dropDerivedDuplicatesOfAuthored(ctx) {
   const authoredNames = new Set([...ctx.reports, ...ctx.charts, ...ctx.queries].filter((x) => x.key.startsWith("authored__")).map((x) => x.name));
