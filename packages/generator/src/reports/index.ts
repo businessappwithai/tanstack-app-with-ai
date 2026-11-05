@@ -227,6 +227,28 @@ export interface CompiledDashboard {
 const DASHBOARD_KEYS = ["title", "role", "reports", "help"] as const;
 
 /**
+ * Split `key: value key: value` text at its keys.
+ *
+ * A key is one of `keys` followed by a colon and preceded by whitespace or the
+ * start; each value runs to the next key. The first occurrence of a key wins.
+ * Scanned once rather than matched with a lazy lookahead per key, which backtracks
+ * over every value it passes.
+ */
+function scanKeys(text: string, keys: readonly string[]): Record<string, string> {
+  const marks = [...text.matchAll(new RegExp(`(?:^|\\s)(${keys.join("|")}):`, "g"))];
+  const out: Record<string, string> = {};
+  marks.forEach((mark, i) => {
+    const key = mark[1] as string;
+    if (key in out) return;
+    const from = (mark.index ?? 0) + mark[0].length;
+    const to = marks[i + 1]?.index ?? text.length;
+    const value = text.slice(from, to).trim();
+    if (value) out[key] = value;
+  });
+  return out;
+}
+
+/**
  * Read one `%%dashboard` line.
  *
  * Anchored at `^%%` like every directive parser here, so prose that merely
@@ -243,11 +265,7 @@ export function parseDashboardDirective(line: string): CompiledDashboard | { err
   const name = nameMatch[1];
   const keys = rest.slice(nameMatch[0].length);
 
-  const read = (key: string): string | undefined => {
-    const stop = DASHBOARD_KEYS.join("|");
-    const found = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:${stop}):|$)`, "is"));
-    return found?.[1]?.trim() || undefined;
-  };
+  const read = (key: string): string | undefined => scanKeys(keys, DASHBOARD_KEYS)[key];
 
   const reports = (read("reports") ?? "")
     .split(",")

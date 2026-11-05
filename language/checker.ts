@@ -2155,16 +2155,29 @@ class CheckEngine {
       .replace(/[\s-]+/g, "_");
   }
 
-  /** `KYCRecord` -> `kyc_record`; the generator's `tableNameFor`, which the pack's SQL must name. */
+  /**
+   * `KYCRecord` -> `kyc_record`; the generator's `tableNameFor`, which the pack's SQL must name.
+   *
+   * An underscore goes before a capital that follows a lower-case letter or digit,
+   * and before the last capital of an acronym run (the one that starts the next
+   * word). Written as a scan rather than as the generator's two regexes: the
+   * second of those backtracks, and this runs once per entity per check.
+   */
   private static tableOf(entity: string): string {
-    return (
-      "bus_" +
-      entity
-        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-        .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-        .replace(/[\s-]+/g, "_")
-        .toLowerCase()
-    );
+    const isUpper = (ch: string | undefined) => ch !== undefined && ch >= "A" && ch <= "Z";
+    const isLower = (ch: string | undefined) => ch !== undefined && ch >= "a" && ch <= "z";
+    const isDigit = (ch: string | undefined) => ch !== undefined && ch >= "0" && ch <= "9";
+    let out = "";
+    for (let i = 0; i < entity.length; i++) {
+      const ch = entity[i];
+      const prev = entity[i - 1];
+      const next = entity[i + 1];
+      if (isUpper(ch) && i > 0 && (isLower(prev) || isDigit(prev) || (isUpper(prev) && isLower(next)))) {
+        out += "_";
+      }
+      out += ch;
+    }
+    return "bus_" + out.replace(/[\s-]+/g, "_").toLowerCase();
   }
 
   /**

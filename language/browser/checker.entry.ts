@@ -230,7 +230,9 @@ export function formatNextSteps(report: CheckReport): string {
       );
     }
     if (reporting.length > 0) {
-      const codes = [...new Set(reporting.map((issue) => issue.code))].sort().join(", ");
+      const codes = [...new Set(reporting.map((issue) => issue.code))]
+        .sort((a, b) => a.localeCompare(b))
+        .join(", ");
       steps.push(
         `${dictionary.length > 0 ? "Also: " : "The generator accepts this model, and it is not finished. "}` +
           `${reporting.length} of these (${codes}) are reporting coverage gaps. Reporting is mandatory and ` +

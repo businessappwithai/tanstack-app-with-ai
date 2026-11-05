@@ -282,12 +282,17 @@ function parseDirective(line: string, n: number, model: EmlModel): DirectiveResu
       }
       const [name] = caps(nameMatch, 1);
       const keys = rest.slice(nameMatch[0].length);
-      const read = (key: string): string | undefined => {
-        const m2 = keys.match(
-          new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:title|role|reports|help):|$)`, "s")
-        );
-        return m2?.[1]?.trim() || undefined;
-      };
+      // Split at the keys once: a lazy lookahead per key backtracks over every value.
+      const marks = [...keys.matchAll(/(?:^|\s)(title|role|reports|help):/g)];
+      const values: Record<string, string> = {};
+      marks.forEach((mark, i) => {
+        const key = mark[1] as string;
+        if (key in values) return;
+        const from = (mark.index ?? 0) + mark[0].length;
+        const value = keys.slice(from, marks[i + 1]?.index ?? keys.length).trim();
+        if (value) values[key] = value;
+      });
+      const read = (key: string): string | undefined => values[key];
       model.dashboards.push({
         name,
         title: read("title") ?? name.replace(/[_-]+/g, " "),

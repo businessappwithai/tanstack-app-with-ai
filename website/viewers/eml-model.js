@@ -2193,10 +2193,18 @@ function parseDirective(line, n, model) {
       }
       const [name] = caps(nameMatch, 1);
       const keys = rest.slice(nameMatch[0].length);
-      const read = (key) => {
-        const m2 = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:title|role|reports|help):|$)`, "s"));
-        return m2?.[1]?.trim() || undefined;
-      };
+      const marks = [...keys.matchAll(/(?:^|\s)(title|role|reports|help):/g)];
+      const values = {};
+      marks.forEach((mark, i) => {
+        const key = mark[1];
+        if (key in values)
+          return;
+        const from = (mark.index ?? 0) + mark[0].length;
+        const value = keys.slice(from, marks[i + 1]?.index ?? keys.length).trim();
+        if (value)
+          values[key] = value;
+      });
+      const read = (key) => values[key];
       model.dashboards.push({
         name,
         title: read("title") ?? name.replace(/[_-]+/g, " "),
@@ -4205,7 +4213,20 @@ class CheckEngine {
     return role.trim().toLowerCase().replace(/[\s-]+/g, "_");
   }
   static tableOf(entity) {
-    return "bus_" + entity.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase();
+    const isUpper = (ch) => ch !== undefined && ch >= "A" && ch <= "Z";
+    const isLower = (ch) => ch !== undefined && ch >= "a" && ch <= "z";
+    const isDigit = (ch) => ch !== undefined && ch >= "0" && ch <= "9";
+    let out = "";
+    for (let i = 0;i < entity.length; i++) {
+      const ch = entity[i];
+      const prev = entity[i - 1];
+      const next = entity[i + 1];
+      if (isUpper(ch) && i > 0 && (isLower(prev) || isDigit(prev) || isUpper(prev) && isLower(next))) {
+        out += "_";
+      }
+      out += ch;
+    }
+    return "bus_" + out.replace(/[\s-]+/g, "_").toLowerCase();
   }
   rbacReaders() {
     const roles = new Map;
@@ -5375,7 +5396,7 @@ function formatNextSteps(report) {
       steps.push(`The generator accepts this model, and it is not finished. ${dictionary.length} of these ` + `(${codes}) are Application Dictionary gaps: the dictionary is what the application ` + `draws every screen from, and each one leaves it recording less than the model knows — ` + `a reference as text rather than a lookup, a closed vocabulary as a free text box, a ` + `field and its manual entry with nothing under it, a form with no sections. Clear them. \`node audit-model.mjs ` + `<file>.mmd\` fails while any stand, and the authoring protocol requires it to exit 0.`);
     }
     if (reporting.length > 0) {
-      const codes = [...new Set(reporting.map((issue) => issue.code))].sort().join(", ");
+      const codes = [...new Set(reporting.map((issue) => issue.code))].sort((a, b) => a.localeCompare(b)).join(", ");
       steps.push(`${dictionary.length > 0 ? "Also: " : "The generator accepts this model, and it is not finished. "}` + `${reporting.length} of these (${codes}) are reporting coverage gaps. Reporting is mandatory and ` + `covers the whole domain: every declared role needs at least 50 charted %%report directives it can ` + `run and 10 %%dashboards of its own. A role below that can see its records and cannot ask anything ` + `about them. Write the missing questions — distinct, across the role's whole domain — then group them. ` + `\`node audit-model.mjs <file>.mmd\` fails while any stand.`);
     }
     if (other > 0) {
@@ -10294,6 +10315,21 @@ function compileReports(source, entityNames, warn = () => {}) {
   return [...byName.values()];
 }
 var DASHBOARD_KEYS = ["title", "role", "reports", "help"];
+function scanKeys(text, keys) {
+  const marks = [...text.matchAll(new RegExp(`(?:^|\\s)(${keys.join("|")}):`, "g"))];
+  const out = {};
+  marks.forEach((mark, i) => {
+    const key = mark[1];
+    if (key in out)
+      return;
+    const from = (mark.index ?? 0) + mark[0].length;
+    const to = marks[i + 1]?.index ?? text.length;
+    const value = text.slice(from, to).trim();
+    if (value)
+      out[key] = value;
+  });
+  return out;
+}
 function parseDashboardDirective(line) {
   const directive = line.trim().match(/^%%+dashboard\s+(.+)$/is);
   if (!directive?.[1])
@@ -10304,11 +10340,7 @@ function parseDashboardDirective(line) {
     return { error: "has no name" };
   const name = nameMatch[1];
   const keys = rest.slice(nameMatch[0].length);
-  const read = (key) => {
-    const stop = DASHBOARD_KEYS.join("|");
-    const found = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:${stop}):|$)`, "is"));
-    return found?.[1]?.trim() || undefined;
-  };
+  const read = (key) => scanKeys(keys, DASHBOARD_KEYS)[key];
   const reports = (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean);
   if (reports.length === 0)
     return { error: "names no reports" };

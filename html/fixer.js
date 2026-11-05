@@ -2002,10 +2002,18 @@ function parseDirective(line, n, model) {
       }
       const [name] = caps(nameMatch, 1);
       const keys = rest.slice(nameMatch[0].length);
-      const read = (key) => {
-        const m2 = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:title|role|reports|help):|$)`, "s"));
-        return m2?.[1]?.trim() || undefined;
-      };
+      const marks = [...keys.matchAll(/(?:^|\s)(title|role|reports|help):/g)];
+      const values = {};
+      marks.forEach((mark, i) => {
+        const key = mark[1];
+        if (key in values)
+          return;
+        const from = (mark.index ?? 0) + mark[0].length;
+        const value = keys.slice(from, marks[i + 1]?.index ?? keys.length).trim();
+        if (value)
+          values[key] = value;
+      });
+      const read = (key) => values[key];
       model.dashboards.push({
         name,
         title: read("title") ?? name.replace(/[_-]+/g, " "),
@@ -4018,7 +4026,20 @@ class CheckEngine {
     return role.trim().toLowerCase().replace(/[\s-]+/g, "_");
   }
   static tableOf(entity) {
-    return "bus_" + entity.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase();
+    const isUpper = (ch) => ch !== undefined && ch >= "A" && ch <= "Z";
+    const isLower = (ch) => ch !== undefined && ch >= "a" && ch <= "z";
+    const isDigit = (ch) => ch !== undefined && ch >= "0" && ch <= "9";
+    let out = "";
+    for (let i = 0;i < entity.length; i++) {
+      const ch = entity[i];
+      const prev = entity[i - 1];
+      const next = entity[i + 1];
+      if (isUpper(ch) && i > 0 && (isLower(prev) || isDigit(prev) || isUpper(prev) && isLower(next))) {
+        out += "_";
+      }
+      out += ch;
+    }
+    return "bus_" + out.replace(/[\s-]+/g, "_").toLowerCase();
   }
   rbacReaders() {
     const roles = new Map;
