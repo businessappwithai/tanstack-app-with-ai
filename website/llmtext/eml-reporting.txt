@@ -130,8 +130,11 @@ warnings because the generator still accepts the model, and they are gaps becaus
   owes it its own 50 and 10: give it the cross-domain, executive and exception
   questions. The generated `administrator` and `user` accounts of a model that
   does not declare them need no set of their own.
-- A report several roles can run counts for each of them, but a role's 50 are
-  not met by borrowing another role's: write the questions this role asks.
+- A report counts for **every** role that can run it. Where several roles read
+  the same tables, one set of distinct questions over those tables serves them
+  all — that is how a small model reaches 50 per role without padding — but each
+  role must still be able to run its 50, and a question no one in that role would
+  ask does not count for it in spirit however the checker counts it.
 
 **7.2.3 Cover the domain, not one corner of it.** Walk every entity the role may
 read and write at least one question about it; then keep adding from these
@@ -152,8 +155,10 @@ families until the role has 50 distinct ones. A role whose reports are all
 
 A role with a short read list may have to lean on these families harder, but if
 its tables genuinely cannot support 50 distinct questions, that is a modelling
-finding, not a reason to pad: at Gate B widen the role's `read` lines or merge it
-with a neighbouring role, and say which you did.
+finding, not a reason to pad: at Gate B widen the role's `read` lines (to
+non-sensitive tables — never to records the role should not see) or merge it with
+a neighbouring role, and say which you did. Two roles that read the same tables
+share one set of questions.
 
 **7.2.4 Dashboards — one per job the role does.**
 
@@ -178,10 +183,11 @@ reports on each (the floor is 3). A report may appear on more than one dashboard
 
 **7.2.5 How to write the reports so they hold.**
 
-- Name each new report with the role as a prefix, lower-case and hyphenated —
-  `%%report sales-manager-open-pipeline-by-stage …` — so a role's set is easy to
-  read and to list on a dashboard. The name is the key a report is stored under
-  (`EML292`), so it must be unique across the whole file.
+- Name each new report for what it asks, lower-case and hyphenated, with the
+  role as a prefix when only that role asks it (`sales-manager-open-pipeline`)
+  and the subject as a prefix when several roles share it (`sessions-by-weekday`).
+  The name is the key a report is stored under (`EML292`), so it must be unique
+  across the whole file.
 - Every charted report names both axes, and both must be columns in its
   `SELECT` list (alias them): `chart: bar x: stage y: total`. Use `line` or
   `area` for time, `pie` only up to six slices, `bar` otherwise.
