@@ -909,7 +909,9 @@ language definition; change all of them or none.
   duplication against a 3% limit. `sonar-project.properties` in this repository is *not* read by the
   PR analysis (it was tried; the number did not move). Set Duplication Exclusions under
   Administration → Analysis Scope in the SonarCloud project, in each of the three repositories that
-  vendor these files.
+  vendor these files, as wildcard patterns (plain paths did not take effect):
+  `**/html/checker.js, **/html/fixer.js, **/html/assets/appwithai-wasm.js,
+  **/html/assets/appwithai-fullstack.js, **/website/viewers/eml-model.js, **/*.generated.ts`.
 
 ### The browser schema types a foreign key the way the NestJS one does
 
