@@ -813,12 +813,12 @@ bun language/fixer.ts   language/examples/crm.eml.mmd.error
 
 The checker always writes the `.error` file — revert it unless the verdict changed.
 
-**The sixteen directives** (`%%` comments Mermaid ignores):
+**The seventeen directives** (`%%` comments Mermaid ignores):
 - structure: `%%meta`, `%%entity`, `%%field`, `%%enum`, `%%index`, `%%category`
 - behaviour: `%%rule`, `%%workflow`, `%%step`, `%%loop`, `%%trigger`, `%%action`, `%%hook`
 - access: `%%rbac`
 - automation condition: `%%guard`
-- reporting: `%%report`
+- reporting: `%%report`, `%%dashboard`
 
 `%%guard` is the one that moved. It used to mean a role restriction; that sense
 is `%%rbac` now, and `%%guard` means only an automation's condition
@@ -860,6 +860,41 @@ Three things to keep true when touching it:
 - The checker still owns the shape: `EML290`-`EML296` — a query that exists and
   is named, a unique name, `SELECT`/`WITH` rather than a write, both axes when a
   chart is asked for, an `entity:` the model declares, a known chart type.
+
+### `%%dashboard` and the per-role reporting minimums
+
+Reporting is mandatory and covers the whole domain. `%%dashboard <name> title: <T>
+role: <role> reports: <a>, <b>, … [help: <why>]` groups a role's own `%%report`
+directives into a named dashboard, and **every declared `%%rbac` role needs at least
+50 charted `%%report` directives it can run (one is a report and a chart) and at
+least 10 dashboards of at least 3 reports each**. The same numbers are stated in
+`website/llmtext/eml-reporting.txt` §7.2, rule M12 of the controller, and the
+language definition; change all of them or none.
+
+| Reader | Where |
+|---|---|
+| Language side — parser, model, shape (`EML297`), minimums (`EML298` reports, `EML299` dashboards) | `language/cli/src/{parser,model}.ts`, `language/checker.ts` (`REPORTS_PER_ROLE`, `DASHBOARDS_PER_ROLE`, `DASHBOARD_MIN_REPORTS`) |
+| Generator side — `compileDashboards`, then one `DashboardSpec` per directive | `packages/generator/src/reports/index.ts`, `pipeline/parse-model.ts`, `reporting/pack.ts` (`deriveAuthoredDashboards`) |
+
+- **"A role can run a report" is a table question.** `canRun` in the checker reads the
+  `bus_` tables in the report's SQL and asks `%%rbac`'s `read` (or `*`/`all`/`any`)
+  lines whether the role admits each; an entity with no read line is open to all, a
+  role called `administrator` reads everything (and, inheriting every other role's
+  reports and dashboards, owes no minimum of its own), and a table no entity declares is
+  not narrowed. This mirrors `deriveAccess` in `rbac/roles.ts` and `tableNameFor` in
+  `naming/tables.ts` — they are separate implementations because `language/` cannot
+  import the generator, so keep the three in step.
+- **`EML298`/`EML299` are gaps, not advice.** They are in `REPORTING_COVERAGE` in
+  `checker.entry.ts`, beside — not inside — `DICTIONARY_COMPLETENESS`, so the checker's
+  closing words name them as reporting gaps rather than dictionary ones, and
+  `audit-model.mjs` fails while they stand.
+- **A dashboard's `role` is metadata, not access control.** The pack carries it, but the
+  reporting platform's `dashboard:view` permission is per role, not per dashboard, so
+  every role that may view dashboards sees every dashboard. A tile whose report reads a
+  table the viewer may not read answers 403, which is why §7.2.4 tells authors to list
+  only reports the dashboard's own role can run.
+- **No published model meets the minimums**, and none of the checks over them is
+  satisfied by editing a number. Expanding a model means writing the questions.
 
 ### The browser schema types a foreign key the way the NestJS one does
 

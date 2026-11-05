@@ -1,6 +1,6 @@
 {
-  "file": "/home/user/app-with-ai-tanstack/docs/eml-sessions/education-management-system/education-management-system.mmd",
-  "checkedAt": "2026-10-29T02:29:53.897Z",
+  "file": "/home/user/tanstack-app-with-ai/docs/eml-sessions/education-management-system/education-management-system.mmd",
+  "checkedAt": "2026-11-05T03:28:54.377Z",
   "languageVersion": "1.2.0",
   "summary": {
     "errors": 0,
@@ -13,7 +13,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "9 moves of \"StudentLifecycle\" are open to anyone who may update Student: take_leave, return_from_leave, suspend, reinstate, graduate, withdraw.",
-      "line": 1322,
+      "line": 1509,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on Student.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -21,7 +21,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "8 moves of \"AdmissionLifecycle\" are open to anyone who may update AdmissionApplication: begin_review, make_offer, reject, accept_offer, decline_offer, withdraw_application.",
-      "line": 1340,
+      "line": 1527,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on AdmissionApplication.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -29,7 +29,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "5 moves of \"SectionLifecycle\" are open to anyone who may update ClassSection: open_enrolment, start_teaching, complete, cancel.",
-      "line": 1359,
+      "line": 1546,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on ClassSection.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -37,7 +37,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "2 moves of \"SessionLifecycle\" are open to anyone who may update ClassSession: hold, cancel.",
-      "line": 1373,
+      "line": 1560,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on ClassSession.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -45,7 +45,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "5 moves of \"EnrolmentLifecycle\" are open to anyone who may update Enrollment: place, cancel_request, complete, fail, withdraw.",
-      "line": 1384,
+      "line": 1571,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on Enrollment.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -53,7 +53,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "5 moves of \"AssessmentLifecycle\" are open to anyone who may update Assessment: publish, open_marking, publish_marks, cancel.",
-      "line": 1399,
+      "line": 1586,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on Assessment.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -61,7 +61,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "5 moves of \"ResultLifecycle\" are open to anyone who may update AssessmentResult: submit, mark_missing, excuse, mark, accept_late.",
-      "line": 1413,
+      "line": 1600,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on AssessmentResult.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -69,7 +69,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "14 moves of \"InvoiceLifecycle\" are open to anyone who may update FeeInvoice: issue, cancel_draft, record_part_payment, settle, mark_overdue, cancel_issued, record_further_part_payment, reopen_after_refund, reissue_after_refund.",
-      "line": 1427,
+      "line": 1614,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on FeeInvoice.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -77,7 +77,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "5 moves of \"ConductLifecycle\" are open to anyone who may update DisciplineIncident: begin_review, dismiss, apply_sanction, close.",
-      "line": 1449,
+      "line": 1636,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on DisciplineIncident.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -85,7 +85,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "2 moves of \"TermLifecycle\" are open to anyone who may update AcademicTerm: open_term, close_term.",
-      "line": 1463,
+      "line": 1650,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on AcademicTerm.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -93,7 +93,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "4 moves of \"StaffLifecycle\" are open to anyone who may update Staff: start_leave, return_to_work, leave_school.",
-      "line": 1473,
+      "line": 1660,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on Staff.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -101,7 +101,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "3 moves of \"ConsentLifecycle\" are open to anyone who may update ConsentRecord: activate, withdraw, expire.",
-      "line": 1485,
+      "line": 1672,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on ConsentRecord.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -109,7 +109,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "5 moves of \"SupportPlanLifecycle\" are open to anyone who may update SupportPlan: activate, begin_review, renew, close.",
-      "line": 1498,
+      "line": 1685,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on SupportPlan.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -117,7 +117,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "6 moves of \"SafeguardingConcernLifecycle\" are open to anyone who may update SafeguardingConcern: triage, begin_investigation, refer, close.",
-      "line": 1512,
+      "line": 1699,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on SafeguardingConcern.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -125,7 +125,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "4 moves of \"CommunicationLifecycle\" are open to anyone who may update CommunicationLog: send, fail, confirm_delivery.",
-      "line": 1526,
+      "line": 1713,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on CommunicationLog.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     },
@@ -133,7 +133,7 @@
       "severity": "info",
       "code": "EML511",
       "message": "6 moves of \"RefundLifecycle\" are open to anyone who may update Refund: begin_review, cancel, approve, reject, pay.",
-      "line": 1539,
+      "line": 1726,
       "hint": "To limit a button to the roles that own it, add  %%rbac role:<role> on Refund.<move>  — the move is its event, or from->to for an edge with no label.",
       "autoFixable": false
     }

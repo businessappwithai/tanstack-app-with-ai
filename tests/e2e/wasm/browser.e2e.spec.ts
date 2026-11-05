@@ -662,7 +662,7 @@ test.describe("@browser the checker refuses a broken model", () => {
     const model = (entity: string) =>
       [
         "%%meta name: Bad RBAC",
-        `%%rbac role:admin on ${entity}.delete`,
+        `%%rbac role:administrator on ${entity}.delete`,
         "erDiagram",
         "    Customer {",
         "        string id PK",
@@ -784,7 +784,7 @@ test.describe("@browser assembling the real stack in a tab", () => {
     const model = (entity: string) =>
       [
         "%%meta name: Bad RBAC",
-        `%%rbac role:admin on ${entity}.delete`,
+        `%%rbac role:administrator on ${entity}.delete`,
         "erDiagram",
         "    Customer {",
         "        string id PK",

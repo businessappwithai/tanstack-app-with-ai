@@ -102,6 +102,8 @@ export interface DashboardSpec {
   key: string;
   name: string;
   description: string;
+  /** The declared `%%rbac` role an authored `%%dashboard` is for; absent on the overview. */
+  role?: string;
   widgets: DashboardWidgetSpec[];
 }
 
@@ -767,7 +769,60 @@ function deriveDashboards(ctx: Ctx, appName: string, appDescription?: string): D
         `The ${headline.length} entities this model puts at the centre of ${appName}, one tile each.`,
       widgets,
     },
+    ...deriveAuthoredDashboards(ctx),
   ];
+}
+
+/**
+ * `%%dashboard` directives — a role's own reports, grouped by the author.
+ *
+ * The overview above is inferred from structure and is the same for everyone.
+ * These are written for the person who opens them: the tiles are the
+ * `%%report` directives the author listed, in that order. A charted report is a
+ * chart tile, half a row wide; one without a chart is a table tile, a full row.
+ */
+function deriveAuthoredDashboards(ctx: Ctx): DashboardSpec[] {
+  const charts = new Set(ctx.charts.map((c) => c.key));
+  const reports = new Set(ctx.reports.map((r) => r.key));
+  const specs: DashboardSpec[] = [];
+
+  for (const d of ctx.model.dashboards ?? []) {
+    const widgets: DashboardWidgetSpec[] = [];
+    let x = 0;
+    let y = 0;
+    for (const name of d.reports) {
+      const key = `authored__${name}`;
+      const title = ctx.model.reports.find((r) => r.name === name)?.title ?? name;
+      if (charts.has(key)) {
+        widgets.push({ chartKey: key, title, x, y, w: 6, h: 4 });
+        x += 6;
+        if (x >= 12) {
+          x = 0;
+          y += 4;
+        }
+      } else if (reports.has(key)) {
+        if (x !== 0) {
+          x = 0;
+          y += 4;
+        }
+        widgets.push({ reportKey: key, title, x, y, w: 12, h: 4 });
+        y += 4;
+      }
+    }
+    if (widgets.length === 0) continue;
+    specs.push({
+      key: `authored__${d.name}`,
+      name: d.title,
+      description:
+        d.help?.trim() ??
+        (d.role
+          ? `${d.title} — a dashboard for the ${d.role} role, declared in the model as %%dashboard ${d.name}.`
+          : `Declared in the model as %%dashboard ${d.name}.`),
+      ...(d.role ? { role: d.role } : {}),
+      widgets,
+    });
+  }
+  return specs;
 }
 
 /**
