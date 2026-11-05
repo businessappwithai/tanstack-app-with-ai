@@ -187,7 +187,8 @@ reports on each (the floor is 3). A report may appear on more than one dashboard
   role as a prefix when only that role asks it (`sales-manager-open-pipeline`)
   and the subject as a prefix when several roles share it (`sessions-by-weekday`).
   The name is the key a report is stored under (`EML292`), so it must be unique
-  across the whole file.
+  across the whole file, and so must the title, because the platform keeps one
+  report per title (also `EML292`).
 - Every charted report names both axes, and both must be columns in its
   `SELECT` list (alias them): `chart: bar x: stage y: total`. Use `line` or
   `area` for time, `pie` only up to six slices, `bar` otherwise.

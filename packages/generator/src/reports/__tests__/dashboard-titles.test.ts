@@ -1,5 +1,5 @@
 /**
- * Two dashboards with one title are an error.
+ * Two dashboards, or two reports, with one title are an error.
  *
  * The reporting platform upserts a dashboard by its title, so `buildReportingPack` refuses a pack where two
  * share one. The checker held a dashboard's *name* to be unique and not its title, so the dance-studio model
@@ -27,6 +27,8 @@ erDiagram
 
 const titleErrors = (source: string) =>
   checkSource(source).issues.filter((i) => i.code === "EML297" && /same title/.test(i.message));
+const reportTitleErrors = (source: string) =>
+  checkSource(source).issues.filter((i) => i.code === "EML292" && /same title/.test(i.message));
 
 describe("dashboard titles", () => {
   it("refuses two dashboards with one title, whatever their names", () => {
@@ -45,3 +47,25 @@ describe("dashboard titles", () => {
     expect(titleErrors(MODEL("Engineer work board"))).toHaveLength(0);
   });
 });
+
+describe("report titles", () => {
+  const withReportTitle = (title: string) =>
+    MODEL("Engineer work board").replace("title: All tickets chart", `title: ${title} chart`);
+
+  it("refuses two reports with one title, whatever their names", () => {
+    const found = reportTitleErrors(withReportTitle("Open tickets"));
+    expect(found).toHaveLength(1);
+    expect(found[0]?.severity).toBe("error");
+    expect(found[0]?.message).toContain('"all-tickets"');
+    expect(found[0]?.message).toContain('"open-tickets"');
+  });
+
+  it("reads titles without regard to case or surrounding space", () => {
+    expect(reportTitleErrors(withReportTitle(" OPEN tickets"))).toHaveLength(1);
+  });
+
+  it("accepts reports whose titles differ", () => {
+    expect(reportTitleErrors(MODEL("Engineer work board"))).toHaveLength(0);
+  });
+});
+
