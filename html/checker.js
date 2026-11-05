@@ -1546,7 +1546,7 @@ var appwithai_language_default = {
           roleIsRequired: "role: must name a role some %%rbac line declares; a dashboard with no role, or an unknown one, is an error (EML297). A dashboard that no role owns is nobody's.",
           reportsMustExist: "Every name in reports: must be a %%report in the model (EML297). A dashboard may list a report another role also runs, but it should list reports its own role can run: every table the report names must be on that role's read list, or the tile answers 403.",
           namesAreKeys: "The name is the pack key and the platform's dashboard name; declared twice is an error (EML297).",
-          coverageMinimums: "Reporting is mandatory and covers the whole domain. Every declared %%rbac role needs at least 50 charted %%report directives it can run - one charted report is a report and a chart - and at least 10 dashboards of its own, each listing at least 3 reports so that ten one-report dashboards cannot stand in for ten. The checker warns below either minimum (EML298 for reports, EML299 for dashboards) and audit-model.mjs fails while a warning stands. A role is counted over the %%report directives whose every bus_ table it may read: %%rbac read (or *) lines decide, an entity with no read line is open to every role, and a role called administrator reads everything.",
+          coverageMinimums: "Reporting is mandatory and covers the whole domain. Every declared %%rbac role needs at least 50 charted %%report directives it can run - one charted report is a report and a chart - and at least 10 dashboards of its own, each listing at least 3 reports so that ten one-report dashboards cannot stand in for ten. The checker warns below either minimum (EML298 for reports, EML299 for dashboards) and audit-model.mjs fails while a warning stands. A role is counted over the %%report directives whose every bus_ table it may read: %%rbac read (or *) lines decide, an entity with no read line is open to every role, and a role called administrator reads everything and, inheriting every other role's reports and dashboards, owes no minimum of its own.",
           whereItIsCompiled: "Compiled once, by buildReportingPack, into one reporting dashboard per %%dashboard beside the derived overview. Both the real platform (seeded from the pack) and the browser application's preview (model.json) read that pack."
         }
       }
@@ -4102,6 +4102,8 @@ class CheckEngine {
       return true;
     };
     for (const [roleKey, role] of roles) {
+      if (roleKey === "administrator")
+        continue;
       const charted = this.model.reports.filter((r) => r.chart && canRun(roleKey, r.sql)).length;
       if (charted < REPORTS_PER_ROLE) {
         this.warn("EML298", `Role "${role}" can run ${charted} charted %%report directives; the minimum is ${REPORTS_PER_ROLE} reports and ${REPORTS_PER_ROLE} charts per role.`, {

@@ -126,10 +126,10 @@ warnings because the generator still accepts the model, and they are gaps becaus
   tell; you must. Never pad.
 - It has a plain-language `title:` that reads as the question, and a `help:`
   saying who asks it and what they do with the answer.
-- A role called `administrator` reads everything, and a model that declares it
-  owes it its own 50 and 10: give it the cross-domain, executive and exception
-  questions. The generated `administrator` and `user` accounts of a model that
-  does not declare them need no set of their own.
+- The built-in `administrator` (written `role:administrator`) runs every report
+  and opens every dashboard the other roles have, so it owes no set of its own.
+  A role you invent, even one called `admin`, is an ordinary role and owes its
+  50 and 10. The generated `user` account holds no functional role and owes none.
 - A report counts for **every** role that can run it. Where several roles read
   the same tables, one set of distinct questions over those tables serves them
   all — that is how a small model reaches 50 per role without padding — but each

@@ -2183,7 +2183,8 @@ class CheckEngine {
   /**
    * Who may read what, as `%%rbac` declares it: every role the model names, and
    * for each entity the roles its `read` (or `*`) lines admit. An entity with no
-   * such line is open to every role; a role called administrator reads all.
+   * such line is open to every role; a role called administrator reads all, and is
+   * exempt from the minimums because it inherits every other role's reports.
    */
   private rbacReaders(): { roles: Map<string, string>; readers: Map<string, Set<string>> } {
     const roles = new Map<string, string>();
@@ -2274,6 +2275,9 @@ class CheckEngine {
     };
 
     for (const [roleKey, role] of roles) {
+      // The built-in administrator runs every report and opens every dashboard the
+      // other roles have, so it inherits their sets rather than owing one of its own.
+      if (roleKey === "administrator") continue;
       const charted = this.model.reports.filter((r) => r.chart && canRun(roleKey, r.sql)).length;
       if (charted < REPORTS_PER_ROLE) {
         this.warn(

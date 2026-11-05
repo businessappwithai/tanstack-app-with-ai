@@ -879,8 +879,9 @@ language definition; change all of them or none.
 - **"A role can run a report" is a table question.** `canRun` in the checker reads the
   `bus_` tables in the report's SQL and asks `%%rbac`'s `read` (or `*`/`all`/`any`)
   lines whether the role admits each; an entity with no read line is open to all, a
-  role called `administrator` reads everything, and a table no entity declares is not
-  narrowed. This mirrors `deriveAccess` in `rbac/roles.ts` and `tableNameFor` in
+  role called `administrator` reads everything (and, inheriting every other role's
+  reports and dashboards, owes no minimum of its own), and a table no entity declares is
+  not narrowed. This mirrors `deriveAccess` in `rbac/roles.ts` and `tableNameFor` in
   `naming/tables.ts` — they are separate implementations because `language/` cannot
   import the generator, so keep the three in step.
 - **`EML298`/`EML299` are gaps, not advice.** They are in `REPORTING_COVERAGE` in
