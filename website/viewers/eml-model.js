@@ -10331,10 +10331,10 @@ function scanKeys(text, keys) {
   return out;
 }
 function parseDashboardDirective(line) {
-  const directive = line.trim().match(/^%%+dashboard\s+(.+)$/is);
-  if (!directive?.[1])
+  const directive = line.trim().match(/^%%+dashboard(\s.*)$/is);
+  const rest = directive?.[1]?.trim();
+  if (!rest)
     return { error: "not a %%dashboard directive" };
-  const rest = directive[1];
   const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
   if (!nameMatch?.[1])
     return { error: "has no name" };
