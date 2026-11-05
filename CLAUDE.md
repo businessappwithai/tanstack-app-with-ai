@@ -1672,8 +1672,25 @@ language definition; change all of them or none.
   every role that may view dashboards sees every dashboard. A tile whose report reads a
   table the viewer may not read answers 403, which is why §7.2.4 tells authors to list
   only reports the dashboard's own role can run.
-- **No published model meets the minimums**, and none of the checks over them is
-  satisfied by editing a number. Expanding a model means writing the questions.
+- **Every published model meets the minimums** (the twelve in the website's list, and the
+  orchestrator's ten). Most of their reports are *derived* from each model's structure
+  (lifecycles, enumerated columns, dates, flags, measures, parents, optional fields) rather than
+  written as business questions; each model's header says which is which. A few narrow roles had
+  their `%%rbac … .read` lists widened to reach 50, each flagged in the PR that did it. None of the
+  checks is satisfied by editing a number: expanding a model still means writing the questions.
+- **A dashboard or a report title is used once.** The platform upserts a query, report, chart and
+  dashboard by *title*, so two sharing one collapse into one row and `buildReportingPack` refuses the
+  pack. The checker holds the title as well as the name: `EML297` for dashboards, `EML292` for reports
+  (trimmed, case-insensitive). `reporting/__tests__/published-models.test.ts` builds the pack for each
+  published model, which is what caught the dance-studio pair before the checker did.
+- **SonarCloud's duplication gate needs the bundles excluded in the project's own settings.** The five
+  committed bundles inline the same checker, so any change that touches it shows 30%+ new-code
+  duplication against a 3% limit. `sonar-project.properties` in this repository is *not* read by the
+  PR analysis (it was tried; the number did not move). Set Duplication Exclusions under
+  Administration → Analysis Scope in the SonarCloud project, in each of the three repositories that
+  vendor these files, as wildcard patterns (plain paths did not take effect):
+  `**/html/checker.js, **/html/fixer.js, **/html/assets/appwithai-wasm.js,
+  **/html/assets/appwithai-fullstack.js, **/website/viewers/eml-model.js, **/*.generated.ts`.
 
 ### The browser schema types a foreign key the way the NestJS one does
 
