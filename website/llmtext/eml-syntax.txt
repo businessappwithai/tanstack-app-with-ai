@@ -1183,7 +1183,7 @@ a column name is wrong — it has no database.
 role it is for and the `%%report` directives it shows, in order; the reporting
 pack carries it beside the derived overview (§7.1, §7.2.4). The checker holds it
 to its shape (`EML297`: a name, a role some `%%rbac` line declares, at least one
-report that exists, a name used once) and holds every declared role to the
+report that exists, a name and a title each used once) and holds every declared role to the
 minimums of §7.2 — at least 50 charted `%%report` directives it can run
 (`EML298`) and at least 10 dashboards of at least 3 reports each (`EML299`).
 

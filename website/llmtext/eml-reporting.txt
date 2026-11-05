@@ -173,7 +173,7 @@ reports on each (the floor is 3). A report may appear on more than one dashboard
 
 - `role:` must be a role some `%%rbac` line declares, and every name in
   `reports:` must be a `%%report` in the file. Either wrong is an error
-  (`EML297`), as is a dashboard with no role, no reports, or a name already used.
+  (`EML297`), as is a dashboard with no role, no reports, or a name or title already used.
 - List only reports that role can run (§7.2.2): a tile whose report reads a table
   the role may not read answers 403.
 - A charted report is drawn as a chart tile, half a row wide; an uncharted one as

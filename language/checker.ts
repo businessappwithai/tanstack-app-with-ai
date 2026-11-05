@@ -2213,6 +2213,9 @@ class CheckEngine {
     const { roles } = this.rbacReaders();
     const reportNames = new Set(this.model.reports.map((r) => r.name));
     const seen = new Set<string>();
+    // The platform upserts a dashboard by its title, so two with one title collapse into one row and the
+    // reporting pack is refused. A name is a key and is checked below; the title is what a person reads.
+    const byTitle = new Map<string, string>();
 
     for (const dashboard of this.model.dashboards) {
       const lineNo = this.src.findLine(new RegExp(`%%dashboard\\s+${dashboard.name}\\b`));
@@ -2225,6 +2228,21 @@ class CheckEngine {
         });
       }
       seen.add(dashboard.name);
+
+      const titleKey = dashboard.title.trim().toLowerCase();
+      const sameTitle = byTitle.get(titleKey);
+      if (sameTitle !== undefined && sameTitle !== dashboard.name) {
+        this.error(
+          "EML297",
+          `%%dashboard "${dashboard.name}" has the same title as "${sameTitle}" ("${dashboard.title}").`,
+          {
+            ...at,
+            hint: "The reporting platform keeps one dashboard per title, so these would collapse into one. Retitle one of them.",
+          }
+        );
+      } else if (sameTitle === undefined) {
+        byTitle.set(titleKey, dashboard.name);
+      }
 
       if (dashboard.reports.length === 0) {
         this.error("EML297", `%%dashboard "${dashboard.name}" names no reports.`, {
