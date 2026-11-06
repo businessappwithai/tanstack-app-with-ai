@@ -9,7 +9,7 @@
  * Project: {{project.name}}
  */
 
-import type { EntityMeta, FieldMeta } from "./entities.ts";
+import { type EntityMeta, type FieldMeta, SIGNED_COLUMN } from "./entities.ts";
 import type { HttpClient } from "./http.ts";
 
 export interface RuleRecord {
@@ -105,10 +105,6 @@ export function buildJdm(name: string, rows: DecisionRow[]): string {
 
   return JSON.stringify(graph);
 }
-
-/** Mirrors SIGNED_COLUMN in the generator (packages/generator/src/templates/loader.ts). */
-const SIGNED_COLUMN =
-  /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
 
 /**
  * A static validation rule set for one entity: required fields must be present

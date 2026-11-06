@@ -22,10 +22,10 @@ describe("the generated suite's static rule builder", () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const template = readFileSync(
-      join(__dirname, "../../../templates/tanstack-start-nestjs/tests/harness/rules.ts.hbs"),
+      join(__dirname, "../../../templates/tanstack-start-nestjs/tests/harness/entities.ts.hbs"),
       "utf8"
     );
-    const match = template.match(/const SIGNED_COLUMN =\s*\/(.+)\/i;/);
+    const match = template.match(/export const SIGNED_COLUMN =\s*\/(.+)\/i;/);
     expect(match, "the harness carries its own SIGNED_COLUMN").not.toBeNull();
     expect(match![1]).toBe(SIGNED_COLUMN.source);
   });
