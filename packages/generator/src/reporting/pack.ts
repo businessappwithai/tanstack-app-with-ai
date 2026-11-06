@@ -420,9 +420,33 @@ interface Ctx {
   charts: ChartSpec[];
 }
 
+/**
+ * Words PostgreSQL accepts after `AS` as a column label but the reporting
+ * platform's table extraction does not. That extractor is a real parse, and a
+ * statement it cannot parse is refused ("tables cannot be determined"), so
+ * `SELECT p.subject AS case` ran for nobody — administrator included — and a
+ * model with a `Case` parent lost every "per case" report and chart. Quoting
+ * the label changes nothing PostgreSQL returns (the column is still `case`).
+ */
+const RESERVED_ALIASES = [
+  "all", "analyse", "analyze", "and", "any", "array", "asc", "both", "case", "cast", "check",
+  "collate", "column", "constraint", "create", "default", "desc", "distinct", "do", "else",
+  "end", "except", "false", "fetch", "for", "foreign", "from", "grant", "group", "having", "in",
+  "initially", "intersect", "into", "leading", "limit", "not", "null", "offset", "on", "only",
+  "or", "order", "primary", "references", "select", "some", "table", "then", "to", "trailing",
+  "true", "union", "unique", "user", "using", "when", "where", "window", "with",
+];
+const RESERVED_ALIAS = new RegExp(`(\\bAS\\s+)(${RESERVED_ALIASES.join("|")})(?![\\w"])`, "gi");
+
+/** `AS case` -> `AS "case"`; an already quoted or ordinary label is untouched. */
+export function quoteReservedAliases(sql: string): string {
+  return sql.replace(RESERVED_ALIAS, (_m, as: string, word: string) => `${as}"${word}"`);
+}
+
 /** Push a query, filling in the tables it reads so no call site can forget. */
 function addQuery(ctx: Ctx, spec: Omit<SavedQuerySpec, "tables">): string {
-  ctx.queries.push({ ...spec, tables: tablesIn(spec.sql) });
+  const sql = quoteReservedAliases(spec.sql);
+  ctx.queries.push({ ...spec, sql, tables: tablesIn(sql) });
   return spec.key;
 }
 

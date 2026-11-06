@@ -277,3 +277,15 @@ describe("buildReportingPack", () => {
     expect(stamped.application.generatedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 });
+
+describe("reserved words as column labels", () => {
+  it("quotes AS case so the platform can read which tables a query touches", async () => {
+    const { quoteReservedAliases } = await import("../pack");
+    expect(quoteReservedAliases("SELECT p.subject AS case, 1 AS n FROM bus_case p")).toBe(
+      'SELECT p.subject AS "case", 1 AS n FROM bus_case p'
+    );
+    expect(quoteReservedAliases('SELECT x AS "case", y AS cases, z AS Order')).toBe(
+      'SELECT x AS "case", y AS cases, z AS "Order"'
+    );
+  });
+});
