@@ -88,6 +88,83 @@ export interface Rule {
   updatedAt: Date;
 }
 
+/**
+ * Plain arithmetic over a record's own columns: `quantity * unit_price`, `net_amount + tax_amount`.
+ *
+ * A `%%action … transform field: net_amount value: quantity * unit_price` names a computed value, and
+ * the executor used to write the text itself into the column — a numeric column refused it
+ * ("invalid input syntax for type numeric") and every update of the record failed (found by the
+ * airport model's Charge). Numbers, column names, `+ - * / %` and parentheses only; anything else is
+ * not arithmetic and is left for the caller to treat as the literal it is. At least one column must
+ * be named, so `2026-01-01` and `10` stay literals, and every named column must hold a number.
+ * Returns undefined when the text is not such an expression (or divides by zero).
+ */
+export function evaluateArithmetic(expression: string, record: Record<string, unknown>): number | undefined {
+  const tokens: string[] = [];
+  const pattern = /\s*(?:(\d+(?:\.\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|([()+\-*/%]))/y;
+  let named = 0;
+  let at = 0;
+  const text = expression.trim();
+  while (at < text.length) {
+    pattern.lastIndex = at;
+    const match = pattern.exec(text);
+    if (!match) return undefined;
+    if (match[2] !== undefined) {
+      const value = record[match[2]];
+      const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+      if (!Number.isFinite(number)) return undefined;
+      named += 1;
+      tokens.push(String(number));
+    } else {
+      tokens.push(match[1] ?? match[3]!);
+    }
+    at = pattern.lastIndex;
+  }
+  if (named === 0 || tokens.length < 3) return undefined;
+
+  let position = 0;
+  let failed = false;
+  const primary = (): number => {
+    const token = tokens[position++];
+    if (token === '(') {
+      const inner = sum();
+      if (tokens[position++] !== ')') failed = true;
+      return inner;
+    }
+    const number = Number(token);
+    if (token === undefined || Number.isNaN(number)) failed = true;
+    return number;
+  };
+  const unary = (): number => {
+    if (tokens[position] === '-') { position++; return -unary(); }
+    if (tokens[position] === '+') { position++; return unary(); }
+    return primary();
+  };
+  const product = (): number => {
+    let left = unary();
+    while (tokens[position] === '*' || tokens[position] === '/' || tokens[position] === '%') {
+      const operator = tokens[position++];
+      const right = unary();
+      if (operator === '*') left *= right;
+      else if (right === 0) failed = true;
+      else left = operator === '/' ? left / right : left % right;
+    }
+    return left;
+  };
+  function sum(): number {
+    let left = product();
+    while (tokens[position] === '+' || tokens[position] === '-') {
+      const operator = tokens[position++];
+      const right = product();
+      left = operator === '+' ? left + right : left - right;
+    }
+    return left;
+  }
+  const result = sum();
+  if (failed || position !== tokens.length || !Number.isFinite(result)) return undefined;
+  return Math.round(result * 1e6) / 1e6;
+}
+
 @Injectable()
 export class RulesService {
   private readonly logger = new Logger(RulesService.name);
@@ -881,9 +958,24 @@ export class RulesService {
           } else if (action.type === 'transform') {
             const transformData = action.config.transformData as Record<string, unknown> | undefined;
             if (transformData && Object.keys(transformData).length > 0) {
+              // A value that is arithmetic over the record's columns is computed, in order: the
+              // next transform of the same write sees what this one produced. The stored row
+              // supplies the columns a partial update did not send.
+              const stored = await db
+                .selectFrom(entityName as any)
+                .selectAll()
+                .where('id' as any, '=', entityId)
+                .executeTakeFirst();
+              const working: Record<string, unknown> = { ...((stored as Record<string, unknown>) ?? {}), ...data };
+              const computed: Record<string, unknown> = {};
+              for (const [column, value] of Object.entries(transformData)) {
+                const number = typeof value === 'string' ? evaluateArithmetic(value, working) : undefined;
+                computed[column] = number ?? value;
+                working[column] = computed[column];
+              }
               await db
                 .updateTable(entityName as any)
-                .set({ ...transformData, updated_at: new Date() } as any)
+                .set({ ...computed, updated_at: new Date() } as any)
                 .where('id' as any, '=', entityId)
                 .execute();
               this.logger.log(
