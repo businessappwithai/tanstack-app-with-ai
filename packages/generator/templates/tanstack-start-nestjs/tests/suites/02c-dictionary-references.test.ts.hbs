@@ -194,6 +194,8 @@ describe("application dictionary — references", () => {
               (item) =>
                 !item.isForeignKey &&
                 item.name !== "id" &&
+                !(item.enumValues && item.enumValues.length > 0) &&
+                !item.name.endsWith("_id") &&
                 (item.type === "string" || item.type === "text")
             );
           if (!hasLabelSource) continue;
