@@ -119,7 +119,7 @@ export async function seed(db: Kysely<any>): Promise<void> {
         {{#case 16}}{{name}}: new Date(Date.now() + {{@../index}} * 3600000),{{/case}}
         {{#case 20}}{{name}}: {{#if (eq @../index 2)}}false{{else}}true{{/if}},{{/case}}
         {{#case 13}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}, {{#if required}}true{{else}}false{{/if}}){{else}}uuidv4(){{/if}},{{/case}}
-        {{#case 14}}{{name}}: 'Sample {{name}} text {{@../index}}',{{/case}}
+        {{#case 14}}{{name}}: '{{#if enumValues}}{{seedValue name @../index ../../displayName enumValues}}{{else}}Sample {{name}} text {{@../index}}{{/if}}',{{/case}}
         {{#default}}{{name}}: '{{seedValue name @../index ../../displayName enumValues}}',{{/default}}
       {{/switch}}
       {{/if}}

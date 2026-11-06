@@ -69,3 +69,20 @@ describe("seedValue", () => {
     expect(seed("status", 0, ["  ", ""])).toBeTruthy();
   });
 });
+
+describe("the business-data seed", () => {
+  it("honours a %%enum on a text column too, not only on a string one", async () => {
+    // `Risk.response` is `text` bound to RiskResponseValues; the text branch wrote
+    // "Sample response text 0" and the generated enum-integrity suite found four
+    // entities holding it.
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(
+      join(import.meta.dirname, "../../../templates/common/seeds/business-data.ts.hbs"),
+      "utf8"
+    );
+    const textCase = source.split("\n").find((line) => line.includes("{{#case 14}}"));
+    expect(textCase).toBeDefined();
+    expect(textCase).toContain("seedValue");
+    expect(textCase).toContain("enumValues");
+  });
+});

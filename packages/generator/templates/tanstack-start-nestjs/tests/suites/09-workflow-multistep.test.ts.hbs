@@ -77,6 +77,9 @@ function stampableFields(entity: EntityMeta): FieldMeta[] {
       !field.name.endsWith("_id") &&
       field.name !== "id" &&
       !FORMAT_CONSTRAINED_COLUMNS.has(field.name) &&
+      // A column bound to a %%enum accepts only its declared values: the suite stamped
+      // `42` into Account.party_role and left that row behind for the enum check to find.
+      !(field.enumValues && field.enumValues.length > 0) &&
       // Only a background workflow writes a state field; a person's write that
       // stamps one is refused before the chain could start.
       !isStateField(entity, field.name) &&
