@@ -20,6 +20,7 @@ import { beforeAll, describe, expect, it } from "../harness/testing.ts";
 import {
   reportAccount,
   reportingGenerated,
+  reportingReachable,
   reportingPack,
   roleCanRun,
   signInToReports,
@@ -53,9 +54,12 @@ describe("reporting platform", () => {
   let reports: NamedRow[] = [];
   let charts: NamedRow[] = [];
   let dashboards: NamedRow[] = [];
+  let live = false;
 
   beforeAll(async () => {
     if (!pack) return;
+    live = await reportingReachable();
+    if (!live) return;
     const adminRole = pack.access.roles.find((role) => role.isAdmin) ?? pack.access.roles[0]!;
     const account = reportAccount(adminRole);
     admin = await signInToReports(account.email, account.password);
@@ -73,7 +77,7 @@ describe("reporting platform", () => {
   });
 
   it("holds every report, chart and dashboard the pack names", () => {
-    if (!pack) return;
+    if (!pack || !live) return;
     const have = (rows: NamedRow[]) => new Set(rows.map((row) => row.name));
     const missing = (expected: string[], rows: NamedRow[]) =>
       expected.filter((name) => !have(rows).has(name));
@@ -83,7 +87,7 @@ describe("reporting platform", () => {
   });
 
   it("gives every dashboard exactly the widgets the pack lists", async () => {
-    if (!pack) return;
+    if (!pack || !live) return;
     for (const expected of pack.dashboards) {
       const row = dashboards.find((candidate) => candidate.name === expected.name);
       expect(row).toBeDefined();
@@ -93,7 +97,7 @@ describe("reporting platform", () => {
   }, SUITE_MS);
 
   it("runs every report as the administrator", async () => {
-    if (!pack) return;
+    if (!pack || !live) return;
     const failures: string[] = [];
     await inBatches(spread(pack.reports, Math.max(SAMPLE, 1) * 5), 6, async (report) => {
       const row = reports.find((candidate) => candidate.name === report.name);
@@ -107,7 +111,7 @@ describe("reporting platform", () => {
   }, SUITE_MS);
 
   it("runs every chart as the administrator", async () => {
-    if (!pack) return;
+    if (!pack || !live) return;
     const failures: string[] = [];
     await inBatches(spread(pack.charts, Math.max(SAMPLE, 1) * 5), 6, async (chart) => {
       const row = charts.find((candidate) => candidate.name === chart.name);
@@ -121,7 +125,7 @@ describe("reporting platform", () => {
   }, SUITE_MS);
 
   it("lets each role in to a report exactly when its tables admit the query", async () => {
-    if (!pack) return;
+    if (!pack || !live) return;
     const queryOf = new Map(pack.queries.map((query) => [query.key, query]));
     const scoped = pack.access.roles.filter((role) => !role.isAdmin);
     // The narrowest and widest scoped roles first: they are the ones that disagree.

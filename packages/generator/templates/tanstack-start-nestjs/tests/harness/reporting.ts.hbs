@@ -144,6 +144,36 @@ export async function signInToReports(email: string, password: string): Promise<
   throw new Error(`Reporting sign-in for ${email} stayed rate-limited`);
 }
 
+/**
+ * Is the platform there to be tested?
+ *
+ * A run that attaches to the backend alone (CI's generated-application job, a
+ * developer's laptop) has no platform, and the reporting suites then say so and
+ * skip rather than fail on a connection refused. Inside compose the platform is a
+ * declared dependency, so `E2E_REPORTING=required` is set there and an unreachable
+ * platform is a failure — a skip that could hide a dead service would be worse than
+ * no suite.
+ */
+export async function reportingReachable(): Promise<boolean> {
+  if (!reportingPack) return false;
+  try {
+    const response = await fetch(`${reportConfig.baseUrl}/api/health`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.ok) return true;
+  } catch {
+    // fall through to the decision below
+  }
+  if (process.env.E2E_REPORTING === "required") {
+    throw new Error(`The reporting platform did not answer at ${reportConfig.baseUrl}/api/health`);
+  }
+  console.log(
+    `  the reporting platform is not reachable at ${reportConfig.baseUrl} — reporting checks skipped ` +
+      "(E2E_REPORTING=required makes this a failure)"
+  );
+  return false;
+}
+
 /** Wait until the platform answers and the seeder has loaded the pack (the overview dashboard exists). */
 export async function waitForSeededPlatform(admin: ReportSession, timeoutMs = 300_000): Promise<void> {
   if (!reportingPack) return;

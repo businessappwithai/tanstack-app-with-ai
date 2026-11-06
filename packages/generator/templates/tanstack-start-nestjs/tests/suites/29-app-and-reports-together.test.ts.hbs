@@ -18,6 +18,7 @@ import {
   harness,
   reportAccount,
   reportingPack,
+  reportingReachable,
   signInToReports,
   waitForSeededPlatform,
   type EntityMeta,
@@ -31,10 +32,13 @@ const WRITES = 3;
 describe("application and reporting, together", () => {
   let admin: ReportSession;
   let reports: NamedRow[] = [];
+  let live = false;
 
   beforeAll(async () => {
     await harness.setup();
     if (!pack) return;
+    live = await reportingReachable();
+    if (!live) return;
     const role = pack.access.roles.find((candidate) => candidate.isAdmin) ?? pack.access.roles[0]!;
     const account = reportAccount(role);
     admin = await signInToReports(account.email, account.password);
@@ -65,8 +69,8 @@ describe("application and reporting, together", () => {
   }
 
   it("reports the records the application writes", async () => {
-    if (!pack) {
-      console.log("  no reporting pack — nothing to compare");
+    if (!pack || !live) {
+      console.log("  no reporting pack, or no platform to compare it with");
       return;
     }
     let checked = 0;

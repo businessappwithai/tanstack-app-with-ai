@@ -424,6 +424,8 @@ services:
       # Unset here and in the backend, the seed uses admin123.
       E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       E2E_REPORT_URL: http://report:3000
+      # In compose the platform is a dependency: an unreachable one is a failure, not a skip.
+      E2E_REPORTING: required
       E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
       E2E_REPORT_PACK: /app/reporting/reporting-pack.json
       E2E_RECORDS_PER_ENTITY: ${E2E_RECORDS_PER_ENTITY:-10}
@@ -461,6 +463,8 @@ services:
       E2E_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
       E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       E2E_REPORT_URL: http://report:3000
+      # In compose the platform is a dependency: an unreachable one is a failure, not a skip.
+      E2E_REPORTING: required
       E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
       E2E_REPORT_PACK: /app/reporting/reporting-pack.json
     volumes:
