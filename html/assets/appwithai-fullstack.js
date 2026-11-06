@@ -19808,8 +19808,75 @@ function linkColumn(parent, child, relForeignKey) {
   const expected = `${tableNameFor(parent).replace(/^bus_/, "")}_id`;
   return child.attributes.find((a) => a.name === expected) ?? (relForeignKey ? child.attributes.find((a) => a.name === relForeignKey) : undefined);
 }
+var RESERVED_ALIASES = [
+  "all",
+  "analyse",
+  "analyze",
+  "and",
+  "any",
+  "array",
+  "asc",
+  "both",
+  "case",
+  "cast",
+  "check",
+  "collate",
+  "column",
+  "constraint",
+  "create",
+  "default",
+  "desc",
+  "distinct",
+  "do",
+  "else",
+  "end",
+  "except",
+  "false",
+  "fetch",
+  "for",
+  "foreign",
+  "from",
+  "grant",
+  "group",
+  "having",
+  "in",
+  "initially",
+  "intersect",
+  "into",
+  "leading",
+  "limit",
+  "not",
+  "null",
+  "offset",
+  "on",
+  "only",
+  "or",
+  "order",
+  "primary",
+  "references",
+  "select",
+  "some",
+  "table",
+  "then",
+  "to",
+  "trailing",
+  "true",
+  "union",
+  "unique",
+  "user",
+  "using",
+  "when",
+  "where",
+  "window",
+  "with"
+];
+var RESERVED_ALIAS = new RegExp(`(\\bAS\\s+)(${RESERVED_ALIASES.join("|")})(?![\\w"])`, "gi");
+function quoteReservedAliases(sql) {
+  return sql.replace(RESERVED_ALIAS, (_m, as, word) => `${as}"${word}"`);
+}
 function addQuery(ctx, spec) {
-  ctx.queries.push({ ...spec, tables: tablesIn(spec.sql) });
+  const sql = quoteReservedAliases(spec.sql);
+  ctx.queries.push({ ...spec, sql, tables: tablesIn(sql) });
   return spec.key;
 }
 function deriveEntity(ctx, e) {
