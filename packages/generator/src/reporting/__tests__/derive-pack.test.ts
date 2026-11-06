@@ -187,6 +187,32 @@ describe("buildReportingPack", () => {
     expect(auditor?.tables).toEqual(["bus_kyc_record"]);
   });
 
+  it("never gives a functional role the name the platform reads as its administrator", async () => {
+    // The platform treats a role *called* admin or administrator as a system administrator,
+    // whatever it was seeded with, so a model's functional `admin` role must not take that name.
+    const model = await parseModel(
+      MODEL.replace(
+        "%%rbac role:auditor on KYCRecord.read",
+        "%%rbac role:auditor on KYCRecord.read\n%%rbac role:admin on Site.read"
+      ),
+      { projectName: "field-service", outputDir: "/tmp/unused" } as never
+    );
+    const pack = buildReportingPack(model, {
+      projectName: "field-service",
+      databaseName: "field_service",
+    });
+    const functional = pack.access.roles.find((role) => role.declaredAs === "admin");
+    expect(functional).toBeDefined();
+    expect(functional?.isAdmin).toBe(false);
+    expect(functional?.name.toLowerCase()).not.toBe("admin");
+    expect(functional?.name.toLowerCase()).not.toBe("administrator");
+    // Only the real administrator keeps the reserved name.
+    const reserved = pack.access.roles.filter((role) =>
+      ["admin", "administrator"].includes(role.name.toLowerCase())
+    );
+    expect(reserved.every((role) => role.isAdmin)).toBe(true);
+  });
+
   it("gives the administrator an empty scope and the User role an empty one too", async () => {
     const pack = await build();
     const admin = pack.access.roles.find((role) => role.isAdmin);

@@ -893,6 +893,22 @@ function assertNamesUnique(ctx: Ctx, dashboards: DashboardSpec[]): void {
 }
 
 /**
+ * The platform reads a role *called* `admin` or `administrator` as a system
+ * administrator (`hasPermission` in its permissions module), whatever
+ * permissions the role was seeded with. A model may legitimately declare a
+ * functional role `admin` — the hospital model does — and under that name its
+ * reporting account could edit saved queries, users and data sources instead of
+ * only reading the tables the model's `%%rbac` admits. Those two names are
+ * therefore never used for a non-administrator; the declared spelling is kept
+ * in `declaredAs`, which is what the application's accounts and the suites match on.
+ */
+const RESERVED_PLATFORM_ROLES = new Set(["admin", "administrator"]);
+
+function reportingRoleName(name: string): string {
+  return RESERVED_PLATFORM_ROLES.has(name.trim().toLowerCase()) ? `${name} (model role)` : name;
+}
+
+/**
  * The reporting platform's roles, shaped by the model's `%%rbac`.
  *
  * Two deliberate decisions here.
@@ -941,7 +957,7 @@ function deriveAccessSpec(model: ParsedModel, options: BuildPackOptions): Access
           .map((entity) => tableNameFor(entity));
 
     return {
-      name: role.name,
+      name: role.isAdmin ? role.name : reportingRoleName(role.name),
       declaredAs: role.declaredAs,
       description: role.isAdmin
         ? "Reads every table of the attached application"
@@ -971,7 +987,10 @@ function deriveAccessSpec(model: ParsedModel, options: BuildPackOptions): Access
    */
   for (const role of roles) {
     if (role.isAdmin) continue;
-    const expected = access.entityCounts[role.name];
+    // Looked up by the application's name for the role, which a reserved
+    // reporting name (see `reportingRoleName`) no longer matches.
+    const appName = access.roles.find((r) => r.declaredAs === role.declaredAs)?.name ?? role.name;
+    const expected = access.entityCounts[appName];
     if (expected !== undefined && expected !== role.tables.length) {
       throw new Error(
         `Reporting role "${role.name}" resolved ${role.tables.length} readable tables, ` +

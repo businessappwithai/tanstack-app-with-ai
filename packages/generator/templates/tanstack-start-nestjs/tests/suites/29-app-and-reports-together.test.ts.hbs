@@ -68,6 +68,14 @@ describe("application and reporting, together", () => {
     return Number(response.data?.totalRows ?? 0);
   }
 
+  /** The application's own count of an entity's rows — the oracle the platform is held to. */
+  async function appTotal(entity: EntityMeta): Promise<number> {
+    const response = await harness.client.get<{ meta?: { total?: number } }>(
+      `/bus/${entity.route}?page=1&limit=1`
+    );
+    return Number(response.data?.meta?.total ?? 0);
+  }
+
   it("reports the records the application writes", async () => {
     if (!pack || !live) {
       console.log("  no reporting pack, or no platform to compare it with");
@@ -78,14 +86,23 @@ describe("application and reporting, together", () => {
       const register = registerFor(entity);
       if (!register) continue;
       const before = await reportedTotal(register.reportId);
+      const appBefore = await appTotal(entity);
+      // Both products read one table: they must already agree.
+      expect(before).toBe(appBefore);
+
       let written = 0;
       for (let index = 0; index < WRITES; index++) {
         const created = await harness.createWithParents(entity);
         if (created) written++;
       }
       if (written === 0) continue; // an unsatisfiable parent chain: 03 reports it
+
+      // A write can add more than it was asked for (a self-referencing parent is created
+      // first), so the platform is held to the application's own count, and to having grown.
+      const appAfter = await appTotal(entity);
       const after = await reportedTotal(register.reportId);
-      expect(after).toBe(before + written);
+      expect(appAfter).toBeGreaterThanOrEqual(appBefore + written);
+      expect(after).toBe(appAfter);
       checked++;
       if (checked >= 3) break; // three entities prove the seam; 28 covers every report
     }

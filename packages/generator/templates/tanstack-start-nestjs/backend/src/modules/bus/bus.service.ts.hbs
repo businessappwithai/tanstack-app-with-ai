@@ -1342,7 +1342,10 @@ export class BusService {
         if (typeof value !== 'string' || !uuidRegex.test(value)) return `Field '${fieldName}' must be a valid UUID`;
         break;
       case 28:
-        if (typeof value !== 'object') return `Field '${fieldName}' must be a JSON object`;
+        // A JSON column is stored as text (the bus tables emit VARCHAR for it), so the API
+        // answers with a string and a client that reads a record and writes it back sends that
+        // string. Refusing it made every record carrying one impossible to update unchanged.
+        if (typeof value !== 'object' && typeof value !== 'string') return `Field '${fieldName}' must be a JSON object`;
         break;
     }
     return null;

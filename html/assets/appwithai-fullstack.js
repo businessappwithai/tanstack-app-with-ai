@@ -20175,6 +20175,10 @@ ${problems.join(`
 `)}`);
   }
 }
+var RESERVED_PLATFORM_ROLES = new Set(["admin", "administrator"]);
+function reportingRoleName(name) {
+  return RESERVED_PLATFORM_ROLES.has(name.trim().toLowerCase()) ? `${name} (model role)` : name;
+}
 function deriveAccessSpec(model, options) {
   const projectId = kebabName(options.projectName);
   const access = deriveAccess(model.rbac, {
@@ -20193,7 +20197,7 @@ function deriveAccessSpec(model, options) {
       return admitted.some((r) => r.toLowerCase() === role.declaredAs.toLowerCase());
     }).map((entity) => tableNameFor(entity));
     return {
-      name: role.name,
+      name: role.isAdmin ? role.name : reportingRoleName(role.name),
       declaredAs: role.declaredAs,
       description: role.isAdmin ? "Reads every table of the attached application" : `Reads what ${role.name} may see in the application`,
       isAdmin: role.isAdmin,
@@ -20205,7 +20209,8 @@ function deriveAccessSpec(model, options) {
   for (const role of roles) {
     if (role.isAdmin)
       continue;
-    const expected = access.entityCounts[role.name];
+    const appName = access.roles.find((r) => r.declaredAs === role.declaredAs)?.name ?? role.name;
+    const expected = access.entityCounts[appName];
     if (expected !== undefined && expected !== role.tables.length) {
       throw new Error(`Reporting role "${role.name}" resolved ${role.tables.length} readable tables, ` + `but the application derives ${expected} for the same role. ` + `These must agree — the reporting side is mirroring %%rbac, not reinterpreting it.`);
     }

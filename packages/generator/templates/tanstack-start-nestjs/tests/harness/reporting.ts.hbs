@@ -112,9 +112,13 @@ export class ReportSession {
       const response = await this.get<Page<T> | T[]>(`${path}${joiner}page=${page}&pageSize=${pageSize}`);
       if (!response.ok) throw new Error(`GET ${path} → ${response.status} ${response.code ?? ""}`);
       const items = Array.isArray(response.data) ? response.data : (response.data?.items ?? []);
-      rows.push(...items);
-      const total = Array.isArray(response.data) ? items.length : (response.data?.meta?.total ?? items.length);
-      if (items.length < pageSize || rows.length >= total) break;
+      const known = new Set(rows.map((row) => row.id));
+      const fresh = items.filter((item) => !known.has(item.id));
+      rows.push(...fresh);
+      // The platform caps pageSize (100), so a page shorter than the one asked for is not
+      // the last page — only an empty one, or having every row the total names, is.
+      const total = Array.isArray(response.data) ? items.length : (response.data?.meta?.total ?? Infinity);
+      if (fresh.length === 0 || rows.length >= total) break;
     }
     return rows;
   }
