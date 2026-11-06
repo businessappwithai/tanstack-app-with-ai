@@ -1354,7 +1354,7 @@ erDiagram
         integer row_count
         string run_status
     }
-    Dashboard {
+    InstitutionDashboard {
         string id PK
         string institution_id FK
         string name
@@ -1363,7 +1363,7 @@ erDiagram
     }
     DashboardWidget {
         string id PK
-        string dashboard_id FK
+        string institution_dashboard_id FK
         string kpi_definition_id FK OPTIONAL
         string report_definition_id FK OPTIONAL
         string title
@@ -1446,7 +1446,7 @@ erDiagram
     CourseOffering ||--o{ OfferingSchedule : "links to offering schedule"
     CourseOffering ||--o{ TeachingAssignment : "links to teaching assignment"
     CourseOffering ||--o{ WaitlistEntry : "links to waitlist entry"
-    Dashboard ||--o{ DashboardWidget : "links to dashboard widget"
+    InstitutionDashboard ||--o{ DashboardWidget : "links to dashboard widget"
     Department ||--o{ Employee : "links to employee"
     Department ||--o{ LearningCourse : "links to learning course"
     Department ||--o{ LearningProgram : "links to learning program"
@@ -1482,7 +1482,7 @@ erDiagram
     Institution ||--o{ Campus : "links to campus"
     Institution ||--o{ ConstituentRole : "links to constituent role"
     Institution ||--o{ CorporatePartner : "links to corporate partner"
-    Institution ||--o{ Dashboard : "links to dashboard"
+    Institution ||--o{ InstitutionDashboard : "links to dashboard"
     Institution ||--o{ FeeComponent : "links to fee component"
     Institution ||--o{ FundraisingCampaign : "links to fundraising campaign"
     Institution ||--o{ GeneralLedgerAccount : "links to general ledger account"
@@ -3281,25 +3281,25 @@ erDiagram
     %%section entity: ReportExecution; name: Operational details; help: Verify the reportexecution context and complete each required business input before committing or approving this record.; rows: report_definition_id, executed_by_id | executed_on, row_count | run_status
     %%index ReportExecution(report_definition_id)
     %%index ReportExecution(executed_by_id)
-    %%entity Dashboard help: Organized view of institution-level indicators scoped to the viewer role and security context.
-    %%entity Dashboard icon: shield-check
-    %%field Dashboard.institution_id help: Choose the verified institution record used to authorize or reconcile this dashboard action; do not paste an identifier from another institution.
-    %%field Dashboard.name help: Use the institution-approved name that appears in dashboard lists, notifications and staff lookups; change it without deleting history.
-    %%field Dashboard.audience_type enum: DashboardAudienceTypeEnum
-    %%field Dashboard.audience_type help: Record the approved audience type exactly as defined in the relevant dashboard process; it is used for operational reconciliation and reporting.
-    %%field Dashboard.layout_json help: Store the structured layout json payload using the agreed integration schema and redact sensitive values from general reports.
-    %%section entity: Dashboard; name: Identity and obligations; help: Verify the dashboard context and complete each required business input before committing or approving this record.; rows: institution_id, name | audience_type, layout_json
-    %%index Dashboard(institution_id)
+    %%entity InstitutionDashboard help: Organized view of institution-level indicators scoped to the viewer role and security context.
+    %%entity InstitutionDashboard icon: shield-check
+    %%field InstitutionDashboard.institution_id help: Choose the verified institution record used to authorize or reconcile this dashboard action; do not paste an identifier from another institution.
+    %%field InstitutionDashboard.name help: Use the institution-approved name that appears in dashboard lists, notifications and staff lookups; change it without deleting history.
+    %%field InstitutionDashboard.audience_type enum: DashboardAudienceTypeEnum
+    %%field InstitutionDashboard.audience_type help: Record the approved audience type exactly as defined in the relevant dashboard process; it is used for operational reconciliation and reporting.
+    %%field InstitutionDashboard.layout_json help: Store the structured layout json payload using the agreed integration schema and redact sensitive values from general reports.
+    %%section entity: InstitutionDashboard; name: Identity and obligations; help: Verify the dashboard context and complete each required business input before committing or approving this record.; rows: institution_id, name | audience_type, layout_json
+    %%index InstitutionDashboard(institution_id)
     %%entity DashboardWidget help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard.
     %%entity DashboardWidget icon: shield-check
-    %%field DashboardWidget.dashboard_id help: Choose the verified dashboard record used to authorize or reconcile this dashboardwidget action; do not paste an identifier from another institution.
+    %%field DashboardWidget.institution_dashboard_id help: Choose the verified dashboard record used to authorize or reconcile this dashboardwidget action; do not paste an identifier from another institution.
     %%field DashboardWidget.kpi_definition_id help: Choose the verified kpi definition record used to authorize or reconcile this dashboardwidget action; do not paste an identifier from another institution.
     %%field DashboardWidget.report_definition_id help: Choose the verified report definition record used to authorize or reconcile this dashboardwidget action; do not paste an identifier from another institution.
     %%field DashboardWidget.title help: Use the institution-approved title that appears in dashboardwidget lists, notifications and staff lookups; change it without deleting history.
     %%field DashboardWidget.visualization_type enum: DashboardWidgetVisualizationTypeEnum
     %%field DashboardWidget.visualization_type help: Record the approved visualization type exactly as defined in the relevant dashboardwidget process; it is used for operational reconciliation and reporting.
-    %%section entity: DashboardWidget; name: Operational details; help: Verify the dashboardwidget context and complete each required business input before committing or approving this record.; rows: dashboard_id, kpi_definition_id | report_definition_id, title | visualization_type
-    %%index DashboardWidget(dashboard_id)
+    %%section entity: DashboardWidget; name: Operational details; help: Verify the dashboardwidget context and complete each required business input before committing or approving this record.; rows: institution_dashboard_id, kpi_definition_id | report_definition_id, title | visualization_type
+    %%index DashboardWidget(institution_dashboard_id)
     %%index DashboardWidget(kpi_definition_id)
     %%index DashboardWidget(report_definition_id)
     %%entity AuditEvent help: Immutable evidence of access and business mutations for investigations and compliance reporting; should not disclose protected payloads.
@@ -3323,7 +3323,7 @@ erDiagram
     %%category name: Corporate Relations and Careers; entities: CorporatePartner, PartnershipAgreement, EmployerContact, PlacementOpportunity, PlacementApplication, InternshipPlacement, EmployerFeedback, CareerOutcome
     %%category name: Alumni and Advancement; entities: AlumniProfile, AlumniEngagement, Donor, FundraisingCampaign, GiftDesignation, GiftCommitment, GiftTransaction, Grant, GrantExpenditure
     %%category name: Campus Operations and ERP; entities: LibraryItem, LibraryLoan, Residence, ResidenceRoom, ResidenceAssignment, TransportRoute, TransportStop, TransportAssignment, Supplier, PurchaseOrder, InventoryItem, StockMovement, FixedAsset, MaintenanceRequest, GeneralLedgerAccount, JournalEntry
-    %%category name: Governance and Enterprise Reporting; entities: Policy, PolicyAcknowledgement, ApprovalRequest, DataRetentionPolicy, DataAccessRequest, IntegrationEndpoint, IntegrationJob, IntegrationFailure, KpiDefinition, KpiSnapshot, ReportDefinition, ReportExecution, Dashboard, DashboardWidget, AuditEvent
+    %%category name: Governance and Enterprise Reporting; entities: Policy, PolicyAcknowledgement, ApprovalRequest, DataRetentionPolicy, DataAccessRequest, IntegrationEndpoint, IntegrationJob, IntegrationFailure, KpiDefinition, KpiSnapshot, ReportDefinition, ReportExecution, InstitutionDashboard, DashboardWidget, AuditEvent
     %%rbac role:admin on Tenant.read
     %%rbac role:registrar on Tenant.read
     %%rbac role:registrar on Tenant.create
@@ -3988,10 +3988,10 @@ erDiagram
     %%rbac role:institution_admin on ReportExecution.read
     %%rbac role:institution_admin on ReportExecution.create
     %%rbac role:institution_admin on ReportExecution.update
-    %%rbac role:admin on Dashboard.read
-    %%rbac role:institution_admin on Dashboard.read
-    %%rbac role:institution_admin on Dashboard.create
-    %%rbac role:institution_admin on Dashboard.update
+    %%rbac role:admin on InstitutionDashboard.read
+    %%rbac role:institution_admin on InstitutionDashboard.read
+    %%rbac role:institution_admin on InstitutionDashboard.create
+    %%rbac role:institution_admin on InstitutionDashboard.update
     %%rbac role:admin on DashboardWidget.read
     %%rbac role:institution_admin on DashboardWidget.read
     %%rbac role:institution_admin on DashboardWidget.create
@@ -5183,12 +5183,12 @@ appeal_withdrawn --> [*]
 %%report report-execution-largest-by-row-count title: The ten largest report executions by row count entity: ReportExecution chart: bar x: record y: row_count help: Auditable instance of an analytics run used to detect errors, unauthorized access or slow-running queries. The records with the highest row count; worth reading for outliers and for the few that carry most of the total. sql: SELECT run_status::text AS record, row_count FROM bus_report_execution WHERE deleted_at IS NULL AND row_count IS NOT NULL ORDER BY row_count DESC LIMIT 10
 %%report report-execution-per-report-definition title: Report Executions per report definition entity: ReportExecution chart: bar x: report_definition y: records help: Auditable instance of an analytics run used to detect errors, unauthorized access or slow-running queries. Which report definition the most report executions belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS report_definition, COUNT(*) AS records FROM bus_report_execution x LEFT JOIN bus_report_definition p ON p.id = x.report_definition_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 %%report report-execution-row-count-per-report-definition title: Total row count per report definition entity: ReportExecution chart: bar x: report_definition y: total_row_count help: Auditable instance of an analytics run used to detect errors, unauthorized access or slow-running queries. Report Executions added up on row count for each report definition, ten largest first. sql: SELECT COALESCE(p.name::text, '(none)') AS report_definition, ROUND(SUM(x.row_count)::numeric, 2) AS total_row_count FROM bus_report_execution x LEFT JOIN bus_report_definition p ON p.id = x.report_definition_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
-%%report dashboard-by-audience-type title: Dashboards by audience type entity: Dashboard chart: pie x: audience_type y: records help: Organized view of institution-level indicators scoped to the viewer role and security context. How dashboards divide across audience type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(audience_type::text, '(unset)') AS audience_type, COUNT(*) AS records FROM bus_dashboard WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
-%%report dashboard-created-per-month title: Dashboards created per month entity: Dashboard chart: line x: month y: records help: Organized view of institution-level indicators scoped to the viewer role and security context. New dashboards per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_dashboard WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
-%%report dashboard-per-institution title: Dashboards per institution entity: Dashboard chart: bar x: institution y: records help: Organized view of institution-level indicators scoped to the viewer role and security context. Which institution the most dashboards belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS institution, COUNT(*) AS records FROM bus_dashboard x LEFT JOIN bus_institution p ON p.id = x.institution_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report dashboard-by-audience-type title: Dashboards by audience type entity: InstitutionDashboard chart: pie x: audience_type y: records help: Organized view of institution-level indicators scoped to the viewer role and security context. How dashboards divide across audience type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(audience_type::text, '(unset)') AS audience_type, COUNT(*) AS records FROM bus_institution_dashboard WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report dashboard-created-per-month title: Dashboards created per month entity: InstitutionDashboard chart: line x: month y: records help: Organized view of institution-level indicators scoped to the viewer role and security context. New dashboards per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_institution_dashboard WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report dashboard-per-institution title: Dashboards per institution entity: InstitutionDashboard chart: bar x: institution y: records help: Organized view of institution-level indicators scoped to the viewer role and security context. Which institution the most dashboards belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS institution, COUNT(*) AS records FROM bus_institution_dashboard x LEFT JOIN bus_institution p ON p.id = x.institution_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 %%report dashboard-widget-by-visualization-type title: Dashboard Widgets by visualization type entity: DashboardWidget chart: pie x: visualization_type y: records help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard. How dashboard widgets divide across visualization type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(visualization_type::text, '(unset)') AS visualization_type, COUNT(*) AS records FROM bus_dashboard_widget WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
 %%report dashboard-widget-created-per-month title: Dashboard Widgets created per month entity: DashboardWidget chart: line x: month y: records help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard. New dashboard widgets per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_dashboard_widget WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
-%%report dashboard-widget-per-dashboard title: Dashboard Widgets per dashboard entity: DashboardWidget chart: bar x: dashboard y: records help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard. Which dashboard the most dashboard widgets belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS dashboard, COUNT(*) AS records FROM bus_dashboard_widget x LEFT JOIN bus_dashboard p ON p.id = x.dashboard_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report dashboard-widget-per-dashboard title: Dashboard Widgets per dashboard entity: DashboardWidget chart: bar x: dashboard y: records help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard. Which dashboard the most dashboard widgets belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS dashboard, COUNT(*) AS records FROM bus_dashboard_widget x LEFT JOIN bus_institution_dashboard p ON p.id = x.institution_dashboard_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 %%report dashboard-widget-per-kpi-definition title: Dashboard Widgets per kpi definition entity: DashboardWidget chart: bar x: kpi_definition y: records help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard. Which kpi definition the most dashboard widgets belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS kpi_definition, COUNT(*) AS records FROM bus_dashboard_widget x LEFT JOIN bus_kpi_definition p ON p.id = x.kpi_definition_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 %%report dashboard-widget-per-report-definition title: Dashboard Widgets per report definition entity: DashboardWidget chart: bar x: report_definition y: records help: Individual visual tied to a validated report definition; never expose unrestricted query results through a public dashboard. Which report definition the most dashboard widgets belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS report_definition, COUNT(*) AS records FROM bus_dashboard_widget x LEFT JOIN bus_report_definition p ON p.id = x.report_definition_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 %%report audit-event-by-action-type title: Audit Events by action type entity: AuditEvent chart: bar x: action_type y: records help: Immutable evidence of access and business mutations for investigations and compliance reporting; should not disclose protected payloads. How audit events divide across action type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(action_type::text, '(unset)') AS action_type, COUNT(*) AS records FROM bus_audit_event WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
