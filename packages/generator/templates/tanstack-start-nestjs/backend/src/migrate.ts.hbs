@@ -264,7 +264,10 @@ async function runSeeds(db: Kysely<any>) {
     console.error('\n❌ Database setup failed:', error);
     process.exit(1);
   } finally {
-    await db.destroy();
+    // pool.end() can hang if idle connections don't close cleanly; 5s is
+    // enough for any real drain and prevents blocking the API startup.
+    await Promise.race([db.destroy(), new Promise(r => setTimeout(r, 5000))]);
+    process.exit(0);
   }
 })().catch((error) => {
   console.error('Fatal error:', error);

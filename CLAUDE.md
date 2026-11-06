@@ -93,6 +93,10 @@ Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
 **Project**: AI-powered ERD design + full-stack code generation  
 **Version**: 5.1.1 | **Runtime**: Bun.js 1.4.4 (pinned — see below)
 
+## Generated Application Stack Rule
+
+**MANDATORY**: When asked to build, generate, or run an application from a `.eml.mmd` model, ALWAYS use the full NestJS + TanStack stack (`bun run wasm generate -i <model> -o <dir>` **without** `--standalone`). The `--standalone` flag produces a browser-only demo — never use it unless the user explicitly asks for the browser/WASM demo. The real application runs NestJS on port 4001 and TanStack Start on port 4000.
+
 ## Commands
 
 | Command | Purpose |
