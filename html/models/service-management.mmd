@@ -510,7 +510,7 @@ erDiagram
     IntegrationEvent {
       string id PK
       string name
-      string integration_endpoint_id FK
+      string integration_endpoint_id FK OPTIONAL
       string event_type
       string correlation_key
       string status
@@ -715,7 +715,7 @@ erDiagram
     SurveyInvitation {
       string id PK
       string name
-      string survey_id FK
+      string survey_id FK OPTIONAL
       string contact_id FK
       string case_id FK OPTIONAL
       datetime expires_at
