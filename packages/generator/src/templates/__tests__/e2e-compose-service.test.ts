@@ -43,6 +43,11 @@ describe("the e2e compose service", () => {
     expect(e2e).toContain("E2E_REPORT_PACK");
   });
 
+  it("lets the backend trust the front end's address on the compose network", () => {
+    expect(compose).toMatch(/CORS_ORIGIN: \$\{CORS_ORIGIN:-.*http:\/\/frontend:/);
+    expect(e2e).toContain("E2E_ORIGIN: ${E2E_ORIGIN:-http://frontend:");
+  });
+
   it("raises the throttle and trusts the report origin, so a run is deterministic", () => {
     expect(compose).toContain("THROTTLE_LIMIT:");
     expect(compose).toContain("BETTER_AUTH_URL: ${REPORT_BASE_URL");
@@ -60,6 +65,15 @@ describe("the reporting suites are registered", () => {
       expect(existsSync(join(TEMPLATES, "tests/suites", `${suite}.test.ts.hbs`))).toBe(true);
     });
   }
+
+  it("has a browser-layer service whose image uses a glibc bun", () => {
+    expect(e2e).toContain("e2e-ui:");
+    expect(e2e).toContain("dockerfile: Dockerfile.ui");
+    const ui = readFileSync(join(TEMPLATES, "tests/Dockerfile.ui.hbs"), "utf8");
+    // The Playwright image is glibc; an Alpine bun copied into it exits 127.
+    expect(ui).toMatch(/^FROM oven\/bun:1\.4\.4 AS bun$/m);
+    expect(ui).not.toMatch(/^FROM oven\/bun:[^ ]*alpine/m);
+  });
 
   it("ships the reporting harness module and the tests Dockerfile", () => {
     expect(generator).toContain('"reporting.ts"');

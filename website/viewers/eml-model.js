@@ -1643,6 +1643,7 @@ var appwithai_language_default = {
     generatedE2E: {
       description: "Every generated application carries an end-to-end suite that is derived from the same model and runs on demand from its docker-compose.yml. Nothing in it is written by hand per application: the generator (packages/generator/src/generators/tests/bun-e2e.generator.ts) renders the tests/ project from the parsed model, and the reporting suites read the same reporting-pack.json the seeder loaded.",
       command: "docker compose run --rm e2e",
+      browserCommand: "docker compose run --rm e2e-ui — the same suite's browser layer: Playwright and Chromium drive the front end, the rules and workflows editor, a record's action buttons and the reporting platform's dashboards.",
       service: "An 'e2e' service behind the 'test' profile (so 'docker compose up' never starts it), built from tests/Dockerfile. It waits for the backend and the reporting platform to be healthy, the front end to have started and the report-seeder to have exited 0, then attaches over the compose network. Results are written to ./test-results. It is generated only when the tests/ project is.",
       scripts: {
         "test:attach": "every suite (the default)",
@@ -1651,7 +1652,8 @@ var appwithai_language_default = {
         "test:workflows": "the workflow suites",
         "test:status": "action buttons per role (suite 26)",
         "test:reporting": "the reporting platform against the pack (suite 28)",
-        "test:together": "the application and the platform on one set of data (suite 29)"
+        "test:together": "the application and the platform on one set of data (suite 29)",
+        "test:ui": "the browser layer (the e2e-ui service)"
       },
       derivedFrom: [
         { declares: "an entity", yields: "CRUD, listing, filtering, sorting, pagination, optimistic locking and validation suites for it" },

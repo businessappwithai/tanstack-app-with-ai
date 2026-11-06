@@ -1,0 +1,19 @@
+# The browser layer of the end-to-end suite: Chromium, Playwright and the specs.
+#
+# `docker compose run --rm e2e-ui` builds this and drives the front end and the
+# reporting platform in a real browser over the compose network. The Playwright
+# image carries Chromium and its system libraries; bun is copied in only to
+# install, as in the API image.
+# The Debian build, not -alpine: the Playwright image is glibc, and an Alpine (musl)
+# bun copied into it fails with "not found" (exit 127) at the first `bun install`.
+FROM oven/bun:1.4.4 AS bun
+
+FROM mcr.microsoft.com/playwright:v1.62.0-noble
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /app/tests
+COPY package.json ./
+RUN bun install
+COPY . .
+ENV E2E_ATTACH=1
+ENTRYPOINT ["bun", "run"]
+CMD ["test:ui"]

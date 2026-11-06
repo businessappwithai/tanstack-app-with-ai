@@ -23,6 +23,7 @@
     "test:status": "node run.ts --only status-flows",
     "test:reporting": "node run.ts --only reporting",
     "test:together": "node run.ts --only together",
+    "test:ui": "playwright test -c ui/playwright.config.ts",
     "test:users": "node --test suites/08-users-roles.test.ts",
     "test:watch": "node --test --watch suites",
     "typecheck": "tsc --noEmit"
@@ -31,6 +32,7 @@
     "@faker-js/faker": "^9.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.0",
     "@types/node": "^22.10.0",
     "typescript": "^5.3.0"
   },

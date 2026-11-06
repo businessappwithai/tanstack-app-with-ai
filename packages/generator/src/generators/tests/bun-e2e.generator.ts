@@ -211,7 +211,17 @@ const ROOT_FILES = [
   "cleanup.ts",
   // The `e2e` compose service builds this: `docker compose run --rm e2e`.
   "Dockerfile",
+  // The browser layer's image: Chromium + Playwright. `docker compose run --rm e2e-ui`.
+  "Dockerfile.ui",
   ".dockerignore",
+];
+
+/** The browser layer: Playwright specs and the helpers they share. */
+const UI_FILES = [
+  "playwright.config.ts",
+  "helpers.ts",
+  "app.spec.ts",
+  "reporting.spec.ts",
 ];
 
 /** Files made executable after writing. */
@@ -240,6 +250,7 @@ export class BunE2ETestGenerator extends BaseGenerator {
 
     await this.writeRootFiles(testsDir, context);
     await this.writeHarness(testsDir, context);
+    await this.writeUi(testsDir, context);
     await this.writeSharedSuites(testsDir, context);
     await this.writePerEntitySuites(testsDir, busEntities, context);
 
@@ -644,6 +655,14 @@ export class BunE2ETestGenerator extends BaseGenerator {
     for (const file of EXECUTABLE_FILES) {
       // chmod is best-effort — Windows and some CI filesystems reject it.
       await fs.chmod(path.join(testsDir, file), 0o755).catch(() => {});
+    }
+  }
+
+  private async writeUi(testsDir: string, context: Record<string, unknown>): Promise<void> {
+    await fs.mkdir(path.join(testsDir, "ui"), { recursive: true });
+    for (const file of UI_FILES) {
+      const content = await this.renderTemplate(`ui/${file}.hbs`, context);
+      await fs.writeFile(path.join(testsDir, "ui", file), content);
     }
   }
 

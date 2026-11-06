@@ -1,0 +1,87 @@
+/**
+ * The generated application, in a browser: sign-in, the dashboard, an entity
+ * list, the rules & workflows editor, and — for the first state machine the
+ * model declares — a record's action buttons moving it along a drawn edge.
+ *
+ * Strict by design: no spec skips because a button is absent. A model that
+ * declares no state machine says so in the log and the status spec does not run.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { expect, test } from "@playwright/test";
+
+import { harness, successorsOf } from "../harness/index.ts";
+import { appUrl, entities, signInToApp, stateMachines } from "./helpers.ts";
+
+test.describe("the application", () => {
+  test.beforeEach(async ({ page }) => {
+    await signInToApp(page);
+  });
+
+  test("shows the dashboard's categories", async ({ page }) => {
+    // An administrator's dashboard hides the business entities behind a button;
+    // everyone else sees them straight away.
+    const reveal = page.getByRole("button", { name: "Show business entities" });
+    await expect(reveal.or(page.getByTestId("dashboard-categories"))).toBeVisible({ timeout: 60_000 });
+    if (await reveal.isVisible()) await reveal.click();
+    await expect(page.getByTestId("dashboard-categories")).toBeVisible();
+    await expect(page.getByText("Failed to load entities")).toHaveCount(0);
+  });
+
+  test("lists the first entity without an error", async ({ page }) => {
+    const entity = entities[0]!;
+    await page.goto(`${appUrl}/${entity.route}`);
+    await expect(page.getByText("Failed to load")).toHaveCount(0);
+    await expect(page.locator("main, [role=main], body").first()).toBeVisible();
+  });
+
+  test("opens the rules and workflows editor", async ({ page }) => {
+    await page.goto(`${appUrl}/admin/automations`);
+    await expect(
+      page.getByRole("heading", { name: /^Rules(,| and) workflows/ }).first()
+    ).toBeVisible({ timeout: 240_000 });
+    await expect(page.getByText("Loading the model…")).toHaveCount(0, { timeout: 120_000 });
+  });
+
+  test("moves a record along a drawn edge with its action button", async ({ page }) => {
+    const machine = stateMachines[0];
+    test.skip(!machine, "the model declares no state machine");
+    const entity = entities.find((candidate) => candidate.tableName === machine!.tableName)!;
+
+    await harness.setup();
+    try {
+      const created = await harness.createWithParents(entity);
+      test.skip(!created?.id, "no record could be created for this entity");
+      const id = String(created!.id);
+
+      await page.goto(`${appUrl}/${entity.route}/${id}`);
+      await expect(page.getByTestId("record-actions")).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId("record-state")).toBeVisible();
+
+      // Press the first move the diagram draws from where the record is.
+      const state = String(
+        (created as Record<string, unknown>)[machine!.statusField] ??
+          machine!.initial
+      );
+      const targets = successorsOf(machine!, state);
+      test.skip(targets.length === 0, "the record starts in an end state");
+      // One move is a button; several are a "Move to…" menu whose items appear on click.
+      const menu = page.getByTestId("record-actions-menu");
+      if (await menu.isVisible()) await menu.click();
+      const button = page
+        .locator('[data-testid^="record-action-"]:not([data-testid="record-action-reopen"])')
+        .first();
+      await expect(button).toBeVisible();
+      await button.click();
+      await expect(page.getByTestId("press-moved").or(page.getByTestId("press-refused"))).toBeVisible({
+        timeout: 60_000,
+      });
+      // A refusal is a rule or workflow of the model doing its job; a failure to
+      // answer at all is not. Either way the page must show an outcome.
+    } finally {
+      await harness.teardown();
+    }
+  });
+});

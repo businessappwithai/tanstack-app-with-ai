@@ -94,7 +94,8 @@ column fails CI rather than every report at run time.
 **The two applications are tested together, on demand.** Every generated
 application carries an end-to-end suite derived from the same model, and its
 `docker-compose.yml` runs it: `docker compose run --rm e2e` (behind the `test`
-profile, so `up` never starts it). It waits for both applications and for the
+profile, so `up` never starts it; `docker compose run --rm e2e-ui` is its browser
+layer, Chromium driving both applications). It waits for both applications and for the
 seeder, then signs in to the *platform* as each reporting role and holds it to
 `reporting/reporting-pack.json` — every report, chart and dashboard present by
 name, every dashboard widget, every report and chart actually run, and each

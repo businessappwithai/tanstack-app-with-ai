@@ -900,7 +900,13 @@ platform held to `reporting/reporting-pack.json` — names, widgets, every repor
 when its tables admit the query) and **29** (records written through the application show up in the platform's register
 report). `harness/reporting.ts` reads the pack off disk; **never re-derive what it expects**.
 
-Things learned bringing it up on the CRM model (63/63 suites, run from the container):
+`docker compose run --rm e2e-ui` is the browser layer (`tests/ui`, Playwright 1.62 on `mcr.microsoft.com/playwright`):
+sign-in and dashboard, an entity list, the rules & workflows editor, a record's action buttons and the reporting
+platform's dashboards. Its image copies a **Debian** bun (`oven/bun:1.4.4`) in to install — an Alpine one fails with
+exit 127 in the glibc Playwright image — and the backend's compose `CORS_ORIGIN` default lists `http://frontend:<port>`
+because that is the origin its browser signs in from.
+
+Things learned bringing it up on the CRM model (63/63 API suites, 7/7 browser specs, run from the containers):
 
 - **The platform refuses the application's `Origin`** (`INVALID_ORIGIN`, 403 on sign-in), so a report session sends the
   platform's own. The compose file sets `CORS_ORIGIN` and `BETTER_AUTH_URL` on `report` for the same reason.

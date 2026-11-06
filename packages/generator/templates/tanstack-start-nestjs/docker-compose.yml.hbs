@@ -182,7 +182,11 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-in-production}
       # The administrator's password (8+ characters). Unset: the seed's default.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}}}
+      # The origins the browser may sign in from. The second is the front end's
+      # address *on the compose network*, which is where the `e2e-ui` service's
+      # browser is. A deployment names its own (comma separated) and keeps that
+      # entry if it runs the end-to-end suite in compose.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}},http://frontend:{{project.frontendPort}}}
       # The rate limiter's ceiling per window. The end-to-end suite (`e2e`
       # below) makes thousands of requests from one address; it backs off on a
       # 429 either way, but a ceiling it never reaches keeps a run short.
@@ -415,7 +419,7 @@ services:
     restart: "no"
     environment:
       E2E_BASE_URL: http://backend:{{project.backendPort}}
-      E2E_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}}}
+      E2E_ORIGIN: ${E2E_ORIGIN:-http://frontend:{{project.frontendPort}}}
       E2E_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
       # Unset here and in the backend, the seed uses admin123.
       E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
@@ -423,6 +427,42 @@ services:
       E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
       E2E_REPORT_PACK: /app/reporting/reporting-pack.json
       E2E_RECORDS_PER_ENTITY: ${E2E_RECORDS_PER_ENTITY:-10}
+    volumes:
+      - ./reporting/reporting-pack.json:/app/reporting/reporting-pack.json:ro
+      - ./test-results:/app/test-results
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      report:
+        condition: service_healthy
+      report-seeder:
+        condition: service_completed_successfully
+
+  # The same suite's browser layer: Chromium drives the front end, the rules &
+  # workflows editor, a record's action buttons and the reporting platform's
+  # dashboards. A separate service because the Playwright image is large and the
+  # API suites should not pay for it.
+  #
+  #   docker compose run --rm e2e-ui
+  e2e-ui:
+    profiles: ["test"]
+    image: {{project.id}}-e2e-ui:${IMAGE_TAG:-latest}
+    build:
+      context: ./tests
+      dockerfile: Dockerfile.ui
+    restart: "no"
+    ipc: host
+    environment:
+      E2E_BASE_URL: http://backend:{{project.backendPort}}
+      E2E_APP_URL: http://frontend:{{project.frontendPort}}
+      E2E_ORIGIN: ${E2E_ORIGIN:-http://frontend:{{project.frontendPort}}}
+      E2E_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
+      E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      E2E_REPORT_URL: http://report:3000
+      E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
+      E2E_REPORT_PACK: /app/reporting/reporting-pack.json
     volumes:
       - ./reporting/reporting-pack.json:/app/reporting/reporting-pack.json:ro
       - ./test-results:/app/test-results
