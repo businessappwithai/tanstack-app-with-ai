@@ -14752,6 +14752,7 @@ function generateForeignKeyName(referencedTableName) {
 }
 // packages/generator/src/templates/loader.ts
 var import_handlebars = __toESM(require_handlebars(), 1);
+var SIGNED_COLUMN = /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
 function resolveOsUser() {
   if (process.env.PGUSER)
     return process.env.PGUSER;
@@ -14816,6 +14817,7 @@ class TemplateLoader {
     import_handlebars.default.registerHelper("and", (...args) => args.slice(0, -1).every(Boolean));
     import_handlebars.default.registerHelper("or", (...args) => args.slice(0, -1).some(Boolean));
     import_handlebars.default.registerHelper("not", (value) => !value);
+    import_handlebars.default.registerHelper("isSignedColumn", (name) => typeof name === "string" && SIGNED_COLUMN.test(name));
     import_handlebars.default.registerHelper("eachFirst", function(items, count, options) {
       if (!Array.isArray(items) || items.length === 0) {
         return options.inverse(this);
