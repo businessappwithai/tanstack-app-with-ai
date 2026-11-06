@@ -1,0 +1,211 @@
+/**
+ * The Enterprise Reporting platform, as the suites see it.
+ *
+ * The generated application and the reporting platform are two products with
+ * two sign-ins; this module is the only place the suites reach the second one.
+ * What it *expects* is never written here: the pack the generator derived from
+ * the model (`reporting/reporting-pack.json`) is read off disk, so a suite
+ * compares the running platform against the same artefact the seeder loaded,
+ * not against a second derivation that could drift.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { HttpClient } from "./http.ts";
+
+/** Whether this application was generated with a reporting pack at all. */
+export const reportingGenerated = {{#if hasReporting}}true{{else}}false{{/if}};
+
+export interface PackQuery { key: string; name: string; sql: string; tables: string[] }
+export interface PackReport { key: string; name: string; queryKey: string; columns: Array<{ field: string; label: string }>; pageSize: number }
+export interface PackChart { key: string; name: string; queryKey: string; chartType: string; xField: string; yField: string }
+export interface PackWidget { chartKey?: string; reportKey?: string; title: string }
+export interface PackDashboard { key: string; name: string; role?: string; widgets: PackWidget[] }
+export interface PackRole {
+  name: string;
+  declaredAs: string;
+  isAdmin: boolean;
+  email: string;
+  appEmail: string;
+  /** `bus_` tables the role may read. Empty means every table for the administrator, none for anyone else. */
+  tables: string[];
+}
+export interface ReportingPackFile {
+  application: { name: string; databaseName: string };
+  queries: PackQuery[];
+  reports: PackReport[];
+  charts: PackChart[];
+  dashboards: PackDashboard[];
+  access: { roles: PackRole[]; appPassword: string; reportPassword: string; scoped: boolean; entityTotal?: number };
+}
+
+function str(name: string, fallback: string): string {
+  const raw = process.env[name];
+  return raw && raw.length > 0 ? raw : fallback;
+}
+
+export const reportConfig = {
+  /** Base URL of the reporting platform, no trailing slash. */
+  baseUrl: str("E2E_REPORT_URL", "http://localhost:3100").replace(/\/+$/, ""),
+  /**
+   * The Origin sent to the platform. Not the application's: Better Auth refuses
+   * an origin it does not trust, and the platform trusts its own address.
+   */
+  origin: str("E2E_REPORT_ORIGIN", str("E2E_REPORT_URL", "http://localhost:3100").replace(/\/+$/, "")),
+  /** Where the pack the seeder loaded lives. */
+  packPath: str(
+    "E2E_REPORT_PACK",
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../reporting/reporting-pack.json")
+  ),
+  /** Password of the seeded reporting accounts (`REPORT_ADMIN_PASSWORD` for the administrator). */
+  adminPassword: str("E2E_REPORT_ADMIN_PASSWORD", process.env.REPORT_ADMIN_PASSWORD ?? "admin"),
+  roleAccountPassword: str("E2E_REPORT_PASSWORD", "admin"),
+};
+
+/** The pack the platform was seeded from, or null when there is none to read. */
+export function loadPack(): ReportingPackFile | null {
+  if (!reportingGenerated || !existsSync(reportConfig.packPath)) return null;
+  return JSON.parse(readFileSync(reportConfig.packPath, "utf8")) as ReportingPackFile;
+}
+
+export const reportingPack: ReportingPackFile | null = loadPack();
+
+/** The platform's `{ success, data }` envelope. */
+interface Envelope<T> { success?: boolean; data?: T; error?: { code?: string; message?: string } }
+
+export interface Page<T> { items: T[]; meta?: { total?: number } }
+
+export interface NamedRow { id: string; name: string; [key: string]: unknown }
+
+/** A signed-in session on the reporting platform. */
+export class ReportSession {
+  readonly http = new HttpClient(reportConfig.baseUrl);
+  readonly email: string;
+  constructor(email: string) {
+    this.email = email;
+  }
+
+  /** GET returning the unwrapped `data`, plus the status for the cases that expect a refusal. */
+  async get<T = unknown>(path: string): Promise<{ status: number; ok: boolean; data: T | undefined; code?: string }> {
+    const response = await this.http.get<Envelope<T>>(path, {
+      allowFailure: true,
+      headers: { Origin: reportConfig.origin },
+    });
+    return {
+      status: response.status,
+      ok: response.ok,
+      data: response.data?.data,
+      code: response.data?.error?.code,
+    };
+  }
+
+  /** Every row of a list endpoint, following the platform's zero-based pages. */
+  async list<T extends NamedRow = NamedRow>(path: string, pageSize = 200): Promise<T[]> {
+    const rows: T[] = [];
+    for (let page = 0; page < 200; page++) {
+      const joiner = path.includes("?") ? "&" : "?";
+      const response = await this.get<Page<T> | T[]>(`${path}${joiner}page=${page}&pageSize=${pageSize}`);
+      if (!response.ok) throw new Error(`GET ${path} → ${response.status} ${response.code ?? ""}`);
+      const items = Array.isArray(response.data) ? response.data : (response.data?.items ?? []);
+      rows.push(...items);
+      const total = Array.isArray(response.data) ? items.length : (response.data?.meta?.total ?? items.length);
+      if (items.length < pageSize || rows.length >= total) break;
+    }
+    return rows;
+  }
+}
+
+/**
+ * Sign in. A fresh client per account and no sign-out: Better Auth checks the
+ * Origin of a cookie-bearing auth POST against its trusted origins, and the
+ * platform throttles credential endpoints to a handful a minute, so a 429 is
+ * waited out rather than reported.
+ */
+export async function signInToReports(email: string, password: string): Promise<ReportSession> {
+  const session = new ReportSession(email);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const response = await session.http.post(
+      "/api/auth/sign-in/email",
+      { email, password },
+      { absolute: true, allowFailure: true, noThrottleRetry: true, headers: { Origin: reportConfig.origin } }
+    );
+    if (response.ok && session.http.jar.size > 0) return session;
+    if (response.status === 429) {
+      await new Promise((done) => setTimeout(done, 15_000));
+      continue;
+    }
+    throw new Error(`Reporting sign-in failed for ${email}: ${response.status} ${response.raw.slice(0, 200)}`);
+  }
+  throw new Error(`Reporting sign-in for ${email} stayed rate-limited`);
+}
+
+/**
+ * Is the platform there to be tested?
+ *
+ * A run that attaches to the backend alone (CI's generated-application job, a
+ * developer's laptop) has no platform, and the reporting suites then say so and
+ * skip rather than fail on a connection refused. Inside compose the platform is a
+ * declared dependency, so `E2E_REPORTING=required` is set there and an unreachable
+ * platform is a failure — a skip that could hide a dead service would be worse than
+ * no suite.
+ */
+export async function reportingReachable(): Promise<boolean> {
+  if (!reportingPack) return false;
+  try {
+    const response = await fetch(`${reportConfig.baseUrl}/api/health`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.ok) return true;
+  } catch {
+    // fall through to the decision below
+  }
+  if (process.env.E2E_REPORTING === "required") {
+    throw new Error(`The reporting platform did not answer at ${reportConfig.baseUrl}/api/health`);
+  }
+  console.log(
+    `  the reporting platform is not reachable at ${reportConfig.baseUrl} — reporting checks skipped ` +
+      "(E2E_REPORTING=required makes this a failure)"
+  );
+  return false;
+}
+
+/** Wait until the platform answers and the seeder has loaded the pack (the overview dashboard exists). */
+export async function waitForSeededPlatform(admin: ReportSession, timeoutMs = 300_000): Promise<void> {
+  if (!reportingPack) return;
+  const pack = reportingPack;
+  if (!pack) return;
+  const expected = pack.dashboards.map((dashboard) => dashboard.name);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rows = await admin.list("/dashboards").catch(() => []);
+    const have = new Set(rows.map((row) => row.name));
+    if (expected.every((name) => have.has(name))) return;
+    await new Promise((done) => setTimeout(done, 5_000));
+  }
+  throw new Error("The reporting platform never showed every dashboard in the pack — has the seeder finished?");
+}
+
+/**
+ * Does the role's table list admit every table the query reads?
+ *
+ * An empty list means "every table" for the administrator only. For anyone else
+ * it means the model's `%%rbac` left the role no entity to read (the generated
+ * `User` role in a model that restricts every entity), and the platform is right
+ * to refuse it everything — the browser build reads it the same way, by `isAdmin`.
+ */
+export function roleCanRun(role: PackRole, query: PackQuery): boolean {
+  if (role.isAdmin) return true;
+  return query.tables.every((table) => role.tables.includes(table));
+}
+
+export function reportAccount(role: PackRole): { email: string; password: string } {
+  return {
+    email: role.email,
+    password: role.isAdmin ? reportConfig.adminPassword : reportConfig.roleAccountPassword,
+  };
+}

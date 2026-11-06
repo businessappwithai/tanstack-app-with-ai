@@ -7435,6 +7435,32 @@ var appwithai_language_default = {
       signIn: "Two applications, two sign-ins, never merged. The application's account for a role is <role>@<app>.example.com and the reporting account is <role>@<app>.reports.example.com; the administrator is admin@admin.com on both sides, as two different accounts in two different user tables. Neither password works on the other side. A role in the application decides what a user may do to a record; a reporting role decides which tables their queries may read. Only read rules narrow a reporting role.",
       verification: "The checker holds %%report to its shape (EML290-EML296), %%dashboard to its shape (EML297) and every declared role to the reporting minimums (EML298, EML299), and cannot see whether a column exists. common/scripts/check-reporting-pack.ts in app-and-report-with-ai-tanstack runs every derived and authored query against a schema the generator actually emitted."
     },
+    generatedE2E: {
+      description: "Every generated application carries an end-to-end suite that is derived from the same model and runs on demand from its docker-compose.yml. Nothing in it is written by hand per application: the generator (packages/generator/src/generators/tests/bun-e2e.generator.ts) renders the tests/ project from the parsed model, and the reporting suites read the same reporting-pack.json the seeder loaded.",
+      command: "docker compose run --rm e2e",
+      browserCommand: "docker compose run --rm e2e-ui — the same suite's browser layer: Playwright and Chromium drive the front end, the rules and workflows editor, a record's action buttons and the reporting platform's dashboards.",
+      service: "An 'e2e' service behind the 'test' profile (so 'docker compose up' never starts it), built from tests/Dockerfile. It waits for the backend and the reporting platform to be healthy, the front end to have started and the report-seeder to have exited 0, then attaches over the compose network. Results are written to ./test-results. It is generated only when the tests/ project is.",
+      scripts: {
+        "test:attach": "every suite (the default)",
+        "test:crud": "the per-entity CRUD suites",
+        "test:rules": "the per-entity business-rule suites",
+        "test:workflows": "the workflow suites",
+        "test:status": "action buttons per role (suite 26)",
+        "test:reporting": "the reporting platform against the pack (suite 28)",
+        "test:together": "the application and the platform on one set of data (suite 29)",
+        "test:ui": "the browser layer (the e2e-ui service)"
+      },
+      derivedFrom: [
+        { declares: "an entity", yields: "CRUD, listing, filtering, sorting, pagination, optimistic locking and validation suites for it" },
+        { declares: "%%rule or %%action", yields: "per-entity rule suites: a refusing rule refuses, a transform transforms, a trigger-workflow starts its process" },
+        { declares: "%%workflow or %%step", yields: "workflow-run, multi-step and status-bound workflow suites (a failing ENTER:<state> workflow leaves the typed values saved and the status unmoved)" },
+        { declares: "a state diagram", yields: "every drawn edge walked, every undrawn one refused, an end state locked, and the action buttons each role is offered" },
+        { declares: "%%rbac", yields: "one sign-in per declared role, driven against every restricted operation and every move a role is given" },
+        { declares: "%%report and %%dashboard, and every derived report", yields: "the reporting platform held to the pack: every report, chart and dashboard present by name, every widget, every report and chart run, and each role let in exactly when its tables admit the query" }
+      ],
+      reportingTables: "In the pack, an empty 'tables' list means every table for the administrator only. For any other role it means %%rbac left that role no entity to read, and the platform correctly refuses it every report.",
+      needs: "A reporting pack (the reporting suites skip themselves loudly without one) and the tests/ project (--skip-tests omits both the project and the service)."
+    },
     pipeline: [
       "1. ERD section -> MermaidParser -> Entity[] + Relationship[] -> migrations, DTOs, services, controllers, forms, tables. The same pass reads %%index into entity.indexes and %%enum / %%field enum: into bound enums.",
       "2. %%category directives -> category.parser -> resolveCategories -> Application Dictionary groups on the generated dashboard. A model declaring none gets a single 'General' category holding every entity.",
@@ -18599,6 +18625,7 @@ var HARNESS_FILES = [
   "server.ts",
   "entities.ts",
   "model.ts",
+  "reporting.ts",
   "factory.ts",
   "rules.ts",
   "workflows.ts",
@@ -18632,11 +18659,29 @@ var SHARED_SUITES = [
   "21-reports.test.ts",
   "22-optimistic-locking.test.ts",
   "23-workflow-editors-api.test.ts",
+  "26-status-flows-by-role.test.ts",
+  "28-reporting-platform.test.ts",
+  "29-app-and-reports-together.test.ts",
   "10-benchmark.test.ts",
   "18-write-benchmark.test.ts",
   "11-performance-budget.test.ts"
 ];
-var ROOT_FILES = ["package.json", "tsconfig.json", "README.md", "run.ts", "cleanup.ts"];
+var ROOT_FILES = [
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  "run.ts",
+  "cleanup.ts",
+  "Dockerfile",
+  "Dockerfile.ui",
+  ".dockerignore"
+];
+var UI_FILES = [
+  "playwright.config.ts",
+  "helpers.ts",
+  "app.spec.ts",
+  "reporting.spec.ts"
+];
 var EXECUTABLE_FILES = ["run.ts", "cleanup.ts"];
 
 class BunE2ETestGenerator extends BaseGenerator {
@@ -18654,6 +18699,7 @@ class BunE2ETestGenerator extends BaseGenerator {
     const context = this.buildContext(busEntities, relationships);
     await this.writeRootFiles(testsDir, context);
     await this.writeHarness(testsDir, context);
+    await this.writeUi(testsDir, context);
     await this.writeSharedSuites(testsDir, context);
     await this.writePerEntitySuites(testsDir, busEntities, context);
     const perEntity = busEntities.length * 2;
@@ -18775,6 +18821,7 @@ class BunE2ETestGenerator extends BaseGenerator {
       refusals: this.refusals(),
       transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
+      hasReporting: this.options.reportingPack !== undefined,
       ...this.accessContext(entities),
       now: new Date().toISOString()
     };
@@ -18921,6 +18968,13 @@ class BunE2ETestGenerator extends BaseGenerator {
       await promises.chmod(node_path_default.join(testsDir, file), 493).catch(() => {});
     }
   }
+  async writeUi(testsDir, context) {
+    await promises.mkdir(node_path_default.join(testsDir, "ui"), { recursive: true });
+    for (const file of UI_FILES) {
+      const content = await this.renderTemplate(`ui/${file}.hbs`, context);
+      await promises.writeFile(node_path_default.join(testsDir, "ui", file), content);
+    }
+  }
   async writeHarness(testsDir, context) {
     for (const file of HARNESS_FILES) {
       const content = await this.renderTemplate(`harness/${file}.hbs`, context);
@@ -19033,7 +19087,8 @@ class FullStackGenerator {
         compiledWorkflows: this.options.compiledWorkflows,
         compiledRbac: this.options.compiledRbac,
         compiledReports: this.options.compiledReports,
-        compiledRules: this.options.compiledRules
+        compiledRules: this.options.compiledRules,
+        reportingPack: this.options.reportingPack
       });
       await testGenerator.generate(entities, relationships, outputDir);
     }
@@ -19142,7 +19197,8 @@ tests/.e2e-seed-manifest.json
     const frontendPort = this.options.frontendPort ?? DEFAULT_FRONTEND_PORT;
     const projectId = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const projectSnake = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-    const render = (content) => content.replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake).replace(/\{\{project\.name\}\}/g, this.options.projectName).replace(/\{\{project\.id\}\}/g, projectId).replace(/\{\{project\.backendPort\}\}/g, String(backendPort)).replace(/\{\{project\.frontendPort\}\}/g, String(frontendPort));
+    const render = (content) => (this.options.skipTests ? content.replace(/\n  # <e2e>[\s\S]*?# <\/e2e>\n/, `
+`) : content.replace(/\n  # <\/?e2e>/g, "")).replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake).replace(/\{\{project\.name\}\}/g, this.options.projectName).replace(/\{\{project\.id\}\}/g, projectId).replace(/\{\{project\.backendPort\}\}/g, String(backendPort)).replace(/\{\{project\.frontendPort\}\}/g, String(frontendPort));
     for (const file of files) {
       try {
         const templateDir = await this.findTemplatesDir();

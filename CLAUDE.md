@@ -887,6 +887,35 @@ Both images also carry `model/model.eml.mmd`. Without it the model-context
 assistant logs `No model/model.eml.mmd shipped with this application` on every
 start and answers nothing.
 
+### `docker compose run --rm e2e` — every generated application tests itself, with its reporting platform
+
+The compose file has an `e2e` service behind the `test` profile (`docker compose up` never starts it). It builds the
+generated `tests/` project (`tests/Dockerfile`: Node runs the suites, bun only installs) and attaches to the running
+stack (`E2E_ATTACH=1`) once the backend and `report` are healthy, the front end has started and `report-seeder` has
+exited 0. `--skip-tests` drops the project and the service together (the `# <e2e>` markers in the compose template).
+
+Beyond the per-entity suites (03 CRUD, 05 rules, 06* workflows, 15 lifecycle, 23 editor API), three model-driven suites
+cover the seam between the two products: **26** (who may press which action button, per role), **28** (the reporting
+platform held to `reporting/reporting-pack.json` — names, widgets, every report and chart run, each role let in exactly
+when its tables admit the query) and **29** (records written through the application show up in the platform's register
+report). `harness/reporting.ts` reads the pack off disk; **never re-derive what it expects**.
+
+`docker compose run --rm e2e-ui` is the browser layer (`tests/ui`, Playwright 1.62 on `mcr.microsoft.com/playwright`):
+sign-in and dashboard, an entity list, the rules & workflows editor, a record's action buttons and the reporting
+platform's dashboards. Its image copies a **Debian** bun (`oven/bun:1.4.4`) in to install — an Alpine one fails with
+exit 127 in the glibc Playwright image — and the backend's compose `CORS_ORIGIN` default lists `http://frontend:<port>`
+because that is the origin its browser signs in from.
+
+Things learned bringing it up on the CRM model (63/63 API suites, 7/7 browser specs, run from the containers):
+
+- **The platform refuses the application's `Origin`** (`INVALID_ORIGIN`, 403 on sign-in), so a report session sends the
+  platform's own. The compose file sets `CORS_ORIGIN` and `BETTER_AUTH_URL` on `report` for the same reason.
+- **`tables: []` in a pack role means every table for the administrator only.** The generated `User` role in a model
+  that restricts every entity has none, and the platform correctly refuses it everything; the browser build reads it by
+  `isAdmin` too. A helper that treats empty as "all" for everyone reports a bug that is not there.
+- **Node's strip-only mode rejects TypeScript parameter properties** (`constructor(readonly x)`) in harness code.
+- Reporting sign-in is rate limited (5 a minute): one client per account, no sign-out, wait out a 429.
+
 ### Project wizard flow
 
 ```

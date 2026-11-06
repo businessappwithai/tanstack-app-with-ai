@@ -254,6 +254,8 @@ export class FullStackGenerator {
         compiledReports: this.options.compiledReports,
         // A refusing rule's ceiling keeps the numbers the suites invent legal.
         compiledRules: this.options.compiledRules,
+        // The reporting suites hold the platform to this pack.
+        reportingPack: this.options.reportingPack,
       });
       await testGenerator.generate(entities, relationships, outputDir);
     }
@@ -412,7 +414,11 @@ tests/.e2e-seed-manifest.json
     const projectSnake = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
     const render = (content: string): string =>
-      content
+      // The `e2e` service builds the `tests/` project, which `skipTests` leaves out.
+      (this.options.skipTests
+        ? content.replace(/\n  # <e2e>[\s\S]*?# <\/e2e>\n/, "\n")
+        : content.replace(/\n  # <\/?e2e>/g, "")
+      )
         .replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake)
         .replace(/\{\{project\.name\}\}/g, this.options.projectName)
         .replace(/\{\{project\.id\}\}/g, projectId)

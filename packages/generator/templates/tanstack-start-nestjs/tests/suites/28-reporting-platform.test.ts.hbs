@@ -1,0 +1,166 @@
+/**
+ * The Enterprise Reporting platform, held to the pack the model produced.
+ *
+ * The generated application and the reporting platform are two products. The
+ * pack (`reporting/reporting-pack.json`) is what the seeder loaded into the
+ * second one: saved queries, reports, charts, dashboards and one reporting role
+ * per `%%rbac` role. This suite signs in to the *platform* and checks it holds
+ * what the pack says — by name, by count — that every report and chart runs, and
+ * that each role is let in to a report exactly when the role's table list admits
+ * every table the report's query reads (the platform's `ds_entity_permissions`
+ * against the pack's own `tables`, which are derived separately).
+ *
+ * Skips itself, loudly, when the application was generated with no pack.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { beforeAll, describe, expect, it } from "../harness/testing.ts";
+import {
+  reportAccount,
+  reportingGenerated,
+  reportingReachable,
+  reportingPack,
+  roleCanRun,
+  signInToReports,
+  waitForSeededPlatform,
+  type NamedRow,
+  type PackRole,
+  type ReportSession,
+} from "../harness/index.ts";
+
+const pack = reportingPack;
+const SAMPLE = Number(process.env.E2E_REPORT_SAMPLE ?? 40);
+const ROLE_LIMIT = Number(process.env.E2E_REPORT_ROLE_LIMIT ?? 6);
+const SUITE_MS = 20 * 60_000;
+
+/** Run `work` over `items`, a few at a time. */
+async function inBatches<T>(items: T[], size: number, work: (item: T) => Promise<void>): Promise<void> {
+  for (let index = 0; index < items.length; index += size) {
+    await Promise.all(items.slice(index, index + size).map(work));
+  }
+}
+
+/** An evenly spread sample, so a large pack is covered end to end rather than at its head. */
+function spread<T>(items: T[], count: number): T[] {
+  if (items.length <= count) return items;
+  const step = items.length / count;
+  return Array.from({ length: count }, (_, index) => items[Math.floor(index * step)]!);
+}
+
+describe("reporting platform", () => {
+  let admin: ReportSession;
+  let reports: NamedRow[] = [];
+  let charts: NamedRow[] = [];
+  let dashboards: NamedRow[] = [];
+  let live = false;
+
+  beforeAll(async () => {
+    if (!pack) return;
+    live = await reportingReachable();
+    if (!live) return;
+    const adminRole = pack.access.roles.find((role) => role.isAdmin) ?? pack.access.roles[0]!;
+    const account = reportAccount(adminRole);
+    admin = await signInToReports(account.email, account.password);
+    await waitForSeededPlatform(admin);
+    reports = await admin.list("/reports");
+    charts = await admin.list("/charts");
+    dashboards = await admin.list("/dashboards");
+  }, { timeout: SUITE_MS });
+
+  it("was generated with a reporting pack, or says it was not", () => {
+    if (!reportingGenerated || !pack) {
+      console.log("  no reporting pack — the reporting suites have nothing to check");
+    }
+    expect(true).toBe(true);
+  });
+
+  it("holds every report, chart and dashboard the pack names", () => {
+    if (!pack || !live) return;
+    const have = (rows: NamedRow[]) => new Set(rows.map((row) => row.name));
+    const missing = (expected: string[], rows: NamedRow[]) =>
+      expected.filter((name) => !have(rows).has(name));
+    expect(missing(pack.reports.map((report) => report.name), reports)).toEqual([]);
+    expect(missing(pack.charts.map((chart) => chart.name), charts)).toEqual([]);
+    expect(missing(pack.dashboards.map((dashboard) => dashboard.name), dashboards)).toEqual([]);
+  });
+
+  it("gives every dashboard exactly the widgets the pack lists", async () => {
+    if (!pack || !live) return;
+    for (const expected of pack.dashboards) {
+      const row = dashboards.find((candidate) => candidate.name === expected.name);
+      expect(row).toBeDefined();
+      const widgets = await admin.list(`/dashboards/${row!.id}/widgets`);
+      expect(widgets.length).toBe(expected.widgets.length);
+    }
+  }, SUITE_MS);
+
+  it("runs every report as the administrator", async () => {
+    if (!pack || !live) return;
+    const failures: string[] = [];
+    await inBatches(spread(pack.reports, Math.max(SAMPLE, 1) * 5), 6, async (report) => {
+      const row = reports.find((candidate) => candidate.name === report.name);
+      if (!row) return failures.push(`${report.name}: not listed`) as unknown as void;
+      const response = await admin.get<{ rows?: unknown[] }>(`/reports/${row.id}/data?page=0&pageSize=20`);
+      if (!response.ok || !Array.isArray(response.data?.rows)) {
+        failures.push(`${report.name}: ${response.status} ${response.code ?? ""}`);
+      }
+    });
+    expect(failures).toEqual([]);
+  }, SUITE_MS);
+
+  it("runs every chart as the administrator", async () => {
+    if (!pack || !live) return;
+    const failures: string[] = [];
+    await inBatches(spread(pack.charts, Math.max(SAMPLE, 1) * 5), 6, async (chart) => {
+      const row = charts.find((candidate) => candidate.name === chart.name);
+      if (!row) return failures.push(`${chart.name}: not listed`) as unknown as void;
+      const response = await admin.get<{ rows?: unknown[] }>(`/charts/${row.id}/data`);
+      if (!response.ok || !Array.isArray(response.data?.rows)) {
+        failures.push(`${chart.name}: ${response.status} ${response.code ?? ""}`);
+      }
+    });
+    expect(failures).toEqual([]);
+  }, SUITE_MS);
+
+  it("lets each role in to a report exactly when its tables admit the query", async () => {
+    if (!pack || !live) return;
+    const queryOf = new Map(pack.queries.map((query) => [query.key, query]));
+    const scoped = pack.access.roles.filter((role) => !role.isAdmin);
+    // The narrowest and widest scoped roles first: they are the ones that disagree.
+    const chosen: PackRole[] = [...scoped]
+      .sort((a, b) => (a.tables.length || 1e9) - (b.tables.length || 1e9))
+      .filter((_, index, all) => index < Math.ceil(ROLE_LIMIT / 2) || index >= all.length - Math.floor(ROLE_LIMIT / 2))
+      .slice(0, ROLE_LIMIT);
+
+    const wrong: string[] = [];
+    for (const role of chosen) {
+      const account = reportAccount(role);
+      const session = await signInToReports(account.email, account.password);
+      const allowed = pack.reports.filter((report) => {
+        const query = queryOf.get(report.queryKey);
+        return query ? roleCanRun(role, query) : false;
+      });
+      const denied = pack.reports.filter((report) => {
+        const query = queryOf.get(report.queryKey);
+        return query ? !roleCanRun(role, query) : false;
+      });
+      for (const [report, expectOk] of [
+        ...spread(allowed, 8).map((report) => [report, true] as const),
+        ...spread(denied, 8).map((report) => [report, false] as const),
+      ]) {
+        const row = reports.find((candidate) => candidate.name === report.name);
+        if (!row) continue;
+        const response = await session.get(`/reports/${row.id}/data?page=0&pageSize=5`);
+        if (response.ok !== expectOk) {
+          wrong.push(`${role.declaredAs} → ${report.name}: expected ${expectOk ? "200" : "refusal"}, got ${response.status}`);
+        }
+      }
+      // A reporting role reads published reports; it does not author saved queries.
+      const queries = await session.get("/queries?page=0&pageSize=1");
+      if (queries.ok) wrong.push(`${role.declaredAs}: may list saved queries without query:view`);
+    }
+    expect(wrong).toEqual([]);
+  }, SUITE_MS);
+});

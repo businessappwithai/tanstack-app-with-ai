@@ -28,6 +28,7 @@ import { declaredEntityNames, entityToBusEntity } from "@appwithai/core/types";
 import type { CompiledRbac } from "../../rbac";
 import { deriveAccess } from "../../rbac/roles";
 import type { CompiledReport } from "../../reports";
+import type { ReportingPack } from "../../reporting/pack";
 import { stateFieldOf } from "../../../../../language/state-field";
 import type { CompiledRule } from "../../rules";
 import type { CompiledWorkflow } from "../../workflows";
@@ -101,6 +102,13 @@ export interface BunE2ETestGeneratorOptions {
    * the values they invent under them.
    */
   compiledRules?: CompiledRule[];
+  /**
+   * The reporting pack the platform is seeded from, derived from the same model.
+   * Its presence is what turns the reporting suites on; the suites read the pack
+   * itself from `reporting/reporting-pack.json` at run time, so what they expect
+   * is the artefact the seeder loaded rather than a second derivation.
+   */
+  reportingPack?: ReportingPack;
   /** The administrator address the bootstrap creates. */
   adminEmail?: string;
 }
@@ -119,6 +127,9 @@ const HARNESS_FILES = [
   // The dictionary and transition suites compare the running application
   // against this rather than against themselves.
   "model.ts",
+  // The Enterprise Reporting platform: its sign-in, its envelopes, and the pack
+  // the seeder loaded into it, read off disk.
+  "reporting.ts",
   "factory.ts",
   "rules.ts",
   "workflows.ts",
@@ -179,6 +190,12 @@ const SHARED_SUITES = [
   "22-optimistic-locking.test.ts",
   // What the rules & workflows screen saves: status machines as edges, processes as automations.
   "23-workflow-editors-api.test.ts",
+  // Who may press which action button, from where each record is — per role.
+  "26-status-flows-by-role.test.ts",
+  // The Enterprise Reporting platform held to the pack the model produced, and
+  // the application and the platform on one set of data.
+  "28-reporting-platform.test.ts",
+  "29-app-and-reports-together.test.ts",
   // Last, so they measure the fullest the tables will be this run.
   "10-benchmark.test.ts",
   "18-write-benchmark.test.ts",
@@ -186,7 +203,26 @@ const SHARED_SUITES = [
 ];
 
 /** Root-level files. */
-const ROOT_FILES = ["package.json", "tsconfig.json", "README.md", "run.ts", "cleanup.ts"];
+const ROOT_FILES = [
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  "run.ts",
+  "cleanup.ts",
+  // The `e2e` compose service builds this: `docker compose run --rm e2e`.
+  "Dockerfile",
+  // The browser layer's image: Chromium + Playwright. `docker compose run --rm e2e-ui`.
+  "Dockerfile.ui",
+  ".dockerignore",
+];
+
+/** The browser layer: Playwright specs and the helpers they share. */
+const UI_FILES = [
+  "playwright.config.ts",
+  "helpers.ts",
+  "app.spec.ts",
+  "reporting.spec.ts",
+];
 
 /** Files made executable after writing. */
 const EXECUTABLE_FILES = ["run.ts", "cleanup.ts"];
@@ -214,6 +250,7 @@ export class BunE2ETestGenerator extends BaseGenerator {
 
     await this.writeRootFiles(testsDir, context);
     await this.writeHarness(testsDir, context);
+    await this.writeUi(testsDir, context);
     await this.writeSharedSuites(testsDir, context);
     await this.writePerEntitySuites(testsDir, busEntities, context);
 
@@ -387,6 +424,7 @@ export class BunE2ETestGenerator extends BaseGenerator {
       refusals: this.refusals(),
       transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
+      hasReporting: this.options.reportingPack !== undefined,
       ...this.accessContext(entities),
       now: new Date().toISOString(),
     };
@@ -617,6 +655,14 @@ export class BunE2ETestGenerator extends BaseGenerator {
     for (const file of EXECUTABLE_FILES) {
       // chmod is best-effort — Windows and some CI filesystems reject it.
       await fs.chmod(path.join(testsDir, file), 0o755).catch(() => {});
+    }
+  }
+
+  private async writeUi(testsDir: string, context: Record<string, unknown>): Promise<void> {
+    await fs.mkdir(path.join(testsDir, "ui"), { recursive: true });
+    for (const file of UI_FILES) {
+      const content = await this.renderTemplate(`ui/${file}.hbs`, context);
+      await fs.writeFile(path.join(testsDir, "ui", file), content);
     }
   }
 

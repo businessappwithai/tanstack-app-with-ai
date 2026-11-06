@@ -1,0 +1,33 @@
+/**
+ * The browser layer of the generated end-to-end suite.
+ *
+ * Drives the front end and the reporting platform in Chromium. One worker and no
+ * parallelism: the suites share one database and the reporting platform
+ * throttles its sign-in. Everything it targets comes from the environment, so
+ * the same specs run against compose, a local stack or CI.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { defineConfig } from "@playwright/test";
+
+export default defineConfig({
+  testDir: ".",
+  testMatch: /.*\.spec\.ts/,
+  workers: 1,
+  fullyParallel: false,
+  timeout: 180_000,
+  expect: { timeout: 30_000 },
+  retries: 1,
+  outputDir: "../../test-results/ui",
+  reporter: [["list"], ["html", { outputFolder: "../../test-results/ui-report", open: "never" }]],
+  use: {
+    baseURL: process.env.E2E_APP_URL ?? "http://localhost:{{config.frontendPort}}",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
+      : {}),
+  },
+});
