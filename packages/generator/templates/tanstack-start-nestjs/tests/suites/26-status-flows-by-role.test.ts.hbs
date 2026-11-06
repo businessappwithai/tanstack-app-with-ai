@@ -37,6 +37,28 @@ interface Action { event?: string; to: string; kind?: string }
 /** Sign-in password of every non-administrator account the seed creates. */
 const ROLE_PASSWORD = process.env.E2E_ROLE_PASSWORD ?? "admin123";
 
+/**
+ * One signed-in client per role account, made once for the whole file.
+ *
+ * Every state machine asks the same question of every role, so signing in inside
+ * the loop made a model with 51 machines and 30 roles do 1,500 sign-ins — about a
+ * minute per machine. A session outlives the file, so each account signs in once
+ * and an account that cannot is remembered as unable to.
+ */
+const sessions = new Map<string, HttpClient | null>();
+
+async function sessionFor(email: string): Promise<HttpClient | null> {
+  if (sessions.has(email)) return sessions.get(email) ?? null;
+  const client = new HttpClient();
+  try {
+    await login(client, email, ROLE_PASSWORD);
+    sessions.set(email, client);
+  } catch {
+    sessions.set(email, null); // access control (12) owns sign-in failures
+  }
+  return sessions.get(email) ?? null;
+}
+
 function actionsOf(payload: unknown): Action[] {
   if (Array.isArray(payload)) return payload as Action[];
   const body = payload as { data?: unknown } | undefined;
@@ -108,12 +130,8 @@ describe("status flows by role", () => {
         });
         const allowed = new Set(actionsOf(admin.data).map((action) => action.to));
         for (const account of roleAccounts.filter((candidate) => !candidate.isAdmin)) {
-          const client = new HttpClient();
-          try {
-            await login(client, account.email, ROLE_PASSWORD);
-          } catch {
-            continue; // access control (12) owns sign-in failures
-          }
+          const client = await sessionFor(account.email);
+          if (!client) continue;
           const response = await client.get<unknown>(`/bus/${entity.route}/${recordId}/actions`, {
             allowFailure: true,
           });

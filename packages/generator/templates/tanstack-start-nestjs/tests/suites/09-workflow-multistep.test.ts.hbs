@@ -226,7 +226,7 @@ describe("multi-step workflows triggered by rules", () => {
         entityName: triggerEntity.tableName,
         ruleName: `${suiteId}-trigger`,
         operation: "CREATE",
-        jdmContent: buildTriggerJdm(workflowName),
+        jdmContent: buildTriggerJdm(workflowName, `${triggerField.name} == "${suiteId}-source"`),
       });
       registered.ruleId = rule.id;
       harness.trackRule(rule.id);
@@ -320,7 +320,12 @@ describe("multi-step workflows triggered by rules", () => {
     for (const fk of foreignKeyFields(targetEntity)) {
       const parent = harness.resolveParentEntity(fk.name);
       if (!parent) continue;
-      const id = await harness.anyRecordId(parent);
+      // `parentIdFor` gives a unique reference a parent of its own. Both rows this suite has the
+      // workflow create point at a parent, and two on one parent are refused by the unique index
+      // (Facility.facility_id on the hospital model) — which failed the workflow, not the suite.
+      const id = fk.unique
+        ? await harness.parentIdFor(fk, parent, 0)
+        : await harness.anyRecordId(parent);
       if (id) foreignKeys[fk.name] = id;
     }
 
@@ -393,8 +398,14 @@ describe("multi-step workflows triggered by rules", () => {
   }
 });
 
-/** A decision graph whose only row emits `trigger-workflow` naming one workflow. */
-function buildTriggerJdm(workflowName: string): string {
+/**
+ * A decision graph whose only row emits `trigger-workflow` naming one workflow.
+ *
+ * `when` narrows it to the record this suite writes. Firing on every write is wrong for an entity
+ * that references itself: creating a Department through its parents writes a chain of them, each
+ * would start the workflow, and the workflow's own fixed-code row then collides with itself.
+ */
+function buildTriggerJdm(workflowName: string, when = "true"): string {
   return JSON.stringify({
     nodes: [
       { id: "input", type: "inputNode", name: "Input", position: { x: 0, y: 0 } },
@@ -415,7 +426,7 @@ function buildTriggerJdm(workflowName: string): string {
           rules: [
             {
               _id: `${workflowName}-row`,
-              i1: "true",
+              i1: when,
               o1: "'trigger-workflow'",
               o2: "'Multi-step workflow triggered'",
               o3: `'${workflowName}'`,
