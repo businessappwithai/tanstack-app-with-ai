@@ -16,3 +16,17 @@ describe("SIGNED_COLUMN", () => {
     (name) => expect(SIGNED_COLUMN.test(name)).toBe(false)
   );
 });
+
+describe("the generated suite's static rule builder", () => {
+  it("keeps the same list as the generator's helper", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const template = readFileSync(
+      join(__dirname, "../../../templates/tanstack-start-nestjs/tests/harness/rules.ts.hbs"),
+      "utf8"
+    );
+    const match = template.match(/const SIGNED_COLUMN =\s*\/(.+)\/i;/);
+    expect(match, "the harness carries its own SIGNED_COLUMN").not.toBeNull();
+    expect(match![1]).toBe(SIGNED_COLUMN.source);
+  });
+});
