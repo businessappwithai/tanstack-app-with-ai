@@ -50,7 +50,7 @@
             "o9": "''"
           },
           {{/if}}
-          {{#if (eq type "decimal")}}
+          {{#if (and (eq type "decimal") (not (isSignedColumn columnName)))}}
           {
             "_id": "{{../tableName}}-{{columnName}}-non-negative",
             "i{{@index}}": "{{columnName}} < 0",
