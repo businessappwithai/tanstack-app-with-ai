@@ -289,6 +289,19 @@ export function numericFields(entity: EntityMeta): FieldMeta[] {
 }
 
 /**
+ * Column names that are signed by nature — coordinates, variances, balances. Mirrors
+ * SIGNED_COLUMN in the generator (packages/generator/src/templates/loader.ts), whose
+ * isSignedColumn helper leaves them out of the application's "must not be negative" rule.
+ */
+export const SIGNED_COLUMN =
+  /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
+
+/** Numbers the application refuses when negative: every numeric column except the signed ones. */
+export function unsignedNumericFields(entity: EntityMeta): FieldMeta[] {
+  return numericFields(entity).filter((f) => !SIGNED_COLUMN.test(f.name));
+}
+
+/**
  * A number a suite may pin to an exact value.
  *
  * A column a refusing rule reads is not safe to overwrite: `planned_packages !=

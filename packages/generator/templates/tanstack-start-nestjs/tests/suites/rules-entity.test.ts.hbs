@@ -23,7 +23,7 @@ import {
   getRule,
   harness,
   listRules,
-  numericFields,
+  unsignedNumericFields,
   scalarFields,
   validateJdm,
   writableFields,
@@ -111,7 +111,8 @@ describe("{{entity.displayName}} business rules", () => {
   });
 
   it("prevents a negative value on a numeric field", async () => {
-    const numeric = numericFields(entity);
+    // Not a coordinate or a balance: those are signed by nature and the rule leaves them be.
+    const numeric = unsignedNumericFields(entity);
     if (numeric.length === 0) return;
 
     const payload = await harness.buildValidRecord(entity, { [numeric[0]!.name]: -42 });
@@ -137,7 +138,7 @@ describe("{{entity.displayName}} business rules", () => {
   });
 
   it("blocks a real create that violates the rule", async () => {
-    const numeric = numericFields(entity);
+    const numeric = unsignedNumericFields(entity);
     if (numeric.length === 0) return;
 
     const payload = await harness.buildValidRecord(entity, { [numeric[0]!.name]: -1 });
