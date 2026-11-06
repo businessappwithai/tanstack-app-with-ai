@@ -8,6 +8,9 @@
  * Project: {{project.name}}
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { config } from "./config.ts";
 import { type HttpClient, HttpError } from "./http.ts";
 
@@ -65,6 +68,44 @@ export async function login(
   if (!user) {
     // Some better-auth versions return only a token; resolve the user via /api/me.
     return await currentUser(client);
+  }
+  return user;
+}
+
+/**
+ * Sign in as the administrator, reusing the session an earlier suite process
+ * left behind when it is still good.
+ *
+ * Every suite is its own process and most finish in about a second, so a fresh
+ * sign-in per suite spends the whole of the backend's sign-in limit (30 a
+ * minute) on one account and the run spends its time waiting out 429s — on a
+ * model with a couple of hundred entities, most of it. The session is checked
+ * with one cheap read; a dead one (a suite that signs out ends it) is replaced
+ * by a real sign-in and written back.
+ */
+export async function loginShared(client: HttpClient): Promise<SessionUser> {
+  const file = join(
+    tmpdir(),
+    `e2e-session-${Buffer.from(`${config.baseUrl}|${config.admin.email}`).toString("hex").slice(0, 48)}.json`
+  );
+  try {
+    const saved = JSON.parse(readFileSync(file, "utf8")) as Record<string, string>;
+    client.jar.restore(saved);
+    const response = await client.get<{ data: SessionUser }>("/me", {
+      allowFailure: true,
+      noThrottleRetry: true,
+    });
+    if (response.ok && response.data?.data) return response.data.data;
+  } catch {
+    // No cache, or an unreadable one: sign in below.
+  }
+  client.jar.clear();
+  const user = await login(client);
+  try {
+    mkdirSync(tmpdir(), { recursive: true });
+    writeFileSync(file, JSON.stringify(client.jar.snapshot()), { mode: 0o600 });
+  } catch {
+    // A cache that cannot be written only costs the next suite a sign-in.
   }
   return user;
 }

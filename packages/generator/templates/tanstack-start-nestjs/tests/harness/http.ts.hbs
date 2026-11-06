@@ -77,6 +77,15 @@ export class CookieJar {
     return this.cookies.size;
   }
 
+  /** The cookies as plain data, so a later process can pick the session up. */
+  snapshot(): Record<string, string> {
+    return Object.fromEntries(this.cookies);
+  }
+
+  restore(values: Record<string, string>): void {
+    this.cookies = new Map(Object.entries(values));
+  }
+
   clear(): void {
     this.cookies.clear();
   }

@@ -13,7 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { login, type SessionUser } from "./auth.ts";
+import { loginShared, type SessionUser } from "./auth.ts";
 import {
   columnsNamedByRefusals,
   distinctParentColumns,
@@ -60,7 +60,7 @@ class TestHarness {
 
   private async doSetup(): Promise<void> {
     await waitForServer();
-    this.user = await login(this.client);
+    this.user = await loginShared(this.client);
   }
 
   /** Register a record for deletion at teardown. */
