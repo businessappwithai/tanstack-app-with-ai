@@ -58,7 +58,9 @@ test.describe("the application", () => {
 
       await page.goto(`${appUrl}/${entity.route}/${id}`);
       await expect(page.getByTestId("record-actions")).toBeVisible({ timeout: 60_000 });
-      await expect(page.getByTestId("record-state")).toBeVisible();
+      // The lifecycle chip is always drawn: it holds the state once the record has one, and says
+      // Draft (or Error) while it does not. Asserting the state itself failed on a record still in Draft.
+      await expect(page.getByTestId("record-lifecycle")).toBeVisible();
 
       // Press the first move the diagram draws from where the record is.
       const state = String(
