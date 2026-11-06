@@ -1675,7 +1675,6 @@ stateDiagram-v2
     draft  --> active    : activate
     active --> withdrawn : withdraw
     active --> expired   : expire
-    draft     --> [*]
     withdrawn --> [*]
     expired   --> [*]
 
@@ -1690,7 +1689,6 @@ stateDiagram-v2
     under_review --> active       : renew
     active       --> closed       : close
     under_review --> closed       : close
-    draft  --> [*]
     closed --> [*]
 
 %% ---- Workflow — safeguarding lifecycle -----------------------------------

@@ -15,6 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { login, type SessionUser } from "./auth.ts";
 import {
+  columnsNamedByRefusals,
   distinctParentColumns,
   type EntityMeta,
   type FieldMeta,
@@ -112,6 +113,7 @@ class TestHarness {
       const existing = await this.parentIdFor(fk, parent, depth + 1, distinct.has(fk.name));
       if (existing) foreignKeys[fk.name] = existing;
     }
+    await this.separateComparedParents(entity, foreignKeys, depth + 1);
 
     const payload = buildRecord(entity, { foreignKeys, overrides });
     try {
@@ -125,6 +127,38 @@ class TestHarness {
       } catch {
         return null;
       }
+    }
+  }
+
+  /**
+   * Two references to one parent get two parents when a refusing rule compares them.
+   *
+   * `refuseSelfApprovedRefund` refuses `approved_by_id == requested_by_id`. Both columns point at
+   * Staff, and `parentIdFor` hands the same existing record to each, so a Refund drawn that way is
+   * refused on every update — which failed a CRUD suite on some runs and not others, depending on
+   * which staff happened to exist. Only columns that the model's own refusals name are separated,
+   * so a model whose two references may legitimately share a parent is left alone.
+   */
+  private async separateComparedParents(
+    entity: EntityMeta,
+    foreignKeys: Record<string, string>,
+    depth: number
+  ): Promise<void> {
+    const named = columnsNamedByRefusals(entity.tableName);
+    const seen = new Map<string, string>();
+    for (const fk of foreignKeyFields(entity)) {
+      const id = foreignKeys[fk.name];
+      if (!id) continue;
+      const first = seen.get(id);
+      if (!first) {
+        seen.set(id, fk.name);
+        continue;
+      }
+      if (!named.has(fk.name) || !named.has(first)) continue;
+      const parent = this.resolveParentEntity(fk.name);
+      if (!parent) continue;
+      const other = await this.parentIdFor(fk, parent, depth, true);
+      if (other) foreignKeys[fk.name] = other;
     }
   }
 
@@ -152,6 +186,7 @@ class TestHarness {
       const id = await this.parentIdFor(fk, parent, 0, distinct.has(fk.name));
       if (id) foreignKeys[fk.name] = id;
     }
+    await this.separateComparedParents(entity, foreignKeys, 0);
 
     return buildRecord(entity, { foreignKeys, overrides });
   }

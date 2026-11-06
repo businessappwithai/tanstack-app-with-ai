@@ -275,7 +275,7 @@ export function firstTextField(entity: EntityMeta): FieldMeta | undefined {
 }
 
 /** Every identifier the model's refusing rules for a table mention. */
-function columnsNamedByRefusals(tableName: string): Set<string> {
+export function columnsNamedByRefusals(tableName: string): Set<string> {
   const named = new Set<string>();
   for (const refusal of refusals) {
     if (refusal.tableName !== tableName) continue;
