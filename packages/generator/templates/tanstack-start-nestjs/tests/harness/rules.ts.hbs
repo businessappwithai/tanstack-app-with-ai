@@ -106,6 +106,10 @@ export function buildJdm(name: string, rows: DecisionRow[]): string {
   return JSON.stringify(graph);
 }
 
+/** Mirrors SIGNED_COLUMN in the generator (packages/generator/src/templates/loader.ts). */
+const SIGNED_COLUMN =
+  /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
+
 /**
  * A static validation rule set for one entity: required fields must be present
  * and numeric fields must not be negative. These are assertions about the
@@ -123,7 +127,10 @@ export function buildStaticValidationJdm(entity: EntityMeta, fields: FieldMeta[]
         message: `${field.displayName} is required`,
       });
     }
-    if (field.type === "integer" || field.type === "decimal") {
+    // Signed by nature (coordinates, variances, balances...): the application's own
+    // generated rule leaves them out (the isSignedColumn helper), so this one must too —
+    // the suite's valid record carries a negative latitude half the time.
+    if ((field.type === "integer" || field.type === "decimal") && !SIGNED_COLUMN.test(field.name)) {
       rows.push({
         _id: `${entity.tableName}-${field.name}-non-negative`,
         when: `${field.name} != null and ${field.name} < 0`,
