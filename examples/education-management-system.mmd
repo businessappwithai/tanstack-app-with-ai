@@ -2144,7 +2144,6 @@ erDiagram
     %%entity WaitlistEntry icon: graduation-cap
     %%field WaitlistEntry.course_offering_id help: Choose the verified course offering record used to authorize or reconcile this waitlistentry action; do not paste an identifier from another institution.
     %%field WaitlistEntry.learner_profile_id help: Choose the verified learner profile record used to authorize or reconcile this waitlistentry action; do not paste an identifier from another institution.
-    %%field WaitlistEntry.priority enum: Priority
     %%field WaitlistEntry.priority help: Enter the measured priority using the documented institutional scale, nonnegative where applicable, so period comparisons remain valid.
     %%field WaitlistEntry.requested_on help: Use the effective calendar date for requested on; registration, entitlement, audit or reporting cutoffs depend on its accuracy.
     %%section entity: WaitlistEntry; name: Identity and obligations; help: Verify the waitlistentry context and complete each required business input before committing or approving this record.; rows: course_offering_id, learner_profile_id | priority, requested_on
@@ -2616,7 +2615,6 @@ erDiagram
     %%field AppointmentWaitlist.appointment_type_id help: Choose the verified appointment type record used to authorize or reconcile this appointmentwaitlist action; do not paste an identifier from another institution.
     %%field AppointmentWaitlist.person_id help: Choose the verified person record used to authorize or reconcile this appointmentwaitlist action; do not paste an identifier from another institution.
     %%field AppointmentWaitlist.requested_on help: Use the effective calendar date for requested on; registration, entitlement, audit or reporting cutoffs depend on its accuracy.
-    %%field AppointmentWaitlist.priority enum: Priority
     %%field AppointmentWaitlist.priority help: Enter the measured priority using the documented institutional scale, nonnegative where applicable, so period comparisons remain valid.
     %%section entity: AppointmentWaitlist; name: Identity and obligations; help: Verify the appointmentwaitlist context and complete each required business input before committing or approving this record.; rows: appointment_type_id, person_id | requested_on, priority
     %%index AppointmentWaitlist(appointment_type_id)
