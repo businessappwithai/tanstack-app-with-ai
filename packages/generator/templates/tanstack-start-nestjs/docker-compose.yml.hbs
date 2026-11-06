@@ -382,13 +382,16 @@ services:
       # The pack, read-only. It is the one reporting artefact this project
       # contains, and it is derived entirely from the model.
       - ./reporting/reporting-pack.json:/pack/reporting-pack.json:ro
-    # It waits for what it needs itself, and for the right things: both
-    # databases reachable, then the application's `bus_` tables to *exist*.
-    # `depends_on` covers a container, not a schema — the application migrates
-    # on start, and an empty database means "not migrated yet" rather than
-    # "nothing to report on", which would cache a data source the platform
-    # believes has no tables in it. Calling `getDb()` bootstraps the platform's
-    # own schema, so the seeder needs no running `report` service either.
+    # Wait for the backend to be healthy — not just for PostgreSQL — because
+    # the backend runs migrations on start (`run-app.sh`), and the seeder must
+    # find the `bus_` tables already there when it introspects the schema.
+    # A healthy backend means migrations completed; an empty database on first
+    # connect means something went wrong in `run-app.sh`, not that the seeder
+    # started too early. `getDb()` bootstraps the platform's own schema, so
+    # the seeder still needs no running `report` service.
+    depends_on:
+      backend:
+        condition: service_healthy
     command: ["bun", "scripts/seed-reporting-pack.ts"]
 
   # <e2e>
