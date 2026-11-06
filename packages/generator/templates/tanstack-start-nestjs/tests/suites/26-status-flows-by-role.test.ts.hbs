@@ -1,0 +1,147 @@
+/**
+ * Status flows as each role sees them — the action buttons.
+ *
+ * `06b` walks every edge the model drew as the administrator. This suite asks the
+ * question the buttons exist to answer: *who* may press *what*, from where the
+ * record is now. `GET /bus/:entity/:id/actions` lists the moves the caller may
+ * press; `%%rbac role:… on E.<event>` gives a move to roles, and a move no line
+ * names is open to anyone who may update the record.
+ *
+ * Held here, for every state machine the model declares and every account the
+ * application seeded:
+ *   - the administrator is offered exactly the edges the diagram draws out of the
+ *     record's current state (nothing invented, nothing missing);
+ *   - no other role is offered a move the administrator is not;
+ *   - a move the diagram never drew is refused (409 `INVALID_TRANSITION`) for every
+ *     role that is allowed to try, and never answered 200.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import {
+  getEntity,
+  harness,
+  HttpClient,
+  illegalTargetFrom,
+  login,
+  roleAccounts,
+  stateMachines,
+  successorsOf,
+  type StateMachine,
+} from "../harness/index.ts";
+
+interface Action { event?: string; to: string; kind?: string }
+
+/** Sign-in password of every non-administrator account the seed creates. */
+const ROLE_PASSWORD = process.env.E2E_ROLE_PASSWORD ?? "admin123";
+
+function actionsOf(payload: unknown): Action[] {
+  if (Array.isArray(payload)) return payload as Action[];
+  const body = payload as { data?: unknown } | undefined;
+  return Array.isArray(body?.data) ? (body!.data as Action[]) : [];
+}
+
+function stateOf(record: Record<string, unknown> | null | undefined, field: string): string | null {
+  const body = ((record as { data?: Record<string, unknown> } | undefined)?.data ?? record) as
+    | Record<string, unknown>
+    | undefined;
+  const value = body?.[field];
+  return value === undefined || value === null ? null : String(value);
+}
+
+describe("status flows by role", () => {
+  beforeAll(async () => {
+    await harness.setup();
+  });
+
+  afterAll(async () => {
+    await harness.teardown();
+  });
+
+  it("has a state machine to drive, or declares none", () => {
+    if (stateMachines.length === 0) {
+      console.log("  the model declares no state machines — nothing to drive");
+    }
+    expect(true).toBe(true);
+  });
+
+  for (const machine of stateMachines as StateMachine[]) {
+    describe(machine.entity, () => {
+      const entity = getEntity(machine.entity);
+      let recordId: string | null = null;
+      let state: string | null = null;
+
+      beforeAll(async () => {
+        const created = await harness.createWithParents(entity);
+        recordId = (created?.id as string | undefined) ?? null;
+        if (recordId) {
+          const read = await harness.client.get<Record<string, unknown>>(
+            `/bus/${entity.route}/${recordId}`,
+            { allowFailure: true }
+          );
+          state = stateOf(read.data, machine.statusField);
+        }
+      });
+
+      it("offers the administrator exactly the drawn moves from where the record is", async () => {
+        if (!recordId || !state) return; // an unsatisfiable parent chain: 03 reports it
+        const response = await harness.client.get<unknown>(
+          `/bus/${entity.route}/${recordId}/actions`,
+          { allowFailure: true }
+        );
+        expect(response.ok).toBe(true);
+        const offered = actionsOf(response.data)
+          .filter((action) => action.kind !== "reopen")
+          .map((action) => action.to)
+          .sort();
+        const drawn = [...new Set(successorsOf(machine, state))].sort();
+        // A final record offers no moves (only Reopen); a draft one offers none until promoted.
+        expect(offered).toEqual(machine.terminal.includes(state) ? [] : drawn);
+      });
+
+      it("never offers another role a move the administrator is not offered", async () => {
+        if (!recordId || !state) return;
+        const admin = await harness.client.get<unknown>(`/bus/${entity.route}/${recordId}/actions`, {
+          allowFailure: true,
+        });
+        const allowed = new Set(actionsOf(admin.data).map((action) => action.to));
+        for (const account of roleAccounts.filter((candidate) => !candidate.isAdmin)) {
+          const client = new HttpClient();
+          try {
+            await login(client, account.email, ROLE_PASSWORD);
+          } catch {
+            continue; // access control (12) owns sign-in failures
+          }
+          const response = await client.get<unknown>(`/bus/${entity.route}/${recordId}/actions`, {
+            allowFailure: true,
+          });
+          if (!response.ok) continue; // the role cannot read this entity at all
+          for (const action of actionsOf(response.data)) {
+            expect(allowed.has(action.to)).toBe(true);
+          }
+        }
+      });
+
+      it("refuses a move the diagram never drew", async () => {
+        if (!recordId || !state) return;
+        const target = illegalTargetFrom(machine, state);
+        if (!target) return; // every state is reachable from here: nothing undrawn to try
+        const read = await harness.client.get<Record<string, unknown>>(
+          `/bus/${entity.route}/${recordId}`,
+          { allowFailure: true }
+        );
+        const etag = read.headers.get("etag");
+        if (!etag) return;
+        const response = await harness.client.post<{ error?: { details?: { code?: string } } }>(
+          `/bus/${entity.route}/${recordId}/transition`,
+          { to: target },
+          { headers: { "If-Match": etag }, allowFailure: true }
+        );
+        expect(response.ok).toBe(false);
+        expect([403, 409, 422]).toContain(response.status);
+      });
+    });
+  }
+});

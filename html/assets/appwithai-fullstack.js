@@ -18599,6 +18599,7 @@ var HARNESS_FILES = [
   "server.ts",
   "entities.ts",
   "model.ts",
+  "reporting.ts",
   "factory.ts",
   "rules.ts",
   "workflows.ts",
@@ -18632,11 +18633,22 @@ var SHARED_SUITES = [
   "21-reports.test.ts",
   "22-optimistic-locking.test.ts",
   "23-workflow-editors-api.test.ts",
+  "26-status-flows-by-role.test.ts",
+  "28-reporting-platform.test.ts",
+  "29-app-and-reports-together.test.ts",
   "10-benchmark.test.ts",
   "18-write-benchmark.test.ts",
   "11-performance-budget.test.ts"
 ];
-var ROOT_FILES = ["package.json", "tsconfig.json", "README.md", "run.ts", "cleanup.ts"];
+var ROOT_FILES = [
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  "run.ts",
+  "cleanup.ts",
+  "Dockerfile",
+  ".dockerignore"
+];
 var EXECUTABLE_FILES = ["run.ts", "cleanup.ts"];
 
 class BunE2ETestGenerator extends BaseGenerator {
@@ -18775,6 +18787,7 @@ class BunE2ETestGenerator extends BaseGenerator {
       refusals: this.refusals(),
       transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
+      hasReporting: this.options.reportingPack !== undefined,
       ...this.accessContext(entities),
       now: new Date().toISOString()
     };
@@ -19033,7 +19046,8 @@ class FullStackGenerator {
         compiledWorkflows: this.options.compiledWorkflows,
         compiledRbac: this.options.compiledRbac,
         compiledReports: this.options.compiledReports,
-        compiledRules: this.options.compiledRules
+        compiledRules: this.options.compiledRules,
+        reportingPack: this.options.reportingPack
       });
       await testGenerator.generate(entities, relationships, outputDir);
     }
@@ -19142,7 +19156,8 @@ tests/.e2e-seed-manifest.json
     const frontendPort = this.options.frontendPort ?? DEFAULT_FRONTEND_PORT;
     const projectId = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const projectSnake = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-    const render = (content) => content.replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake).replace(/\{\{project\.name\}\}/g, this.options.projectName).replace(/\{\{project\.id\}\}/g, projectId).replace(/\{\{project\.backendPort\}\}/g, String(backendPort)).replace(/\{\{project\.frontendPort\}\}/g, String(frontendPort));
+    const render = (content) => (this.options.skipTests ? content.replace(/\n  # <e2e>[\s\S]*?# <\/e2e>\n/, `
+`) : content.replace(/\n  # <\/?e2e>/g, "")).replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake).replace(/\{\{project\.name\}\}/g, this.options.projectName).replace(/\{\{project\.id\}\}/g, projectId).replace(/\{\{project\.backendPort\}\}/g, String(backendPort)).replace(/\{\{project\.frontendPort\}\}/g, String(frontendPort));
     for (const file of files) {
       try {
         const templateDir = await this.findTemplatesDir();

@@ -1,0 +1,90 @@
+/**
+ * The application and the reporting platform, on one set of data.
+ *
+ * Two products read one database: the application writes it, the platform reports
+ * on it. Each is tested on its own elsewhere; this suite is the seam. It writes
+ * records through the *application's* API and asserts the *platform's* register
+ * report for the same entity sees them — which fails if the platform is reading
+ * a stale cache, the wrong database, a table the migration renamed, or a query
+ * the pack derived from a column that no longer exists.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import {
+  entities,
+  harness,
+  reportAccount,
+  reportingPack,
+  signInToReports,
+  waitForSeededPlatform,
+  type EntityMeta,
+  type NamedRow,
+  type ReportSession,
+} from "../harness/index.ts";
+
+const pack = reportingPack;
+const WRITES = 3;
+
+describe("application and reporting, together", () => {
+  let admin: ReportSession;
+  let reports: NamedRow[] = [];
+
+  beforeAll(async () => {
+    await harness.setup();
+    if (!pack) return;
+    const role = pack.access.roles.find((candidate) => candidate.isAdmin) ?? pack.access.roles[0]!;
+    const account = reportAccount(role);
+    admin = await signInToReports(account.email, account.password);
+    await waitForSeededPlatform(admin);
+    reports = await admin.list("/reports");
+  }, { timeout: 20 * 60_000 });
+
+  afterAll(async () => {
+    await harness.teardown();
+  });
+
+  /** The register report of an entity: `<table>` read, one row per record. */
+  function registerFor(entity: EntityMeta): { reportId: string } | null {
+    if (!pack) return null;
+    const query = pack.queries.find(
+      (candidate) => candidate.key.endsWith("__register") && candidate.tables.length === 1 && candidate.tables[0] === entity.tableName
+    );
+    if (!query) return null;
+    const report = pack.reports.find((candidate) => candidate.queryKey === query.key);
+    const row = report ? reports.find((candidate) => candidate.name === report.name) : undefined;
+    return row ? { reportId: row.id } : null;
+  }
+
+  async function reportedTotal(reportId: string): Promise<number> {
+    const response = await admin.get<{ totalRows?: number }>(`/reports/${reportId}/data?page=0&pageSize=1`);
+    expect(response.ok).toBe(true);
+    return Number(response.data?.totalRows ?? 0);
+  }
+
+  it("reports the records the application writes", async () => {
+    if (!pack) {
+      console.log("  no reporting pack — nothing to compare");
+      return;
+    }
+    let checked = 0;
+    for (const entity of entities) {
+      const register = registerFor(entity);
+      if (!register) continue;
+      const before = await reportedTotal(register.reportId);
+      let written = 0;
+      for (let index = 0; index < WRITES; index++) {
+        const created = await harness.createWithParents(entity);
+        if (created) written++;
+      }
+      if (written === 0) continue; // an unsatisfiable parent chain: 03 reports it
+      const after = await reportedTotal(register.reportId);
+      expect(after).toBe(before + written);
+      checked++;
+      if (checked >= 3) break; // three entities prove the seam; 28 covers every report
+    }
+    expect(checked).toBeGreaterThan(0);
+  }, 20 * 60_000);
+});

@@ -183,6 +183,10 @@ services:
       # The administrator's password (8+ characters). Unset: the seed's default.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}}}
+      # The rate limiter's ceiling per window. The end-to-end suite (`e2e`
+      # below) makes thousands of requests from one address; it backs off on a
+      # 429 either way, but a ceiling it never reaches keeps a run short.
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100000}
       PORT: {{project.backendPort}}
       # No immudb service is composed here; left unset the backend tries to
       # connect on start and logs a gRPC login error. Audit rows go to PostgreSQL.
@@ -321,6 +325,11 @@ services:
       AUTH_SECRET: ${REPORT_AUTH_SECRET:-change-me-in-production-at-least-32-chars}
       ENCRYPTION_KEY: ${REPORT_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # The origins the platform trusts for a sign-in that already carries a
+      # cookie. Unset it trusts only localhost:4050, so a second sign-in from the
+      # published port, or from the end-to-end container, was refused as "Invalid origin".
+      CORS_ORIGIN: ${REPORT_CORS_ORIGIN:-http://localhost:${REPORT_PORT:-3100},http://report:3000}
+      BETTER_AUTH_URL: ${REPORT_BASE_URL:-http://localhost:${REPORT_PORT:-3100}}
     # `restart: unless-stopped` above is the whole dependency story, and there
     # is deliberately no `depends_on` for the database: the platform bootstraps
     # its own schema on the first request, so it may start first and be
@@ -377,6 +386,56 @@ services:
     # believes has no tables in it. Calling `getDb()` bootstraps the platform's
     # own schema, so the seeder needs no running `report` service either.
     command: ["bun", "scripts/seed-reporting-pack.ts"]
+
+  # <e2e>
+  # ─────────────────────────────────────────────────────────────────────────
+  # The end-to-end suite, on demand.
+  #
+  #   docker compose run --rm e2e          the API suites against both applications
+  #   docker compose run --rm e2e test     the same, spelled out
+  #   docker compose run --rm e2e test:crud | test:rules | test:workflows
+  #
+  # It is the `tests/` project generated beside this application, derived from the
+  # same model: CRUD for every entity, the business rules, the workflows, the
+  # editor's API, every state machine and who may press its buttons, and the
+  # reporting platform held to the pack the seeder loaded — signed in as each
+  # reporting role. It starts nothing: it waits for both applications to be up
+  # and the seeder to have finished, then talks to them over the compose network.
+  #
+  # The `test` profile keeps it out of `docker compose up`. Naming the service
+  # with `run` starts it (and what it depends on) without the profile flag.
+  # Results are written to ./test-results.
+  # ─────────────────────────────────────────────────────────────────────────
+  e2e:
+    profiles: ["test"]
+    image: {{project.id}}-e2e:${IMAGE_TAG:-latest}
+    build:
+      context: ./tests
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      E2E_BASE_URL: http://backend:{{project.backendPort}}
+      E2E_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}}}
+      E2E_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
+      # Unset here and in the backend, the seed uses admin123.
+      E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      E2E_REPORT_URL: http://report:3000
+      E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
+      E2E_REPORT_PACK: /app/reporting/reporting-pack.json
+      E2E_RECORDS_PER_ENTITY: ${E2E_RECORDS_PER_ENTITY:-10}
+    volumes:
+      - ./reporting/reporting-pack.json:/app/reporting/reporting-pack.json:ro
+      - ./test-results:/app/test-results
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      report:
+        condition: service_healthy
+      report-seeder:
+        condition: service_completed_successfully
+  # </e2e>
 
 volumes:
   postgres_data:

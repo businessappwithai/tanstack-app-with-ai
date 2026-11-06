@@ -132,7 +132,7 @@ export interface AccessRoleSpec {
    * do not share a user table, and this is the other one's address.
    */
   appEmail: string;
-  /** `bus_` tables this role may read. Empty means every table. */
+  /** `bus_` tables this role may read. Empty means every table for the administrator and none for any other role. */
   tables: string[];
 }
 
