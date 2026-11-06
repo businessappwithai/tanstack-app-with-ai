@@ -300,7 +300,12 @@ export function numericFields(entity: EntityMeta): FieldMeta[] {
  */
 export function firstUnruledNumericField(entity: EntityMeta): FieldMeta | undefined {
   const ruled = columnsNamedByRefusals(entity.tableName);
-  return numericFields(entity).find((f) => !ruled.has(f.name));
+  // A column a transform computes is rewritten after every write (`net_amount` from `quantity *
+  // unit_price` on the airport model's Charge), so a value pinned there is not the value read back.
+  const overwritten = new Set(
+    transforms.filter((t) => t.tableName === entity.tableName).map((t) => t.column)
+  );
+  return numericFields(entity).find((f) => !ruled.has(f.name) && !overwritten.has(f.name));
 }
 
 export function getEntity(name: string): EntityMeta {
