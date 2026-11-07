@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { DatabaseModule } from "../../database/database.module";
 import { AdminOnlyGuard } from "../auth/guards/admin-only.guard";
+import { LogLevelStore } from "./log-level-store.service";
 import { LoggingController } from "./logging.controller";
 
 /**
@@ -10,7 +11,7 @@ import { LoggingController } from "./logging.controller";
  */
 @Module({
   imports: [DatabaseModule],
-  providers: [Reflector, AdminOnlyGuard],
+  providers: [Reflector, AdminOnlyGuard, LogLevelStore],
   controllers: [LoggingController],
 })
 export class LoggingModule {}

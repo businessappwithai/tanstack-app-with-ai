@@ -1801,6 +1801,12 @@ export async function executeCustomValidateHooks(
         template: "src/migrations/024_widen_workflow_operation.ts.hbs",
         required: true,
       },
+      // Log levels an administrator set through /api/logging/levels, kept across restarts.
+      {
+        slug: "log_level_overrides",
+        template: "src/migrations/025_log_level_overrides.ts.hbs",
+        required: true,
+      },
     ];
 
     // Drop previously generated scaffold migrations under *any* prefix. This
@@ -2718,7 +2724,11 @@ export async function seed(db: Kysely<any>): Promise<void> {
     const backend = resolveTemplateDir("tanstack-start-nestjs/backend");
     const outDir = path.join(outputDir, "src/modules/logging");
     await fs.mkdir(outDir, { recursive: true });
-    for (const file of ["logging.controller.ts", "logging.module.ts"]) {
+    for (const file of [
+      "logging.controller.ts",
+      "logging.module.ts",
+      "log-level-store.service.ts",
+    ]) {
       await fs.copyFile(path.join(backend, "src/modules/logging", file), path.join(outDir, file));
     }
     // Plain modules the controller and the guards import.

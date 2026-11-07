@@ -25,6 +25,8 @@ export interface ChannelLevelReport {
   effective: string;
   /** True when `effective` was set through the endpoint and will not survive a restart. */
   overridden: boolean;
+  /** True when the override is also stored in the database and so survives a restart. */
+  persisted?: boolean;
 }
 
 export function describeLevels(

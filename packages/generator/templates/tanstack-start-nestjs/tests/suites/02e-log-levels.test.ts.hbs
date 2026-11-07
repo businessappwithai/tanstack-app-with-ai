@@ -12,6 +12,9 @@
  *   - a signed-in non-administrator is refused on every method;
  *   - an unknown channel is a 404 and an unknown level a 400.
  *
+ * A level set through the endpoint is kept in the database (and so across a restart) unless
+ * the request says `persist: false`.
+ *
  * Whatever the suite changes it puts back.
  *
  * Generated: {{now}}
@@ -26,6 +29,7 @@ interface LevelRow {
   declared: string;
   effective: string;
   overridden: boolean;
+  persisted?: boolean;
 }
 
 interface Envelope {
@@ -88,6 +92,23 @@ describe("log levels", () => {
     expect(reset.status).toBe(200);
 
     const after = rows((await admin.get<Envelope>("/logging/levels")).data).find((r) => r.channel === "http");
+    expect(after?.overridden).toBe(false);
+  });
+
+  it("keeps a level across restarts by default, and only in memory when told it is temporary", async () => {
+    const kept = await admin.put<Envelope>("/logging/levels/http", { level: "debug" });
+    expect(kept.status).toBe(200);
+    const stored = rows((await admin.get<Envelope>("/logging/levels")).data).find((r) => r.channel === "http");
+    expect(stored?.persisted).toBe(true);
+
+    const temporary = await admin.put<Envelope>("/logging/levels/http", { level: "trace", persist: false });
+    expect(temporary.status).toBe(200);
+    const memoryOnly = rows((await admin.get<Envelope>("/logging/levels")).data).find((r) => r.channel === "http");
+    expect(memoryOnly?.effective).toBe("trace");
+
+    await admin.delete("/logging/levels/http");
+    const after = rows((await admin.get<Envelope>("/logging/levels")).data).find((r) => r.channel === "http");
+    expect(after?.persisted).toBe(false);
     expect(after?.overridden).toBe(false);
   });
 
