@@ -18,7 +18,12 @@ let CUR=''; let PICK=1; let MINIMAL=false; async function fill(p){
   if(!changed) break;
  }
  return r; }
-async function isRequired(e){ return e.evaluate(x=>{ const l=x.id&&document.querySelector('label[for="'+x.id+'"]'); const w=x.closest('div'); const t=(l?l.textContent:(w&&w.parentElement?w.parentElement.textContent:''))||''; return t.includes('*'); }); }
+async function isRequired(e){ return e.evaluate(x=>{
+  // The field's own wrapper: climb while the parent still holds only this one control, then look for
+  // the required asterisk in that text (a section or the whole form would hold other fields' asterisks).
+  const all=n=>n.querySelectorAll('input[name],select[name],textarea[name]').length;
+  let n=x; while(n.parentElement && all(n.parentElement)===1) n=n.parentElement;
+  return (n.textContent||'').includes('*'); }); }
 async function fill1(p,second){
  const els=await p.locator('form input, form select, form textarea, main input, main select, main textarea').elementHandles(); const log=[]; let n=0;
  for(const e of els){
@@ -76,6 +81,13 @@ async function fill1(p,second){
      // — what a person does — and try once more.
      r.firstAttempt=r.createMsg.slice(0,100); PICK=0; MINIMAL=true;
      await p.getByRole('button',{name:'New',exact:true}).first().click(); await p.waitForTimeout(2000);
+     // The form keeps what was typed: empty every optional field, as a person starting over would.
+     for(const e of await p.locator('main input[name],main select[name],main textarea[name]').elementHandles()){
+       const info=await e.evaluate(x=>({t:x.tagName,ty:x.type,vis:!!x.offsetParent,ro:x.readOnly||x.disabled}));
+       if(!info.vis||info.ro||info.ty==='checkbox'||info.ty==='hidden'||info.ty==='file') continue;
+       if(await isRequired(e)) continue;
+       try{ if(info.t==='SELECT') await e.selectOption(''); else await e.fill(''); }catch{}
+     }
      CUR=ent; await fill(p);
      await p.getByRole('button',{name:'Create',exact:true}).first().click(); await p.waitForTimeout(3500);
      r.createMsg=(await p.locator('[role=alert],[data-sonner-toast],.toast').allInnerTexts()).join(' | ').slice(0,200);
