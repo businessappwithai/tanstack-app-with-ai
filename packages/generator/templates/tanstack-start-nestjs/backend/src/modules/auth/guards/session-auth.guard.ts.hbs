@@ -8,17 +8,17 @@
  * and validates it against BetterAuth's session store.
  */
 
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ServiceUnavailableException, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ServiceUnavailableException, Inject, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { getAuth } from '../../../lib/better-auth';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { DatabaseService } from '../../../database/database.service';
 import { setRequestContext } from '../../../common/logging/logger.service';
 import { CapabilityService } from '../capability.service';
+import { getLogger } from '../../../common/logging/logger.service';
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
-  private readonly logger = new Logger(SessionAuthGuard.name);
 
   constructor(
     @Inject(Reflector) private reflector: Reflector,
@@ -85,9 +85,7 @@ export class SessionAuthGuard implements CanActivate {
         } catch (error) {
           // Not knowing what a user may do is not the same as their holding
           // nothing: the access guard refuses on a missing answer.
-          this.logger.error(
-            `Could not read the caller's access: ${error instanceof Error ? error.message : String(error)}`
-          );
+          getLogger('auth').event('auth.session.unavailable', { step: "reading the caller's access", err: error });
         }
       } else if (sysUserId && this.db) {
         try {
@@ -105,7 +103,6 @@ export class SessionAuthGuard implements CanActivate {
         }
       }
 
-      this.logger.debug(`User authenticated: ${session.user.email}`);
       return true;
     } catch (error) {
       if (error instanceof UnauthorizedException) throw error;
@@ -113,9 +110,7 @@ export class SessionAuthGuard implements CanActivate {
       // — a database that was busy, a connection that dropped — tells the front end to sign the
       // person out, and every screen they had open bounces to the sign-in page for a fault that
       // was never theirs. Say the service could not answer, and let the request be retried.
-      this.logger.error(
-        `Could not check the session: ${error instanceof Error ? error.message : String(error)}`
-      );
+      getLogger('auth').event('auth.session.unavailable', { step: 'checking the session', err: error });
       throw new ServiceUnavailableException('Could not check your session. Try again.');
     }
   }

@@ -1,14 +1,14 @@
-import { Inject, Injectable, Logger, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { type Kysely, sql } from "kysely";
 import { KYSELY_CONNECTION } from "../../database/database.constants";
 import type { AuditEvent, AuditSearchParams } from "./audit.types";
 import { maskSensitive } from "./audit.types";
 import { ImmudbService } from "./immudb.service";
+import { getLogger } from "../../common/logging/logger.service";
 
 @Injectable()
 export class AuditService implements OnModuleInit {
-  private readonly logger = new Logger(AuditService.name);
 
   constructor(
     @Inject(KYSELY_CONNECTION) private readonly kysely: Kysely<any>,
@@ -67,11 +67,9 @@ export class AuditService implements OnModuleInit {
         this.kysely
       );
 
-      this.logger.log("audit_log table ready");
+      getLogger("audit").event("audit.ready", { store: "audit_log" });
     } catch (err) {
-      this.logger.error(
-        `Failed to create audit_log table: ${err instanceof Error ? err.message : String(err)}`
-      );
+      getLogger("audit").event("audit.write.failed", { store: "audit_log table", err });
     }
   }
 
@@ -105,11 +103,9 @@ export class AuditService implements OnModuleInit {
         const resolvedKey = txId !== safeEvent.immudb_key ? txId : safeEvent.immudb_key;
         await this.insertPostgres({ ...safeEvent, immudb_key: resolvedKey });
       } catch (err) {
-        this.logger.error(
-          `Audit log write failed: ${err instanceof Error ? err.message : String(err)}`
-        );
+        getLogger("audit").event("audit.write.failed", { store: "postgres", err });
         await this.insertPostgres(safeEvent).catch((e) =>
-          this.logger.error(`Audit PG fallback also failed: ${e.message}`)
+          getLogger("audit").event("audit.write.failed", { store: "postgres fallback", err: e })
         );
       }
     });
@@ -136,9 +132,7 @@ export class AuditService implements OnModuleInit {
     try {
       await this.insertPostgres(safeEvent);
     } catch (err) {
-      this.logger.error(
-        `Audit log write failed: ${err instanceof Error ? err.message : String(err)}`
-      );
+      getLogger("audit").event("audit.write.failed", { store: "postgres", err });
       return null;
     }
 
@@ -153,9 +147,7 @@ export class AuditService implements OnModuleInit {
             .execute();
         }
       } catch (err) {
-        this.logger.warn(
-          `immudb proof not written for ${safeEvent.id}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        getLogger("audit").event("audit.immudb.failed", { operation: "proof", err });
       }
     });
 

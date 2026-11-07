@@ -23,7 +23,6 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
-  Logger,
   UseGuards,
   Req,
   Res,
@@ -34,6 +33,7 @@ import { BusService } from './bus.service';
 import { TransitionService } from './transition.service';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { EntityAccessGuard } from '../auth/guards/entity-access.guard';
+import { getLogger } from '../../common/logging/logger.service';
 
 /**
  * The record version an `If-Match` header names, for optimistic locking.
@@ -70,13 +70,11 @@ function setEtag(reply: any, record: any): void {
 @UseGuards(SessionAuthGuard, EntityAccessGuard)
 @Controller('bus')
 export class BusController {
-  private readonly logger = new Logger(BusController.name);
 
   constructor(
     private readonly busService: BusService,
     private readonly transitions: TransitionService,
   ) {
-    this.logger.log('BusController initialized');
   }
 
   /**
@@ -114,8 +112,6 @@ export class BusController {
     @Query() query?: Record<string, any>,
     @Req() req?: any,
   ) {
-    const methodName = 'findAll';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}, page: ${page}, limit: ${limit}, orderBy: ${orderBy}, orderDir: ${orderDir}, search: ${search}`);
 
     // Extract filters from query params (exclude pagination params)
     const { page: _p, limit: _l, orderBy: _ob, orderDir: _od, search: _s, awaiting, ...rawFilters } =
@@ -137,7 +133,6 @@ export class BusController {
     }
 
     if (Object.keys(parsedFilters).length > 0) {
-      this.logger.debug(`[${methodName}] Filters: ${JSON.stringify(parsedFilters)}`);
     }
 
     let searchFields: string[] | undefined;
@@ -151,7 +146,6 @@ export class BusController {
 
     const result = await this.busService.findAll(entity, { page, limit, orderBy, orderDir, search, searchFields }, parsedFilters);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, returned ${result.data.length} records (total: ${result.meta.total})`);
     return result;
   }
 
@@ -205,7 +199,6 @@ export class BusController {
               parsed[fieldName] = { operator: '=', value };
           }
 
-          this.logger.debug(`[parseFilters] Parsed filter: ${fieldName} with operator ${operator}`);
         } else {
           // No operator specified: an exact match on the value as given.
           parsed[fieldName] = { operator: '=', value };
@@ -230,12 +223,9 @@ export class BusController {
   @ApiParam({ name: 'entity', description: 'Entity name' })
   @ApiResponse({ status: 200, description: 'Returns entity metadata from Application Dictionary' })
   async getMetadata(@Param('entity') entity: string) {
-    const methodName = 'getMetadata';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}`);
 
     const result = await this.busService.getEntityMetadata(entity);
 
-    this.logger.debug(`[${methodName}] Success - entity: ${entity}, returned ${result.columns.length} columns`);
     return result;
   }
 
@@ -247,12 +237,9 @@ export class BusController {
   @ApiOperation({ summary: 'Get fields for form display (ordered by seq_no)' })
   @ApiParam({ name: 'entity', description: 'Entity name' })
   async getFormFields(@Param('entity') entity: string) {
-    const methodName = 'getFormFields';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}`);
 
     const result = await this.busService.getFormFields(entity);
 
-    this.logger.debug(`[${methodName}] Success - entity: ${entity}, returned ${result.length} form fields`);
     return result;
   }
 
@@ -264,12 +251,9 @@ export class BusController {
   @ApiOperation({ summary: 'Get fields for grid display (ordered by seq_no_grid)' })
   @ApiParam({ name: 'entity', description: 'Entity name' })
   async getGridFields(@Param('entity') entity: string) {
-    const methodName = 'getGridFields';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}`);
 
     const result = await this.busService.getGridFields(entity);
 
-    this.logger.debug(`[${methodName}] Success - entity: ${entity}, returned ${result.length} grid fields`);
     return result;
   }
 
@@ -288,13 +272,10 @@ export class BusController {
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) reply?: any,
   ) {
-    const methodName = 'findOne';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}, id: ${id}`);
 
     const result = await this.busService.findById(entity, id);
     setEtag(reply, result);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}`);
     return result;
   }
 
@@ -311,15 +292,11 @@ export class BusController {
     @Param('entity') entity: string,
     @Body() data: Record<string, any>,
   ) {
-    const methodName = 'create';
-    this.logger.log(`[${methodName}] Request - entity: ${entity}`);
-    this.logger.debug(`[${methodName}] Request body: ${JSON.stringify(data)}`);
 
     // Validate data against dictionary metadata
     await this.busService.validateData(entity, data, 'create');
     const result = await this.busService.create(entity, data);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, created id: ${result.id}`);
     return result;
   }
 
@@ -342,11 +319,8 @@ export class BusController {
     @Req() req?: any,
     @Res({ passthrough: true }) reply?: any,
   ) {
-    const methodName = 'update';
     const version = parseIfMatch(ifMatch);
 
-    this.logger.log(`[${methodName}] Request - entity: ${entity}, id: ${id}, expectedVersion: ${version}`);
-    this.logger.debug(`[${methodName}] Request body: ${JSON.stringify(data)}`);
 
     // Capture before-value for audit trail
     if (req) {
@@ -358,7 +332,6 @@ export class BusController {
     const result = await this.busService.update(entity, id, data, version);
     setEtag(reply, result);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}, new version: ${result.version}`);
     return result;
   }
 
@@ -529,11 +502,8 @@ export class BusController {
     @Req() req?: any,
     @Res({ passthrough: true }) reply?: any,
   ) {
-    const methodName = 'patch';
     const version = parseIfMatch(ifMatch);
 
-    this.logger.log(`[${methodName}] Request - entity: ${entity}, id: ${id}, expectedVersion: ${version}`);
-    this.logger.debug(`[${methodName}] Request body: ${JSON.stringify(data)}`);
 
     // Capture before-value for audit trail
     if (req) {
@@ -545,7 +515,6 @@ export class BusController {
     const result = await this.busService.update(entity, id, data, version);
     setEtag(reply, result);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}, new version: ${result.version}`);
     return result;
   }
 
@@ -561,10 +530,7 @@ export class BusController {
   @ApiResponse({ status: 201, description: 'Dictionary records created or already existed' })
   @ApiResponse({ status: 404, description: 'No sys_table record found — register the table first' })
   async setupDictionary(@Param('entity') entity: string) {
-    const methodName = 'setupDictionary';
-    this.logger.log(`[${methodName}] Request - entity: ${entity}`);
     const result = await this.busService.setupEntityDictionary(entity);
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, created: ${result.created.length} records`);
     return result;
   }
 
@@ -588,8 +554,6 @@ export class BusController {
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req?: any,
   ) {
-    const methodName = 'delete';
-    this.logger.log(`[${methodName}] Request - entity: ${entity}, id: ${id}`);
 
     // Capture before-value for audit trail
     if (req) {
@@ -616,9 +580,11 @@ export class BusController {
      * which is also what tells a client to go and remove the children first.
      */
     if (!promotion.promoted) {
-      this.logger.warn(
-        `[${methodName}] Refused - entity: ${entity}, id: ${id}: ${promotion.message ?? 'the delete did not complete'}`,
-      );
+      getLogger('entity').event('entity.promotion.refused', {
+        entity,
+        recordId: id,
+        reason: promotion.message ?? 'the delete did not complete',
+      });
       throw new ConflictException({
         message: promotion.message ?? `Could not delete ${entity} ${id}`,
         deleted: false,
@@ -626,7 +592,6 @@ export class BusController {
       });
     }
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}`);
     return { deleted: promotion.promoted, promotion };
   }
 

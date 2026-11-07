@@ -29,9 +29,10 @@
  * Project: {{project.name}}
  */
 
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { cacheTtl, createCache } from '../../common/ttl-cache';
+import { getLogger } from '../../common/logging/logger.service';
 
 export type GrantKind = 'op' | 'move' | 'reopen';
 
@@ -86,7 +87,6 @@ function undefinedRelation(error: any): boolean {
 
 @Injectable()
 export class CapabilityService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(CapabilityService.name);
   private readonly users = createCache<string, Capabilities>('capabilities');
   private readonly policies = createCache<'policy', AccessPolicy>('accessPolicy', { maxEntries: 1 });
   /** Whether an account is active. Same expiry as a user's capabilities — it is the same question. */
@@ -161,10 +161,7 @@ export class CapabilityService implements OnModuleInit, OnModuleDestroy {
       await client.query('LISTEN access_changed');
       this.listener = client;
     } catch (error: any) {
-      this.logger.warn(
-        `Not listening for access changes (${error?.message ?? error}); ` +
-          'cached access expires on its own (CACHE_TTL_CAPABILITIES_MS).',
-      );
+      getLogger('auth').event('auth.capability.unsynced', { err: error });
     }
   }
 

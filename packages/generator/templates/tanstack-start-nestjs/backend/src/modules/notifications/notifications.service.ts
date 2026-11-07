@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, } from "@nestjs/common";
 import { type Kysely, sql } from "kysely";
 import { KYSELY_CONNECTION } from "../../database/database.constants";
 import { TRANSACTION_ACTIONS } from "../audit/audit.types";
@@ -7,6 +7,7 @@ import type {
   TransactionNotification,
   TransactionOutcome,
 } from "./notifications.types";
+import { getLogger } from "../../common/logging/logger.service";
 
 /**
  * A user's own record transactions, read out of the audit trail.
@@ -24,7 +25,6 @@ import type {
  */
 @Injectable()
 export class NotificationsService {
-  private readonly logger = new Logger(NotificationsService.name);
 
   /** table_name → display name, from the Application Dictionary. */
   private entityLabels: Map<string, string> | null = null;
@@ -171,9 +171,7 @@ export class NotificationsService {
         if (row.table_name && row.name) map.set(row.table_name, row.name);
       }
     } catch (err) {
-      this.logger.warn(
-        `Could not read entity names from the dictionary: ${err instanceof Error ? err.message : String(err)}`
-      );
+      getLogger("notifications").event("notifications.send.failed", { step: "reading entity names from the dictionary", err });
     }
 
     this.entityLabels = map;

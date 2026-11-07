@@ -59,7 +59,6 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
-  Logger,
   Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -87,7 +86,6 @@ const METHOD_OPERATION: Record<string, Operation> = {
 
 @Injectable()
 export class EntityAccessGuard implements CanActivate {
-  private readonly logger = new Logger(EntityAccessGuard.name);
 
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
@@ -118,10 +116,10 @@ export class EntityAccessGuard implements CanActivate {
      * disabled every entity restriction in the application.
      */
     if (!this.db) {
-      this.logger.error(
-        'EntityAccessGuard has no DatabaseService, so %%rbac rules cannot be read. ' +
-          'Refusing rather than allowing — check the module wiring.',
-      );
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: 'module wiring',
+        reason: 'EntityAccessGuard has no DatabaseService, so %%rbac rules cannot be read; refusing',
+      });
       throw new ForbiddenException(
         'Access rules are unavailable. This is a server misconfiguration, not a permission you lack.',
       );
@@ -146,7 +144,10 @@ export class EntityAccessGuard implements CanActivate {
       }
     } catch (error: any) {
       capabilities = undefined;
-      this.logger.error(`Could not read the caller's access: ${error?.message ?? error}`);
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: "reading the caller's access",
+        reason: error?.message ?? String(error),
+      });
     }
     if (!capabilities || !this.capabilities) {
       // An access decision that cannot be made is a refusal.
@@ -221,9 +222,10 @@ export class EntityAccessGuard implements CanActivate {
         .where('id' as any, '=', request.params.id)
         .executeTakeFirst();
     } catch (error: any) {
-      this.logger.warn(
-        `Could not read the lifecycle of ${tableName}/${request.params.id}: ${error?.message ?? error}`,
-      );
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: 'reading the lifecycle',
+        reason: error?.message ?? String(error),
+      });
       return;
     }
     if (!current || !isLocked(lifecycle, current[lifecycle.column])) return;
@@ -288,9 +290,10 @@ export class EntityAccessGuard implements CanActivate {
         .where('id' as any, '=', request.params.id)
         .executeTakeFirst();
     } catch (error: any) {
-      this.logger.warn(
-        `Could not read the state of ${tableName}/${request.params.id}: ${error?.message ?? error}`,
-      );
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: 'reading the state',
+        reason: error?.message ?? String(error),
+      });
       current = undefined;
     }
 

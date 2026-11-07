@@ -1,6 +1,7 @@
-import { ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, } from "@nestjs/common";
 import { type Kysely, sql } from "kysely";
 import { KYSELY_CONNECTION } from "../../database/database.constants";
+import { getLogger } from "../../common/logging/logger.service";
 
 /**
  * One record's history, and the notes people have left on it.
@@ -21,7 +22,6 @@ import { KYSELY_CONNECTION } from "../../database/database.constants";
  */
 @Injectable()
 export class RecordHistoryService {
-  private readonly logger = new Logger(RecordHistoryService.name);
 
   constructor(@Inject(KYSELY_CONNECTION) private readonly kysely: Kysely<any>) {}
 
@@ -47,9 +47,9 @@ export class RecordHistoryService {
         .execute();
       allowedRoles = rows.map((row: any) => row.role_name);
     } catch (error: any) {
-      this.logger.warn(
-        `Operation access lookup failed for ${tableName}.${operation}: ${error?.message ?? error}`,
-      );
+      getLogger("audit").event("audit.history.degraded", {
+        reason: `Operation access lookup failed for ${tableName}.${operation}: ${error?.message ?? error}`,
+      });
       return;
     }
 

@@ -10,6 +10,7 @@ import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { KYSELY_CONNECTION } from './database.constants';
 import { DatabaseService } from './database.service';
+import { getLogger } from '../common/logging/logger.service';
 
 function buildPoolConfig(configService: ConfigService) {
   const url = configService.get<string>('DATABASE_URL');
@@ -21,6 +22,23 @@ function buildPoolConfig(configService: ConfigService) {
     port: configService.get<number>('DB_PORT', 5432),
     user: configService.get('DB_USER', '{{snakeCase project.name}}'),
     password: configService.get('DB_PASSWORD', ''),
+    database: configService.get('DB_NAME', '{{snakeCase project.name}}'),
+  };
+}
+
+/** Where the pool points, for the log: never the credentials. */
+function describeTarget(configService: ConfigService): { host: string; database: string } {
+  const url = configService.get<string>('DATABASE_URL');
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      return { host: parsed.hostname, database: parsed.pathname.replace(/^\//, '') };
+    } catch {
+      return { host: 'unparseable DATABASE_URL', database: '' };
+    }
+  }
+  return {
+    host: configService.get('DB_HOST', '127.0.0.1'),
     database: configService.get('DB_NAME', '{{snakeCase project.name}}'),
   };
 }
@@ -37,9 +55,15 @@ function buildPoolConfig(configService: ConfigService) {
 
         try {
           await db.selectFrom('information_schema.tables' as any).limit(1).execute();
-          console.log('✓ Database connection established');
+          getLogger('db').event('db.connected', {
+            ...describeTarget(configService),
+            poolMax: pool.options.max ?? 10,
+          });
         } catch (error) {
-          console.warn('⚠ Database connection check failed:', error instanceof Error ? error.message : String(error));
+          getLogger('db').event('db.connection.failed', {
+            ...describeTarget(configService),
+            err: error,
+          });
         }
 
         return db;
@@ -54,6 +78,5 @@ export class DatabaseModule implements OnModuleDestroy {
 
   async onModuleDestroy() {
     await this.db.destroy();
-    console.log('✓ Database connection closed');
   }
 }

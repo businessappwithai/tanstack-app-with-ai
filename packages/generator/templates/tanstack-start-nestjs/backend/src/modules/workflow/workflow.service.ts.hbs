@@ -14,7 +14,9 @@
  * Project: {{project.name}}
  */
 
-import { Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+
+import { getLogger } from '../../common/logging/logger.service';
 import { Kysely, sql } from 'kysely';
 import { InjectDatabase } from '../../database/database.service.decorator';
 import { RulesEngine } from '../rules/rules-engine.service';
@@ -129,7 +131,23 @@ interface BpmnTaskProps {
 
 @Injectable()
 export class WorkflowService {
-  private readonly logger = new Logger(WorkflowService.name);
+  private readonly log = getLogger('workflow');
+
+  /** A step that did nothing, and why. The reason is the sentence a person reads in the run. */
+  private skipped(type: string, reason: string): void {
+    this.log.event('workflow.step.skipped', { workflow: null, step: null, type, reason });
+  }
+
+  /** A step that did something. Debug: the run row already records what it produced. */
+  private performed(type: string, detail: string): void {
+    this.log.event('workflow.step.completed', {
+      workflow: null,
+      step: null,
+      type,
+      durationMs: null,
+      detail,
+    });
+  }
 
   constructor(
     @InjectDatabase() private readonly db: Kysely<any>,
@@ -192,7 +210,11 @@ export class WorkflowService {
       if (options.throwOnError) {
         throw new Error(`Could not load workflow definitions for ${entityName}: ${err?.message ?? err}`);
       }
-      this.logger.warn(`Could not load workflow definitions for ${entityName}: ${err?.message}`);
+      this.log.event('workflow.definition.unavailable', {
+        workflow: null,
+        entity: entityName,
+        err,
+      });
       return;
     }
 
@@ -247,13 +269,21 @@ export class WorkflowService {
           .where('id', '=', runId)
           .execute();
 
-        this.logger.log(
-          `Workflow "${def.name}" completed for ${tableName}:${entityId} (${mutations.length} mutations)`,
-        );
+        this.log.event('workflow.run.completed', {
+          workflow: def.name,
+          entity: tableName,
+          recordId: entityId,
+          mutations: mutations.length,
+          trigger: 'event',
+        });
       } catch (err: any) {
-        this.logger.error(
-          `Workflow "${def.name}" failed for ${tableName}:${entityId}: ${err?.message}`,
-        );
+        this.log.event('workflow.run.failed', {
+          workflow: def.name,
+          entity: tableName,
+          recordId: entityId,
+          trigger: 'event',
+          err,
+        });
         if (options.throwOnError) {
           // The caller owns a transaction: let it roll back rather than recording a
           // half-applied run. The run row dies with the rollback too.
@@ -302,7 +332,7 @@ export class WorkflowService {
         } as any)
         .execute();
     } catch (err: any) {
-      this.logger.warn(`Could not record the failed run of "${failure.workflow}": ${err?.message}`);
+      this.log.event('workflow.run.unrecorded', { workflow: failure.workflow, err });
     }
   }
 
@@ -331,7 +361,11 @@ export class WorkflowService {
       if (options.throwOnError) {
         throw new Error(`Could not load workflow "${workflowName}": ${err?.message ?? err}`);
       }
-      this.logger.warn(`Could not load workflow "${workflowName}": ${err?.message}`);
+      this.log.event('workflow.definition.unavailable', {
+        workflow: workflowName,
+        entity: entityName,
+        err,
+      });
       return [];
     }
 
@@ -341,9 +375,12 @@ export class WorkflowService {
       // creates until someone builds them in the Workflow Designer. That is the
       // normal state of a fresh app, so it is a debug line, not a warning on
       // every single write.
-      this.logger.debug(
-        `No active workflow named "${workflowName}" — nothing to trigger for ${entityName}:${entityId}`,
-      );
+      this.log.event('workflow.trigger.ignored', {
+        workflow: workflowName,
+        entity: entityName,
+        recordId: entityId,
+        reason: 'no active workflow by that name',
+      });
       return [];
     }
 
@@ -377,10 +414,22 @@ export class WorkflowService {
         .where('id', '=', runId)
         .execute();
 
-      this.logger.log(`Rule-triggered workflow "${workflowName}" completed for ${entityName}:${entityId}`);
+      this.log.event('workflow.run.completed', {
+        workflow: workflowName,
+        entity: entityName,
+        recordId: entityId,
+        mutations: mutations.length,
+        trigger: 'rule',
+      });
       return mutations;
     } catch (err: any) {
-      this.logger.error(`Rule-triggered workflow "${workflowName}" failed: ${err?.message}`);
+      this.log.event('workflow.run.failed', {
+        workflow: workflowName,
+        entity: entityName,
+        recordId: entityId,
+        trigger: 'rule',
+        err,
+      });
       if (options.throwOnError) {
         throw new Error(`Workflow "${workflowName}" failed: ${err?.message ?? err}`);
       }
@@ -473,6 +522,7 @@ export class WorkflowService {
       if (!this.checkHolds(context, field, operator, compareTo)) break;
 
       if (pass >= maxPasses) {
+        this.log.event('workflow.loop.exhausted', { workflow: null, loop: loopId, max: maxPasses });
         throw new Error(
           `Loop "${loopId}" did not finish within its limit of ${maxPasses} passes — ` +
             `"${field} ${operator} ${compareTo}" never stopped being true. ` +
@@ -700,11 +750,11 @@ export class WorkflowService {
     }
 
     if (task.nodeType === 'Agent') {
-      this.logger.warn('Agent workflow node is a placeholder — skipping');
+      this.skipped('Agent', 'Agent workflow node is a placeholder — skipping');
       return { nodeType: 'Agent', skipped: 'Agent nodes are a placeholder pending Mastra integration' };
     }
 
-    this.logger.warn(`Unknown workflow nodeType: ${task.nodeType} — skipping`);
+    this.skipped('unknown', `Unknown workflow nodeType: ${task.nodeType} — skipping`);
     return null;
   }
 
@@ -732,7 +782,7 @@ export class WorkflowService {
     const targetTable = task.entity?.trim() || triggeringTable;
     const field = task.field?.trim();
     if (!field) {
-      this.logger.warn('UpdateEntity task missing "field" — skipping');
+      this.skipped('UpdateEntity', 'UpdateEntity task missing "field" — skipping');
       return { nodeType: 'UpdateEntity', table: targetTable, skipped: 'no "field" configured' };
     }
 
@@ -745,22 +795,18 @@ export class WorkflowService {
     if (targetSource) {
       targetValue = context[targetSource];
       if (targetValue === undefined || targetValue === null) {
-        this.logger.warn(
-          `UpdateEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}.${field}`,
-        );
+        this.skipped('UpdateEntity', `UpdateEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}.${field}`);
         return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: `no value for targetSource "${targetSource}"` };
       }
     } else if (!isSelf && targetField === 'id') {
-      this.logger.warn(
-        `UpdateEntity: cannot update ${targetTable} from a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: cannot update ${targetTable} from a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`);
       return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: 'no row targeting configured for a cross-entity update' };
     } else {
       targetValue = entityId;
     }
 
     if (targetValue === undefined || targetValue === null) {
-      this.logger.warn('UpdateEntity: no value to match rows on — skipping');
+      this.skipped('UpdateEntity', 'UpdateEntity: no value to match rows on — skipping');
       return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: 'no value to match rows on' };
     }
 
@@ -778,9 +824,7 @@ export class WorkflowService {
     // worse than not running: a decision that matched no row, or a create that
     // was skipped, would quietly erase the field the next step meant to set.
     if (source && context[source] === undefined && !hasLiteral) {
-      this.logger.warn(
-        `UpdateEntity: nothing published "${source}" and there is no literal fallback — skipping ${targetTable}.${field}`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: nothing published "${source}" and there is no literal fallback — skipping ${targetTable}.${field}`);
       return {
         nodeType: 'UpdateEntity',
         table: targetTable,
@@ -799,9 +843,7 @@ export class WorkflowService {
       ? lifecycle!.edges.filter((edge) => edge.to === String(resolvedValue)).map((edge) => edge.from)
       : [];
     if (isMove && fromStates.length === 0) {
-      this.logger.warn(
-        `UpdateEntity: no drawn edge reaches "${String(resolvedValue)}" on ${targetTable} — skipped`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: no drawn edge reaches "${String(resolvedValue)}" on ${targetTable} — skipped`);
       return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: `no drawn edge reaches "${String(resolvedValue)}"` };
     }
     const now = new Date();
@@ -820,13 +862,9 @@ export class WorkflowService {
 
     const rowsAffected = Number(result?.[0]?.numUpdatedRows ?? 0);
     if (rowsAffected === 0) {
-      this.logger.warn(
-        `UpdateEntity: ${targetTable}.${field} matched no rows (${targetField}=${String(targetValue)})`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: ${targetTable}.${field} matched no rows (${targetField}=${String(targetValue)})`);
     } else {
-      this.logger.log(
-        `UpdateEntity: ${targetTable}.${field} = ${JSON.stringify(resolvedValue)} (${targetField}=${String(targetValue)}, ${rowsAffected} row(s))`,
-      );
+      this.performed('UpdateEntity', `UpdateEntity: ${targetTable}.${field} = ${JSON.stringify(resolvedValue)} (${targetField}=${String(targetValue)}, ${rowsAffected} row(s))`);
     }
 
     return {
@@ -872,13 +910,13 @@ export class WorkflowService {
     try {
       fieldMap = JSON.parse(task.fields?.trim() || '{}') as Record<string, string>;
     } catch (err: any) {
-      this.logger.warn(`CreateEntity: "fields" is not valid JSON (${err?.message}) — skipping`);
+      this.skipped('CreateEntity', `CreateEntity: "fields" is not valid JSON (${err?.message}) — skipping`);
       return { nodeType: 'CreateEntity', table: targetTable, skipped: 'invalid fields JSON' };
     }
 
     const entries = Object.entries(fieldMap).filter(([column]) => column.trim().length > 0);
     if (entries.length === 0) {
-      this.logger.warn(`CreateEntity: no fields configured for ${targetTable} — skipping`);
+      this.skipped('CreateEntity', `CreateEntity: no fields configured for ${targetTable} — skipping`);
       return { nodeType: 'CreateEntity', table: targetTable, skipped: 'no fields configured' };
     }
 
@@ -922,7 +960,7 @@ export class WorkflowService {
     const varName = task.as?.trim() || `${targetTable.replace(/^bus_/, '')}Id`;
     if (createdId !== undefined) vars[varName] = createdId;
 
-    this.logger.log(`CreateEntity: inserted into ${targetTable} (id=${createdId}, as "${varName}")`);
+    this.performed('CreateEntity', `CreateEntity: inserted into ${targetTable} (id=${createdId}, as "${varName}")`);
     return {
       nodeType: 'CreateEntity',
       table: targetTable,
@@ -960,22 +998,18 @@ export class WorkflowService {
     if (targetSource) {
       targetValue = context[targetSource];
       if (targetValue === undefined || targetValue === null) {
-        this.logger.warn(
-          `DeleteEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}`,
-        );
+        this.skipped('DeleteEntity', `DeleteEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}`);
         return { nodeType: 'DeleteEntity', table: targetTable, skipped: `no value for targetSource "${targetSource}"` };
       }
     } else if (!isSelf && targetField === 'id') {
-      this.logger.warn(
-        `DeleteEntity: cannot delete from ${targetTable} in a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`,
-      );
+      this.skipped('DeleteEntity', `DeleteEntity: cannot delete from ${targetTable} in a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`);
       return { nodeType: 'DeleteEntity', table: targetTable, skipped: 'no row targeting configured for a cross-entity delete' };
     } else {
       targetValue = entityId;
     }
 
     if (targetValue === undefined || targetValue === null) {
-      this.logger.warn('DeleteEntity: no value to match rows on — skipping');
+      this.skipped('DeleteEntity', 'DeleteEntity: no value to match rows on — skipping');
       return { nodeType: 'DeleteEntity', table: targetTable, skipped: 'no value to match rows on' };
     }
 
@@ -989,13 +1023,9 @@ export class WorkflowService {
     const rowsAffected = Number(result?.[0]?.numDeletedRows ?? 0);
 
     if (rowsAffected === 0) {
-      this.logger.warn(
-        `DeleteEntity: ${targetTable} matched no rows (${targetField}=${String(targetValue)})`,
-      );
+      this.skipped('DeleteEntity', `DeleteEntity: ${targetTable} matched no rows (${targetField}=${String(targetValue)})`);
     } else {
-      this.logger.log(
-        `DeleteEntity: ${targetTable} deleted ${rowsAffected} row(s) (${targetField}=${String(targetValue)})`,
-      );
+      this.performed('DeleteEntity', `DeleteEntity: ${targetTable} deleted ${rowsAffected} row(s) (${targetField}=${String(targetValue)})`);
     }
 
     return {
@@ -1023,7 +1053,7 @@ export class WorkflowService {
   ): Record<string, unknown> | null {
     const target = task.target?.trim();
     if (!target) {
-      this.logger.warn('Formula task missing "target" variable name — skipping');
+      this.skipped('Formula', 'Formula task missing "target" variable name — skipping');
       return { nodeType: 'Formula', skipped: 'no "target" variable configured' };
     }
 
@@ -1031,18 +1061,18 @@ export class WorkflowService {
 
     if (operationName === 'set') {
       vars[target] = task.value ?? '';
-      this.logger.log(`Formula(set): ${target} = ${JSON.stringify(vars[target])}`);
+      this.performed('Formula', `Formula(set): ${target} = ${JSON.stringify(vars[target])}`);
       return { nodeType: 'Formula', target, value: vars[target], operation: 'set' };
     }
 
     if (operationName === 'copy') {
       const carried = context[task.source?.trim() ?? ''];
       if (carried === undefined) {
-        this.logger.warn(`Formula(copy): "${task.source}" is not in the workflow context — skipping`);
+        this.skipped('Formula', `Formula(copy): "${task.source}" is not in the workflow context — skipping`);
         return { nodeType: 'Formula', target, skipped: `no value for source "${task.source}"` };
       }
       vars[target] = carried;
-      this.logger.log(`Formula(copy): ${target} = ${JSON.stringify(carried)}`);
+      this.performed('Formula', `Formula(copy): ${target} = ${JSON.stringify(carried)}`);
       return { nodeType: 'Formula', target, value: carried, operation: 'copy' };
     }
 
@@ -1052,9 +1082,7 @@ export class WorkflowService {
     // was NaN and every formula over two variables was skipped as non-numeric.
     const right = Number(this.resolveReference(task.operand, context));
     if (!Number.isFinite(left) || !Number.isFinite(right)) {
-      this.logger.warn(
-        `Formula: "${task.source}" (${String(context[task.source ?? ''])}) or operand "${task.operand}" is not numeric — skipping`,
-      );
+      this.skipped('Formula', `Formula: "${task.source}" (${String(context[task.source ?? ''])}) or operand "${task.operand}" is not numeric — skipping`);
       return { nodeType: 'Formula', target, skipped: 'non-numeric operand' };
     }
 
@@ -1064,7 +1092,7 @@ export class WorkflowService {
       case 'multiply': value = left * right; break;
       case 'divide':
         if (right === 0) {
-          this.logger.warn('Formula: division by zero — skipping');
+          this.skipped('Formula', 'Formula: division by zero — skipping');
           return { nodeType: 'Formula', target, skipped: 'division by zero' };
         }
         value = left / right;
@@ -1072,12 +1100,12 @@ export class WorkflowService {
       case 'add': value = left + right; break;
       case 'subtract': value = left - right; break;
       default:
-        this.logger.warn(`Formula: unknown operation "${operation}" — skipping`);
+        this.skipped('Formula', `Formula: unknown operation "${operation}" — skipping`);
         return { nodeType: 'Formula', target, skipped: `unknown operation "${operation}"` };
     }
 
     vars[target] = value;
-    this.logger.log(`Formula: ${target} = ${left} ${operation} ${right} = ${value}`);
+    this.performed('Formula', `Formula: ${target} = ${left} ${operation} ${right} = ${value}`);
     return { nodeType: 'Formula', target, value };
   }
 
@@ -1110,7 +1138,7 @@ export class WorkflowService {
       try {
         content = JSON.parse(inline);
       } catch (err: any) {
-        this.logger.warn(`Decision: decisionTable is not valid JSON — skipping (${err?.message})`);
+        this.skipped('Decision', `Decision: decisionTable is not valid JSON — skipping (${err?.message})`);
         return { nodeType: 'Decision', skipped: 'decisionTable is not valid JSON' };
       }
       if (!content || typeof content !== 'object') {
@@ -1130,11 +1158,11 @@ export class WorkflowService {
           .where('is_active', '=', true)
           .executeTakeFirst();
       } catch (err: any) {
-        this.logger.warn(`Decision: could not load rule "${ruleName}": ${err?.message}`);
+        this.skipped('Decision', `Decision: could not load rule "${ruleName}": ${err?.message}`);
         return { nodeType: 'Decision', rule: ruleName, skipped: 'could not load the rule' };
       }
       if (!row?.jdm_content) {
-        this.logger.warn(`Decision: no active rule named "${ruleName}" — skipping`);
+        this.skipped('Decision', `Decision: no active rule named "${ruleName}" — skipping`);
         return { nodeType: 'Decision', rule: ruleName, skipped: `no active rule named "${ruleName}"` };
       }
       const stored = typeof row.jdm_content === 'string' ? row.jdm_content : JSON.stringify(row.jdm_content);
@@ -1142,7 +1170,7 @@ export class WorkflowService {
       // refuses it with "missing field `content`", which names nothing a reader
       // can act on; this names the rule and why it cannot answer.
       if (this.rulesEngine.isDiagramOnly(stored)) {
-        this.logger.warn(`Decision: rule "${ruleName}" is a drawn flowchart with no conditions — skipping`);
+        this.skipped('Decision', `Decision: rule "${ruleName}" is a drawn flowchart with no conditions — skipping`);
         return {
           nodeType: 'Decision',
           rule: ruleName,
@@ -1155,7 +1183,7 @@ export class WorkflowService {
         typeof row.jdm_content === 'string' ? row.jdm_content : JSON.stringify(row.jdm_content),
       );
     } else {
-      this.logger.warn('Decision task has neither a decisionTable nor a rule — skipping');
+      this.skipped('Decision', 'Decision task has neither a decisionTable nor a rule — skipping');
       return { nodeType: 'Decision', skipped: 'no decision table and no rule configured' };
     }
 
@@ -1185,14 +1213,14 @@ export class WorkflowService {
         outputs = {};
       }
     } catch (err: any) {
-      this.logger.error(`Decision: evaluation failed — ${err?.message ?? err}`);
+      this.log.event('workflow.step.failed', { workflow: null, step: null, type: 'Decision', err });
       return { nodeType: 'Decision', skipped: `evaluation failed: ${err?.message ?? err}` };
     }
 
     if (matchedRows === 0) {
       // Not an error: a table that matches nothing is how "leave things alone"
       // is expressed. Later steps see no new variables and skip themselves.
-      this.logger.log('Decision: no row matched — nothing published');
+      this.performed('Decision', 'Decision: no row matched — nothing published');
       return { nodeType: 'Decision', matchedRows: 0, published: {} };
     }
 
@@ -1213,9 +1241,7 @@ export class WorkflowService {
       vars[key] = value;
     }
 
-    this.logger.log(
-      `Decision: matched ${matchedRows} row(s), published ${Object.keys(published).join(', ') || '(nothing)'}`,
-    );
+    this.performed('Decision', `Decision: matched ${matchedRows} row(s), published ${Object.keys(published).join(', ') || '(nothing)'}`);
     return { nodeType: 'Decision', matchedRows, published };
   }
 
@@ -1226,7 +1252,7 @@ export class WorkflowService {
   ): Promise<Record<string, unknown> | null> {
     const url = task.url?.trim();
     if (!url) {
-      this.logger.warn('REST task missing "url" — skipping');
+      this.skipped('REST', 'REST task missing "url" — skipping');
       return { nodeType: 'REST', skipped: 'no "url" configured' };
     }
 
@@ -1243,11 +1269,11 @@ export class WorkflowService {
         body,
         signal: controller.signal,
       });
-      this.logger.log(`REST: ${method} ${url} → ${response.status}`);
+      this.performed('REST', `REST: ${method} ${url} → ${response.status}`);
       return { nodeType: 'REST', url, method, status: response.status, ok: response.ok };
     } catch (err: any) {
       // A failing webhook must not fail the workflow — record it and move on.
-      this.logger.warn(`REST: ${method} ${url} failed: ${err?.message}`);
+      this.log.event('workflow.step.failed', { workflow: null, step: null, type: 'REST', err });
       return { nodeType: 'REST', url, method, error: err?.message ?? String(err) };
     } finally {
       clearTimeout(timeout);

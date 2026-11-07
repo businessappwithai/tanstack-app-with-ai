@@ -22,7 +22,7 @@
  * writes, workflow mutations, the status flip) is transactional.
  */
 
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { sql, type Kysely } from 'kysely';
 import { InjectDatabase } from '../../database/database.service.decorator';
 import { AuditAction } from '../audit/audit.types';
@@ -31,6 +31,8 @@ import { RulesService } from '../rules/rules.service';
 import type { MatchedAction } from '../rules/rules.service';
 import { WorkflowRunError, WorkflowService } from '../workflow/workflow.service';
 import { LIFECYCLE_ERROR, lifecycleOf, phaseOf, type LifecyclePhase } from '../../common/lifecycle';
+import { classify } from '../../common/errors/classify';
+import { getLogger } from '../../common/logging/logger.service';
 
 /**
  * The record's phase, as `doc_status` stores it on every table: `draft`,
@@ -93,7 +95,7 @@ export interface PromotionResult {
 
 @Injectable()
 export class EntityPromotionService {
-  private readonly logger = new Logger(EntityPromotionService.name);
+  private readonly log = getLogger('entity');
 
   constructor(
     @InjectDatabase() private readonly db: Kysely<any>,
@@ -263,9 +265,13 @@ export class EntityPromotionService {
       } catch (err: any) {
         return this.fail(base, startedAt, finaliseStep, err, entityData, actor);
       }
-      this.logger.log(
-        `${isDelete ? 'Deleted' : 'Promoted'} ${tableName}:${entityId} (no associated rules or workflows)`,
-      );
+      this.log.event('entity.promotion.completed', {
+        entity: tableName,
+        recordId: entityId,
+        operation: isDelete ? 'delete' : 'save',
+        outcome: isDelete ? 'deleted' : 'promoted',
+        steps: 'none',
+      });
       const result: PromotionResult = {
         ...base,
         ...(await this.outcome(tableName, entityId, isDelete)),
@@ -322,9 +328,13 @@ export class EntityPromotionService {
       .filter(Boolean)
       .join(' and ');
 
-    this.logger.log(
-      `${isDelete ? 'Deleted' : 'Promoted to final'} ${tableName}:${entityId} after ${summary}`,
-    );
+    this.log.event('entity.promotion.completed', {
+      entity: tableName,
+      recordId: entityId,
+      operation: isDelete ? 'delete' : 'save',
+      outcome: isDelete ? 'deleted' : 'promoted',
+      steps: summary,
+    });
     const result: PromotionResult = {
       ...base,
       ranRules: ruleNames,
@@ -388,7 +398,23 @@ export class EntityPromotionService {
     // to Error: that is a verdict on the values, and a workflow failing is not.
     const workflowFailure = err instanceof WorkflowRunError && base.operation !== 'delete';
 
-    this.logger.error(`Promotion failed for ${base.entityName}:${base.entityId} — ${failedStep}: ${error}`);
+    // A refusal is a verdict on the values, a process that failed under a rule's eye,
+    // or a database constraint (deleting a parent that still has children): the
+    // caller's problem, not the operator's emergency. Anything else is.
+    if (workflowFailure || classify(err, base.operation === 'delete' ? 'DELETE' : 'POST').status < 500) {
+      this.log.event('entity.promotion.refused', {
+        entity: base.entityName,
+        recordId: base.entityId,
+        reason: `${failedStep}: ${error}`,
+      });
+    } else {
+      this.log.event('entity.promotion.failed', {
+        entity: base.entityName,
+        recordId: base.entityId,
+        step: failedStep,
+        err,
+      });
+    }
 
     try {
       // A delete that rolled back leaves the record exactly as it was, status
@@ -403,9 +429,12 @@ export class EntityPromotionService {
       }
     } catch (statusErr: any) {
       // The record keeps its existing draft status; the response still carries the detail.
-      this.logger.error(
-        `Could not record the failure on ${base.entityName}:${base.entityId}: ${statusErr?.message ?? statusErr}`,
-      );
+      this.log.event('entity.promotion.failed', {
+        entity: base.entityName,
+        recordId: base.entityId,
+        step: 'recording the failure',
+        err: statusErr,
+      });
     }
 
     const result: PromotionResult = {

@@ -29,12 +29,12 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { DatabaseService } from '../../database/database.service';
+import { getLogger } from '../../common/logging/logger.service';
 
 /**
  * Says that this deployment has no Electric server behind the proxy.
@@ -89,7 +89,6 @@ function electricUpstream(): string | null {
 @UseGuards(JwtAuthGuard)
 @Controller('v1/shape')
 export class ElectricController {
-  private readonly logger = new Logger(ElectricController.name);
 
   constructor(private readonly databaseService: DatabaseService) {}
 
@@ -204,7 +203,6 @@ export class ElectricController {
     }
 
     const upstreamUrl = `${upstreamBase}/v1/shape?${upstreamParams.toString()}`;
-    this.logger.debug(`Electric proxy [roles=${roles.join(',')}]: ${table}`);
 
     try {
       const upstream = await fetch(upstreamUrl, {
@@ -265,7 +263,7 @@ export class ElectricController {
       const body = await upstream.arrayBuffer();
       res.status(upstream.status).headers(headers).send(Buffer.from(body));
     } catch (err) {
-      this.logger.error('Electric proxy error', err);
+      getLogger('http').event('http.proxy.failed', { target: 'electric', err });
       throw new HttpException('Electric upstream unavailable', HttpStatus.BAD_GATEWAY);
     }
   }
