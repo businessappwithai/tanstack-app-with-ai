@@ -145,9 +145,14 @@ describe("the spec and its call sites agree", () => {
         .filter((channel) => !channel.surfaces.includes("generator"))
         .map((channel) => channel.name)
     );
+    // An event can be narrower than its channel: `http` is shared, but a
+    // request the generated application refused is not one this tree serves.
+    const emittedElsewhere = (event: (typeof logSpec.events)[number]): boolean =>
+      generatedOnly.has(event.channel) ||
+      (event.surfaces !== undefined && !event.surfaces.includes("generator"));
 
     const unused = logSpec.events
-      .filter((event) => !generatedOnly.has(event.channel) && !emitted.has(event.id))
+      .filter((event) => !emittedElsewhere(event) && !emitted.has(event.id))
       .map((event) => event.id);
 
     expect(

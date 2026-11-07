@@ -33,6 +33,7 @@ interface SpecEvent {
   level: string;
   message: string;
   fields: string[];
+  surfaces?: string[];
 }
 
 interface SpecErrorCategory {
@@ -95,7 +96,10 @@ export function generatedLogSpec(): string {
       .filter((error) => error.surfaces.includes(SURFACE))
       .map(({ surfaces: _surfaces, ...error }) => error),
     channels: channels.map(({ surfaces: _surfaces, ...channel }) => channel),
-    events: spec.events.filter((event) => kept.has(event.channel)),
+    events: spec.events
+      .filter((event) => kept.has(event.channel))
+      .filter((event) => event.surfaces === undefined || event.surfaces.includes(SURFACE))
+      .map(({ surfaces: _surfaces, ...event }) => event),
   };
 
   return `${JSON.stringify(shipped, null, 2)}\n`;
@@ -113,6 +117,7 @@ export function generatedEventIds(): string[] {
   const kept = new Set(generatedChannels());
   return (canonical as unknown as Spec).events
     .filter((event) => kept.has(event.channel))
+    .filter((event) => event.surfaces === undefined || event.surfaces.includes(SURFACE))
     .map((event) => event.id);
 }
 

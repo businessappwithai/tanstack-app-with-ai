@@ -33,6 +33,9 @@ import * as nodePath from 'path';
 import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 
+import { categoryForStatus, FALLBACK_CODE } from '../errors/app-error';
+import { ERROR_CATEGORIES } from '../errors/catalogue';
+
 /* -------------------------------------------------------------------------- */
 /*  The specification                                                          */
 /* -------------------------------------------------------------------------- */
@@ -402,14 +405,33 @@ export class AppLoggerService implements NestLoggerService {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Report the two failures that otherwise leave no trace: an exception nobody
- * caught and a rejection nobody handled.
+ * Write whatever is buffered. Output is asynchronous in production (see
+ * `getRoot`), so a process that exits straight after logging its last words
+ * would lose exactly the lines that explain why.
+ */
+export function flushLogs(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!root) return resolve();
+    try {
+      root.flush(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+/**
+ * Report the failures that otherwise leave no trace: an exception nobody
+ * caught, a rejection nobody handled, and the signal that stops the process.
  *
- * Both are fatal and both exit. A process that logs the error and carries on is
- * in a state nobody reasoned about; the supervisor restarting it is the correct
- * outcome and this line is what says why. SIGTERM is recorded too — it is how
- * every orchestrator asks a container to stop, and "why did it restart" is
- * unanswerable without it.
+ * The two are not the same size of problem. An uncaught exception leaves the
+ * process in a state nobody reasoned about, so it is fatal and it exits —
+ * after the line has been written, which is the order that matters. A promise
+ * rejected with no handler is almost always one request's side effect (a
+ * notification that failed to send, a background step that threw); it is
+ * reported at error with its cause and the process keeps serving. SIGTERM is
+ * recorded too — it is how every orchestrator asks a container to stop, and
+ * "why did it restart" is unanswerable without it.
  */
 export function installProcessLogging(): void {
   const log = getLogger('app');
@@ -417,18 +439,17 @@ export function installProcessLogging(): void {
 
   process.on('uncaughtException', (err) => {
     log.event('app.uncaught', { err });
-    process.exit(1);
+    void flushLogs().then(() => process.exit(1));
   });
 
   process.on('unhandledRejection', (reason) => {
-    log.event('app.uncaught', { err: reason });
-    process.exit(1);
+    log.event('app.unhandled_rejection', { err: reason });
   });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       log.event('app.shutdown', { signal, uptimeMs: Date.now() - startedAt });
-      process.exit(0);
+      void flushLogs().then(() => process.exit(0));
     });
   }
 }
@@ -436,6 +457,18 @@ export function installProcessLogging(): void {
 /* -------------------------------------------------------------------------- */
 /*  HTTP                                                                       */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * A caller may supply its own request id, so a line here and a line in the
+ * front end can be joined up. It is written into every log line and echoed in
+ * a response header, so it is accepted only as the plain token it should be: a
+ * header value with a newline in it would otherwise forge a second log line.
+ */
+const REQUEST_ID = /^[A-Za-z0-9._:-]{8,64}$/;
+
+function acceptRequestId(supplied: unknown): string {
+  return typeof supplied === 'string' && REQUEST_ID.test(supplied) ? supplied : randomUUID();
+}
 
 /** Anything slower than this is worth a warning of its own. */
 const LATENCY_BUDGET_MS = Number(process.env.HTTP_SLOW_REQUEST_MS ?? 1000);
@@ -466,7 +499,7 @@ export function installHttpLogging(fastify: {
 
   fastify.addHook('onRequest', async (request: any, reply: any) => {
     request.__logStartedAt = Date.now();
-    request.__logRequestId = request.headers?.['x-request-id'] ?? randomUUID();
+    request.__logRequestId = acceptRequestId(request.headers?.['x-request-id']);
 
     // Everything logged for the rest of this request carries the id, without
     // any of it having to be handed one.
@@ -494,6 +527,14 @@ export function installHttpLogging(fastify: {
       requestId: request.__logRequestId ?? null,
     };
 
+    // What the exception filter decided this was. A response it never saw — a
+    // better-auth route, a 404 for a path nothing matched — is classified from
+    // its status alone.
+    const classified = request.__logClassified as { category: string; code: string } | undefined;
+    const errorCategory = classified?.category ?? categoryForStatus(status);
+    const errorCode =
+      classified?.code ?? FALLBACK_CODE[errorCategory as keyof typeof FALLBACK_CODE];
+
     if (status >= 500) {
       // The exception filter stashes what it caught, because this hook is the
       // one place that sees every response and the filter is the one place that
@@ -504,14 +545,28 @@ export function installHttpLogging(fastify: {
         status,
         durationMs,
         err: request.__logError ?? null,
+        errorCategory,
+        errorCode,
       });
     } else if (status >= 400) {
-      log.event('http.request.client_error', {
+      // The category decides how loud a refusal is. A missing record or a stale
+      // save is expected traffic and is written at info; a bad payload, a
+      // refused credential or a throttled caller is worth a warning.
+      const quiet =
+        ERROR_CATEGORIES[errorCategory as keyof typeof ERROR_CATEGORIES]?.level === 'info';
+      const fields = {
         ...base,
         status,
         durationMs,
         reason: `HTTP ${status}`,
-      });
+        errorCategory,
+        errorCode,
+      };
+      if (quiet) {
+        log.event('http.request.refused', fields);
+      } else {
+        log.event('http.request.client_error', fields);
+      }
     } else {
       log.event('http.request.completed', { ...base, status, durationMs });
     }
