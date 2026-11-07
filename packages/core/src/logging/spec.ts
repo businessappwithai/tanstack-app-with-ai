@@ -49,11 +49,47 @@ export interface RedactionPolicy {
   readonly paths: readonly string[];
 }
 
+/**
+ * How much of an error the caller is told.
+ *
+ * `message` — the error's own message (it was written for a person: a rule's
+ * wording, a validation reason). `code` — the catalogue's fixed message plus
+ * the code, so a client can branch without the server describing why access
+ * was refused. `generic` — the catalogue's fixed message and a reference only;
+ * the cause stays in the log.
+ */
+export const EXPOSURES = ["message", "code", "generic"] as const;
+
+export type ErrorExposure = (typeof EXPOSURES)[number];
+
+/** A kind of failure. Fixed, and the same in every product that reads the spec. */
+export interface ErrorCategory {
+  readonly name: string;
+  /** The HTTP statuses an error of this category may carry. */
+  readonly statuses: readonly number[];
+  /** The level the request line is written at when the response is this category. */
+  readonly level: LogLevel;
+  readonly expose: ErrorExposure;
+  readonly description: string;
+}
+
+/** One declared error: the code a client branches on, and what it means. */
+export interface ErrorDefinition {
+  readonly code: string;
+  readonly category: string;
+  readonly status: number;
+  /** The message shown when the error carries none of its own, or may not show it. */
+  readonly message: string;
+  readonly surfaces: readonly string[];
+}
+
 export interface LogSpec {
   readonly specVersion: string;
   readonly levels: Readonly<Record<LogLevel, number>>;
   readonly environments: Readonly<Record<string, EnvironmentProfile>>;
   readonly redact: RedactionPolicy;
+  readonly errorCategories: readonly ErrorCategory[];
+  readonly errors: readonly ErrorDefinition[];
   readonly channels: readonly LogChannel[];
   readonly events: readonly LogEvent[];
 }
@@ -104,6 +140,52 @@ function validate(spec: LogSpec): LogSpec {
     }
   }
 
+  const categories = new Map<string, ErrorCategory>();
+  for (const category of spec.errorCategories) {
+    if (categories.has(category.name)) problems.push(`two error categories are named ${category.name}`);
+    categories.set(category.name, category);
+
+    if (!isLevel(category.level)) {
+      problems.push(`error category ${category.name} has level ${String(category.level)}`);
+    }
+    if (!(EXPOSURES as readonly string[]).includes(category.expose)) {
+      problems.push(`error category ${category.name} exposes ${String(category.expose)}`);
+    }
+    if (category.statuses.length === 0) {
+      problems.push(`error category ${category.name} allows no status`);
+    }
+    // A caller's mistake is not the operator's emergency. Only a category that
+    // can answer 5xx may log at error, or an alert on error volume pages
+    // someone for a mistyped password.
+    const clientOnly = category.statuses.every((status) => status < 500);
+    if (clientOnly && (category.level === "error" || category.level === "fatal")) {
+      problems.push(`error category ${category.name} is 4xx-only and logs at ${category.level}`);
+    }
+    const serverSide = category.statuses.every((status) => status >= 500);
+    if (serverSide && category.level !== "error" && category.level !== "fatal") {
+      problems.push(`error category ${category.name} is 5xx-only and logs at ${category.level}`);
+    }
+  }
+
+  const codes = new Set<string>();
+  for (const error of spec.errors) {
+    if (codes.has(error.code)) problems.push(`two errors share the code ${error.code}`);
+    codes.add(error.code);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(error.code)) {
+      problems.push(`error code ${error.code} is not UPPER_SNAKE_CASE`);
+    }
+
+    const category = categories.get(error.category);
+    if (!category) {
+      problems.push(`error ${error.code} is in category ${error.category}, which is not declared`);
+    } else if (!category.statuses.includes(error.status)) {
+      problems.push(
+        `error ${error.code} answers ${error.status}, which category ${error.category} does not allow`
+      );
+    }
+    if (!error.message) problems.push(`error ${error.code} has no message`);
+  }
+
   for (const [name, profile] of Object.entries(spec.environments)) {
     if (!isConfiguredLevel(profile.level)) {
       problems.push(`environment ${name} has level ${String(profile.level)}, which is not a level`);
@@ -126,6 +208,42 @@ const EVENTS_BY_ID: ReadonlyMap<string, LogEvent> = new Map(
 const CHANNELS_BY_NAME: ReadonlyMap<string, LogChannel> = new Map(
   logSpec.channels.map((channel) => [channel.name, channel])
 );
+
+const CATEGORIES_BY_NAME: ReadonlyMap<string, ErrorCategory> = new Map(
+  logSpec.errorCategories.map((category) => [category.name, category])
+);
+
+const ERRORS_BY_CODE: ReadonlyMap<string, ErrorDefinition> = new Map(
+  logSpec.errors.map((error) => [error.code, error])
+);
+
+export function findErrorCategory(name: string): ErrorCategory | undefined {
+  return CATEGORIES_BY_NAME.get(name);
+}
+
+export function findError(code: string): ErrorDefinition | undefined {
+  return ERRORS_BY_CODE.get(code);
+}
+
+export function errorCodes(): readonly string[] {
+  return [...ERRORS_BY_CODE.keys()];
+}
+
+/**
+ * The category an HTTP status falls in when nothing more specific is known.
+ *
+ * Used to classify a plain framework exception (a bare `NotFoundException`)
+ * that carries no catalogue code. Where a status belongs to several categories
+ * the first declared wins, which is why `validation` is listed before
+ * `business_rule` for 422.
+ */
+export function categoryForStatus(status: number): ErrorCategory {
+  const found = logSpec.errorCategories.find((category) => category.statuses.includes(status));
+  if (found) return found;
+  const fallback = CATEGORIES_BY_NAME.get(status >= 500 ? "internal" : "validation");
+  if (!fallback) throw new Error("log-spec.json declares no internal or validation category");
+  return fallback;
+}
 
 export function findEvent(id: string): LogEvent | undefined {
   return EVENTS_BY_ID.get(id);
