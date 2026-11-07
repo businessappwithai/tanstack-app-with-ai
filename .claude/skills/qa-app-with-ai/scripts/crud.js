@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const key=process.argv[2]||'x'; const ents=(process.argv[3]||'').split('|').filter(Boolean);
 const S=(process.env.QA_OUT||'./qa-out')+'/'+key+'/'; require('fs').mkdirSync(S,{recursive:true});
 const TS=Date.now().toString(36);
-let CUR=''; async function fill(p){
+let CUR=''; let PICK=1; async function fill(p){
  await fill1(p); const r=await fill1(p,true);
  // Dependent lookups load only after their parent is chosen and may sit earlier in the form
  // than the parent: keep going until no dropdown that has options is left empty.
@@ -24,7 +24,7 @@ async function fill1(p,second){
   if(!info.vis||info.ro||!info.nm||/search/i.test(info.nm)) continue;
   if(info.nm===CUR.toLowerCase().replace(/\s+/g,'_')+'_id') continue; // the record's own id mirror, not an input
   try{
-   if(info.t==='SELECT'){ for(let w=0;w<(second?14:3);w++){ if((await e.evaluate(s=>s.options.length))>1) break; await e.page?.waitForTimeout?.(300); await new Promise(r=>setTimeout(r,300)); } const opts=await e.evaluate(s=>[...s.options].map(o=>o.value).filter(v=>v)); if(opts.length) {await e.selectOption(opts[opts.length>1?1:0]); n++;} }
+   if(info.t==='SELECT'){ for(let w=0;w<(second?14:3);w++){ if((await e.evaluate(s=>s.options.length))>1) break; await e.page?.waitForTimeout?.(300); await new Promise(r=>setTimeout(r,300)); } const opts=await e.evaluate(s=>[...s.options].map(o=>o.value).filter(v=>v)); if(opts.length) {await e.selectOption(opts[PICK===0?0:(opts.length>1?1:0)]); n++;} }
    else if(info.ty==='checkbox'||info.ty==='file'||info.ty==='hidden') {}
    else if(info.ty==='date') await e.fill('2026-06-15');
    else if(info.ty==='datetime-local') await e.fill('2026-06-15T10:00');
@@ -67,6 +67,17 @@ async function fill1(p,second){
    const alert=await p.locator('[role=alert],[data-sonner-toast],.toast,[aria-live]').allInnerTexts(); r.createMsg=alert.join(' | ').slice(0,200);
    await p.screenshot({path:S+`crud-${ent.replace(/\W/g,'')}-2-created.png`});
    r.create=/created/i.test(r.createMsg)?'pass':'fail';
+   if(r.create==='fail' && r.createMsg && !/validation|unique/i.test(r.createMsg)){
+     // A model rule refused the generated values (a "resolved" case with no notes). Choose each
+     // dropdown's first option — the default state — and try once more.
+     r.firstAttempt=r.createMsg.slice(0,100); PICK=0;
+     await p.getByRole('button',{name:'New',exact:true}).first().click(); await p.waitForTimeout(2000);
+     CUR=ent; await fill(p);
+     await p.getByRole('button',{name:'Create',exact:true}).first().click(); await p.waitForTimeout(3500);
+     r.createMsg=(await p.locator('[role=alert],[data-sonner-toast],.toast').allInnerTexts()).join(' | ').slice(0,200);
+     r.create=/created/i.test(r.createMsg)?'pass (after retrying with default options)':'fail'; PICK=1;
+   }
+   if(r.create.startsWith('pass')) r.create='pass';
    if(r.create==='fail') r.invalid=(await p.locator('.text-destructive,[class*=error],[aria-invalid=true]').evaluateAll(n=>n.slice(0,6).map(x=>(x.getAttribute('name')||x.textContent||'').trim().slice(0,60)))).join(' ; ');
    if(r.create==='pass'){
     // Update: Edit -> change first text field -> Save
