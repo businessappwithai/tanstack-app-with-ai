@@ -3,6 +3,8 @@
  *
  */
 
+import { getClientLogger } from "./logger";
+import { errorCategory, errorCode, errorRef, errorStatus } from "./api-error";
 import { BACKEND_PORT } from "./app-meta";
 
 // Empty is the recommended setting, in development and in production alike: it
@@ -35,151 +37,66 @@ export function setUnauthorizedCallback(cb: OnUnauthorized) {
 // Logger Utility
 // ============================================================================
 
-enum LogLevel {
-  DEBUG = 0,
-  INFO = 1,
-  WARN = 2,
-  ERROR = 3,
-}
-
+/**
+ * What the API client says about itself, through the shared client logger so
+ * `VITE_LOG_LEVEL` governs it. Method, path, status and duration only: a
+ * request body is business data and a header can be a credential, and neither
+ * is printed (the old logger printed both at debug).
+ */
 class Logger {
-  private level: LogLevel;
-  private prefix: string;
+  private readonly out = getClientLogger("api");
 
-  constructor(prefix: string = "[ApiClient]") {
-    this.prefix = prefix;
-    // Use INFO level in production, DEBUG level in development
-    this.level = import.meta.env.MODE === "production" ? LogLevel.INFO : LogLevel.DEBUG;
+  debug(message: string, context?: unknown) {
+    this.out.debug(message, context);
   }
 
-  private shouldLog(level: LogLevel): boolean {
-    return level >= this.level;
+  log(message: string, context?: unknown) {
+    this.out.info(message, context);
   }
 
-  debug(...args: unknown[]) {
-    if (this.shouldLog(LogLevel.DEBUG)) {
-      console.log(`${this.prefix} [DEBUG]`, ...args);
-    }
+  warn(message: string, context?: unknown) {
+    this.out.warn(message, context);
   }
 
-  log(...args: unknown[]) {
-    if (this.shouldLog(LogLevel.INFO)) {
-      console.log(`${this.prefix} [INFO]`, ...args);
-    }
+  error(message: string, context?: unknown) {
+    this.out.error(message, context);
   }
 
-  warn(...args: unknown[]) {
-    if (this.shouldLog(LogLevel.WARN)) {
-      console.warn(`${this.prefix} [WARN]`, ...args);
-    }
+  logRequest(method: string, url: string, _options?: unknown) {
+    this.debug(`→ ${method} ${pathOf(url)}`);
   }
 
-  error(...args: unknown[]) {
-    if (this.shouldLog(LogLevel.ERROR)) {
-      console.error(`${this.prefix} [ERROR]`, ...args);
-    }
-  }
-
-  /**
-   * Log request details
-   */
-  logRequest(method: string, url: string, options?: RequestInit & { body?: unknown }) {
-    this.debug(`→ ${method} ${url}`);
-
-    if (options?.headers) {
-      this.debug(`  Headers:`, this.sanitizeHeaders(options.headers as HeadersInit));
-    }
-
-    if (options?.body) {
-      try {
-        const bodyStr =
-          typeof options.body === "string" ? options.body : JSON.stringify(options.body);
-        if (bodyStr.length < 500) {
-          this.debug(`  Body:`, bodyStr);
-        } else {
-          this.debug(`  Body:`, bodyStr.substring(0, 500) + "... (truncated)");
-        }
-      } catch (e) {
-        this.debug(`  Body: [Unable to stringify]`);
-      }
-    }
-  }
-
-  /**
-   * Log response details
-   */
+  /** A response. 4xx is the caller's problem and reads as a warning; 5xx as an error. */
   logResponse(method: string, url: string, response: Response, duration: number) {
-    const statusEmoji = response.ok ? "✓" : "✗";
-    this.log(
-      `${statusEmoji} ${method} ${url} - ${response.status} ${response.statusText} (${duration}ms)`
-    );
-
-    if (!response.ok) {
-      this.error(`  Response failed: ${response.status} ${response.statusText}`);
-    }
+    const line = `${method} ${pathOf(url)} - ${response.status} (${duration}ms)`;
+    if (response.status >= 500) this.error(line);
+    else if (response.status >= 400) this.warn(line);
+    else this.debug(line);
   }
 
-  /**
-   * Log error details
-   */
+  /** A failed call. The envelope's code, category and ref are what to look for in the server log. */
   logError(method: string, url: string, error: unknown, duration?: number) {
     const durationStr = duration ? ` (${duration}ms)` : "";
-
     if (error instanceof Error) {
       // Network/fetch errors (ERR_CONNECTION_REFUSED, offline) — expected when backend is unavailable
-      this.warn(`✗ ${method} ${url} - ${error.message}${durationStr}`);
+      this.warn(`${method} ${pathOf(url)} - ${error.message}${durationStr}`);
       return;
     }
-
-    this.error(`✗ ${method} ${url} - Failed${durationStr}`);
-
-    if (error && typeof error === "object") {
-      if ("statusCode" in error) {
-        this.error(`  Status: ${(error as ApiError).statusCode}`);
-      }
-      if ("message" in error) {
-        this.error(`  Message: ${(error as ApiError).message}`);
-      }
-      if ("error" in error) {
-        this.error(`  Error: ${(error as ApiError).error}`);
-      }
-      if ("errors" in error && (error as ApiError).errors) {
-        this.error(`  Validation Errors:`, (error as ApiError).errors);
-      }
-      if ("details" in error && (error as ApiError).details) {
-        this.error(`  Details:`, (error as ApiError).details);
-      }
-    } else {
-      this.error(`  Unknown error:`, error);
-    }
+    this.debug(`${method} ${pathOf(url)} failed${durationStr}`, {
+      status: errorStatus(error),
+      code: errorCode(error),
+      category: errorCategory(error),
+      ref: errorRef(error),
+    });
   }
+}
 
-  /**
-   * Sanitize headers to remove sensitive information
-   */
-  private sanitizeHeaders(headers: HeadersInit): Record<string, string> {
-    const sanitized: Record<string, string> = {};
-
-    if (headers instanceof Headers) {
-      headers.forEach((value, key) => {
-        sanitized[key] = this.shouldSanitizeHeader(key) ? "[REDACTED]" : value;
-      });
-    } else if (Array.isArray(headers)) {
-      headers.forEach(([key, value]) => {
-        sanitized[key] = this.shouldSanitizeHeader(key) ? "[REDACTED]" : value;
-      });
-    } else {
-      Object.entries(headers).forEach(([key, value]) => {
-        sanitized[key] = this.shouldSanitizeHeader(key) ? "[REDACTED]" : value;
-      });
-    }
-
-    return sanitized;
-  }
-
-  private shouldSanitizeHeader(key: string): boolean {
-    const sensitiveHeaders = ["authorization", "cookie", "x-api-key"];
-    return sensitiveHeaders.includes(key.toLowerCase());
+/** The path of a URL, without its query string: the query can carry what someone searched for. */
+function pathOf(url: string): string {
+  try {
+    return new URL(url, "http://localhost").pathname;
+  } catch {
+    return url;
   }
 }
 
@@ -203,6 +120,8 @@ export interface ApiError {
   error: string;
   timestamp: string;
   path: string;
+  /** The request id: quote it to find this request in the server's log. */
+  ref?: string;
   requestId?: string;
   details?: Record<string, unknown>;
   errors?: Record<string, string[] | string>; // Field-level validation errors from backend
@@ -225,7 +144,7 @@ class ApiClient {
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
     this.logger = new Logger();
-    this.logger.log(`ApiClient initialized with baseUrl: ${baseUrl}`);
+    this.logger.debug(`ApiClient initialized with baseUrl: ${baseUrl}`);
   }
 
   setAuthToken(token: string | null) {
@@ -315,6 +234,11 @@ class ApiClient {
       const data = await response.json();
 
       if (!response.ok) {
+        // The header is the request id even when the body is not our envelope
+        // (a proxy's own error page, say).
+        if (data && typeof data === "object" && !data.ref) {
+          data.ref = response.headers.get("x-request-id") ?? data.requestId ?? undefined;
+        }
         this.logger.logError(method, url, data, duration);
         throw data as ApiError;
       }
@@ -329,6 +253,7 @@ class ApiClient {
         error: "Request Failed",
         timestamp: new Date().toISOString(),
         path: response.url,
+        ref: response.headers.get("x-request-id") ?? undefined,
       } as ApiError;
       this.logger.logError(method, url, error, duration);
       throw error;

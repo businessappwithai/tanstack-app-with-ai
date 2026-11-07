@@ -493,6 +493,14 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
     const csvContent = await this.component("src/lib/csv.ts");
     await fs.writeFile(path.join(outputDir, "src/lib/csv.ts"), csvContent);
 
+    // How the browser logs, and how it reads what the API says went wrong. The API
+    // client, the query provider and the root error component all import them, so
+    // leaving them out fails the generated build.
+    for (const file of ["logger.ts", "api-error.ts"]) {
+      const content = await this.component(`src/lib/${file}`);
+      await fs.writeFile(path.join(outputDir, "src/lib", file), content);
+    }
+
     // A window label's plural, for list titles and breadcrumbs. The list and record
     // shells both import it, so leaving it out fails the generated build.
     const pluralLabelContent = await this.component("src/lib/plural-label.ts");

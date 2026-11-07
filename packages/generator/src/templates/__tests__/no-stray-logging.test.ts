@@ -26,7 +26,7 @@ function walk(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full, found);
-    else if (/\.ts(\.hbs)?$/.test(entry)) found.push(full);
+    else if (/\.tsx?(\.hbs)?$/.test(entry)) found.push(full);
   }
   return found;
 }
@@ -78,6 +78,27 @@ describe("server code in a generated backend", () => {
   it("keeps main.ts to a single console, the last resort before the logger exists", () => {
     const main = readFileSync(join(BACKEND, "main.ts.hbs"), "utf-8");
     expect(main.match(/\bconsole\.(log|info|warn|error|debug)\(/g)).toHaveLength(1);
+  });
+});
+
+describe("browser code in a generated front end", () => {
+  const FRONTEND = join(import.meta.dirname, "../../../templates/tanstack-start-nestjs/frontend/src");
+  const frontendFiles = walk(FRONTEND);
+
+  // The logger writes the console; the two proxies run on the front end's own
+  // server, where there is no browser to report to and no backend logger.
+  const ALLOWED = [/^lib\/logger\.ts$/, /^lib\/api-proxy\.ts$/, /^lib\/copilot-runtime\.ts$/];
+
+  it("prints through the client logger, never console.* directly", () => {
+    const offenders = frontendFiles
+      .filter((file) => !ALLOWED.some((allowed) => allowed.test(relative(FRONTEND, file))))
+      .filter((file) =>
+        readFileSync(file, "utf-8")
+          .split("\n")
+          .some((line) => /\bconsole\.(log|info|warn|error|debug)\(/.test(line) && !/^\s*(\*|\/\/)/.test(line))
+      )
+      .map((file) => relative(FRONTEND, file));
+    expect(offenders).toEqual([]);
   });
 });
 

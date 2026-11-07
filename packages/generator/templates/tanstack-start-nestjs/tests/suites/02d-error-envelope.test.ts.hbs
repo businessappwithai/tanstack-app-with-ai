@@ -1,0 +1,153 @@
+/**
+ * What the API says when something goes wrong.
+ *
+ * Every failure is one envelope: the HTTP status, a `message`, and in
+ * `details` a catalogue `code` and a `category` that says what *kind* of
+ * failure it is. A `ref` — the request's id, also in the `x-request-id`
+ * header — is what a person quotes to find that request in the server's log.
+ * The front end branches on the code and the category, and prints the ref,
+ * so this suite holds all three to what the API actually sends:
+ *
+ *   - a missing thing is a 404 `not_found`, a stale save a 409 `conflict`
+ *     with the code the form recognises, an anonymous caller a 401
+ *     `authentication`;
+ *   - `ref` equals the response header, on a success as well as a failure;
+ *   - a request id is accepted from the caller only when it is a plain token,
+ *     because it is written into a log line and echoed in a header;
+ *   - the route the browser reports its errors to accepts a well-formed
+ *     report, refuses a malformed one, and refuses an oversize one.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import { entities, firstTextField, harness, HttpClient } from "../harness/index.ts";
+
+interface Envelope {
+  statusCode?: number;
+  message?: string | string[];
+  ref?: string;
+  requestId?: string;
+  details?: { code?: string; category?: string };
+}
+
+describe("the error envelope", () => {
+  beforeAll(async () => {
+    await harness.setup();
+  });
+
+  afterAll(async () => {
+    await harness.teardown();
+  });
+
+  it("answers an entity that does not exist with a 404 not_found", async () => {
+    const response = await harness.client.get<Envelope>("/bus/no_such_entity_anywhere", {
+      allowFailure: true,
+    });
+    expect(response.status).toBe(404);
+    expect(response.data.details?.category).toBe("not_found");
+    expect(response.data.details?.code).toBeTruthy();
+  });
+
+  it("answers an anonymous caller with a 401 authentication", async () => {
+    const entity = entities[0];
+    if (!entity) return;
+    const anonymous = new HttpClient();
+    const response = await anonymous.get<Envelope>(`/bus/${entity.route}`, { allowFailure: true });
+    expect(response.status).toBe(401);
+    expect(response.data.details?.category).toBe("authentication");
+    expect(response.data.details?.code).toBe("UNAUTHENTICATED");
+  });
+
+  it("puts the request id in the body and in the x-request-id header, and they agree", async () => {
+    const response = await harness.client.get<Envelope>("/bus/no_such_entity_anywhere", {
+      allowFailure: true,
+    });
+    const header = response.headers.get("x-request-id");
+    expect(header).toBeTruthy();
+    expect(response.data.ref).toBe(header);
+    expect(response.data.requestId).toBe(header);
+  });
+
+  it("keeps a plain caller-supplied request id and replaces one that is not", async () => {
+    const plain = await harness.client.get<Envelope>("/bus/no_such_entity_anywhere", {
+      allowFailure: true,
+      headers: { "x-request-id": "e2e-request-id-0001" },
+    });
+    expect(plain.headers.get("x-request-id")).toBe("e2e-request-id-0001");
+    expect(plain.data.ref).toBe("e2e-request-id-0001");
+
+    const odd = await harness.client.get<Envelope>("/bus/no_such_entity_anywhere", {
+      allowFailure: true,
+      headers: { "x-request-id": "x y" },
+    });
+    expect(odd.headers.get("x-request-id")).not.toBe("x y");
+    expect(odd.headers.get("x-request-id")).toMatch(/^[A-Za-z0-9._:-]{8,64}$/);
+  });
+
+  it("names a stale save a conflict with the code the form recognises", async () => {
+    for (const entity of entities) {
+      const text = firstTextField(entity);
+      if (!text) continue;
+      const created = (await harness.createWithParents(entity)) as { id?: string; version?: number } | null;
+      if (!created?.id) continue;
+      const opened = Number(created.version);
+      const path = `/bus/${entity.route}/${created.id}`;
+      const first = await harness.client.patch(
+        path,
+        { [text.name]: `e2e-envelope-${Date.now().toString(36)}` },
+        { headers: { "If-Match": `"${opened}"` }, allowFailure: true }
+      );
+      if (!first.ok) continue; // the model's own rules may refuse any edit here
+      const stale = await harness.client.patch<Envelope>(
+        path,
+        { [text.name]: `e2e-envelope-stale-${Date.now().toString(36)}` },
+        { headers: { "If-Match": `"${opened}"` }, allowFailure: true }
+      );
+      expect(stale.status).toBe(409);
+      expect(stale.data.details?.code).toBe("VERSION_CONFLICT");
+      expect(stale.data.details?.category).toBe("conflict");
+      return;
+    }
+  });
+
+  describe("the route the browser reports to", () => {
+    const report = (body: unknown) =>
+      harness.client.post<Envelope>("/client-logs", body, { allowFailure: true });
+
+    it("accepts a well-formed report", async () => {
+      const response = await report({
+        level: "error",
+        source: "e2e",
+        message: "a report from the end-to-end suite",
+        url: "https://example.test/dashboard?search=private",
+      });
+      expect(response.status).toBe(204);
+    });
+
+    it("refuses a report with no message or an unknown level", async () => {
+      const noMessage = await report({ level: "error" });
+      expect(noMessage.status).toBe(400);
+      expect(noMessage.data.details?.category).toBe("validation");
+
+      const badLevel = await report({ level: "fatal", message: "x" });
+      expect(badLevel.status).toBe(400);
+    });
+
+    it("refuses an oversize report", async () => {
+      const response = await report({ level: "error", message: "a".repeat(9000) });
+      expect(response.status).toBe(413);
+    });
+
+    it("refuses an anonymous report", async () => {
+      const anonymous = new HttpClient();
+      const response = await anonymous.post<Envelope>(
+        "/client-logs",
+        { level: "error", message: "x" },
+        { allowFailure: true }
+      );
+      expect(response.status).toBe(401);
+    });
+  });
+});

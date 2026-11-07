@@ -30,6 +30,9 @@ import {
   SYNC_ENABLED,
   whenSysCollectionsReady,
 } from "@/lib/sys-collections";
+import { getClientLogger } from "@/lib/logger";
+
+const log = getClientLogger("electric");
 
 /* -------------------------------------------------------------------------- */
 /*  Context                                                                    */
@@ -102,10 +105,7 @@ export function ElectricProvider({ children, role }: ElectricProviderProps) {
       } catch (err) {
         if (cancelled) return;
         const failure = err instanceof Error ? err : new Error(String(err));
-        console.warn(
-          "[ElectricProvider] dictionary sync unavailable, falling back to HTTP:",
-          failure.message
-        );
+        log.warn("dictionary sync unavailable, falling back to HTTP", { reason: failure.message });
         setError(failure);
         setIsSynced(false);
       } finally {

@@ -13328,6 +13328,12 @@ var log_spec_default = {
       description: "The model-context assistant's index of this application's model.",
       level: "info",
       surfaces: ["generated"]
+    },
+    {
+      name: "client",
+      description: "What the browser tells the server about itself: render errors, unhandled rejections, failed queries. Reported, never stored.",
+      level: "info",
+      surfaces: ["generated"]
     }
   ],
   events: [
@@ -14036,6 +14042,20 @@ var log_spec_default = {
       message: "Email delivery is not configured; the email was not sent",
       fields: ["kind", "userId"],
       surfaces: ["generated"]
+    },
+    {
+      id: "client.error.reported",
+      channel: "client",
+      level: "warn",
+      message: "Browser reported an error",
+      fields: ["source", "message", "url", "component", "code", "ref", "stack", "userId"]
+    },
+    {
+      id: "client.report.received",
+      channel: "client",
+      level: "info",
+      message: "Browser reported a message",
+      fields: ["level", "source", "message", "url", "component", "userId"]
     }
   ]
 };
@@ -16557,6 +16577,7 @@ class NestJsBackendGenerator extends BaseGenerator {
     await this.generateBusEntities(outputDir, context);
     await this.generateAuditModule(outputDir);
     await this.generateNotificationsModule(outputDir);
+    await this.generateClientLogsModule(outputDir);
     await this.generateWorkflowDefinitionsModule(outputDir);
     await this.generateModelContextModule(outputDir, context);
     await this.generateMigrations(outputDir, context);
@@ -16606,6 +16627,7 @@ class NestJsBackendGenerator extends BaseGenerator {
       "src/modules/rules/jdm",
       "src/modules/audit",
       "src/modules/notifications",
+      "src/modules/client-logs",
       "src/modules/workflow",
       "src/modules/workflow-definitions",
       "src/trigger",
@@ -18104,6 +18126,18 @@ export async function seed(db: Kysely<any>): Promise<void> {
       }
     }
   }
+  async generateClientLogsModule(outputDir) {
+    const templateDir = join(resolveTemplateDir("tanstack-start-nestjs/backend"), "src/modules/client-logs");
+    const outDir = join(outputDir, "src/modules/client-logs");
+    await mkdir(outDir, { recursive: true });
+    for (const file of [
+      "client-log-rules.ts",
+      "client-logs.controller.ts",
+      "client-logs.module.ts"
+    ]) {
+      await copyFile(join(templateDir, file), join(outDir, file));
+    }
+  }
   async generateNotificationsModule(outputDir) {
     const templateDir = join(resolveTemplateDir("tanstack-start-nestjs/backend"), "src/modules/notifications");
     const notificationsOutputDir = join(outputDir, "src/modules/notifications");
@@ -18521,6 +18555,10 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     await writeFile(join(outputDir, "src/lib/api-client.ts"), apiClientContent);
     const csvContent = await this.component("src/lib/csv.ts");
     await writeFile(join(outputDir, "src/lib/csv.ts"), csvContent);
+    for (const file of ["logger.ts", "api-error.ts"]) {
+      const content = await this.component(`src/lib/${file}`);
+      await writeFile(join(outputDir, "src/lib", file), content);
+    }
     const pluralLabelContent = await this.component("src/lib/plural-label.ts");
     await writeFile(join(outputDir, "src/lib/plural-label.ts"), pluralLabelContent);
     const versionConflictContent = await this.component("src/lib/version-conflict.ts");
@@ -19139,6 +19177,7 @@ var SHARED_SUITES = [
   "02-dictionary.test.ts",
   "02b-dictionary-layout.test.ts",
   "02c-dictionary-references.test.ts",
+  "02d-error-envelope.test.ts",
   "04-bulk-seed.test.ts",
   "06-rules-workflow.test.ts",
   "06b-workflow-transitions.test.ts",

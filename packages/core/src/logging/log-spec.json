@@ -198,6 +198,12 @@
       "description": "The model-context assistant's index of this application's model.",
       "level": "info",
       "surfaces": ["generated"]
+    },
+    {
+      "name": "client",
+      "description": "What the browser tells the server about itself: render errors, unhandled rejections, failed queries. Reported, never stored.",
+      "level": "info",
+      "surfaces": ["generated"]
     }
   ],
   "events": [
@@ -906,6 +912,20 @@
       "message": "Email delivery is not configured; the email was not sent",
       "fields": ["kind", "userId"],
       "surfaces": ["generated"]
+    },
+    {
+      "id": "client.error.reported",
+      "channel": "client",
+      "level": "warn",
+      "message": "Browser reported an error",
+      "fields": ["source", "message", "url", "component", "code", "ref", "stack", "userId"]
+    },
+    {
+      "id": "client.report.received",
+      "channel": "client",
+      "level": "info",
+      "message": "Browser reported a message",
+      "fields": ["level", "source", "message", "url", "component", "userId"]
     }
   ]
 }
