@@ -213,6 +213,14 @@
       "fields": ["signal", "uptimeMs"]
     },
     {
+      "id": "app.unhandled_rejection",
+      "channel": "app",
+      "level": "error",
+      "message": "Unhandled promise rejection",
+      "fields": ["err"],
+      "surfaces": ["generated"]
+    },
+    {
       "id": "app.uncaught",
       "channel": "app",
       "level": "fatal",
@@ -231,14 +239,22 @@
       "channel": "http",
       "level": "warn",
       "message": "Request rejected",
-      "fields": ["method", "path", "status", "durationMs", "requestId", "reason"]
+      "fields": ["method", "path", "status", "durationMs", "requestId", "reason", "errorCategory", "errorCode"]
+    },
+    {
+      "id": "http.request.refused",
+      "channel": "http",
+      "level": "info",
+      "message": "Request refused",
+      "fields": ["method", "path", "status", "durationMs", "requestId", "reason", "errorCategory", "errorCode"],
+      "surfaces": ["generated"]
     },
     {
       "id": "http.request.failed",
       "channel": "http",
       "level": "error",
       "message": "Request failed",
-      "fields": ["method", "path", "status", "durationMs", "requestId", "err"]
+      "fields": ["method", "path", "status", "durationMs", "requestId", "err", "errorCategory", "errorCode"]
     },
     {
       "id": "http.request.slow",

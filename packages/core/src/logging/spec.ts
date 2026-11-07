@@ -37,6 +37,12 @@ export interface LogEvent {
   readonly level: LogLevel;
   readonly message: string;
   readonly fields: readonly string[];
+  /**
+   * Where the event is emitted, when that is narrower than its channel's
+   * surfaces. A channel such as `http` is shared by the modelling tool and the
+   * generated application, but some events only the latter can produce.
+   */
+  readonly surfaces?: readonly string[];
 }
 
 export interface EnvironmentProfile {

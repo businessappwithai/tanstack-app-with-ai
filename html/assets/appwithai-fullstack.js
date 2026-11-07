@@ -13343,6 +13343,14 @@ var log_spec_default = {
       fields: ["signal", "uptimeMs"]
     },
     {
+      id: "app.unhandled_rejection",
+      channel: "app",
+      level: "error",
+      message: "Unhandled promise rejection",
+      fields: ["err"],
+      surfaces: ["generated"]
+    },
+    {
       id: "app.uncaught",
       channel: "app",
       level: "fatal",
@@ -13361,14 +13369,22 @@ var log_spec_default = {
       channel: "http",
       level: "warn",
       message: "Request rejected",
-      fields: ["method", "path", "status", "durationMs", "requestId", "reason"]
+      fields: ["method", "path", "status", "durationMs", "requestId", "reason", "errorCategory", "errorCode"]
+    },
+    {
+      id: "http.request.refused",
+      channel: "http",
+      level: "info",
+      message: "Request refused",
+      fields: ["method", "path", "status", "durationMs", "requestId", "reason", "errorCategory", "errorCode"],
+      surfaces: ["generated"]
     },
     {
       id: "http.request.failed",
       channel: "http",
       level: "error",
       message: "Request failed",
-      fields: ["method", "path", "status", "durationMs", "requestId", "err"]
+      fields: ["method", "path", "status", "durationMs", "requestId", "err", "errorCategory", "errorCode"]
     },
     {
       id: "http.request.slow",
@@ -13676,10 +13692,48 @@ function generatedLogSpec() {
     errorCategories: spec.errorCategories,
     errors: spec.errors.filter((error) => error.surfaces.includes(SURFACE)).map(({ surfaces: _surfaces, ...error }) => error),
     channels: channels.map(({ surfaces: _surfaces, ...channel }) => channel),
-    events: spec.events.filter((event) => kept.has(event.channel))
+    events: spec.events.filter((event) => kept.has(event.channel)).filter((event) => event.surfaces === undefined || event.surfaces.includes(SURFACE)).map(({ surfaces: _surfaces, ...event }) => event)
   };
   return `${JSON.stringify(shipped, null, 2)}
 `;
+}
+function generatedErrorCatalogue() {
+  const spec = log_spec_default;
+  const errors = spec.errors.filter((error) => error.surfaces.includes(SURFACE));
+  const categories = spec.errorCategories;
+  const categoryUnion = categories.map((category, index) => `  | ${JSON.stringify(category.name)}${index === categories.length - 1 ? ";" : ""}`);
+  const categoryRows = categories.map((category) => `  ${category.name}: { level: ${JSON.stringify(category.level)}, ` + `expose: ${JSON.stringify(category.expose)}, ` + `statuses: ${JSON.stringify(category.statuses)} },`);
+  const codeRows = errors.map((error) => `  ${error.code}: { category: ${JSON.stringify(error.category)}, ` + `status: ${error.status}, message: ${JSON.stringify(error.message)} },`);
+  return [
+    "/**",
+    " * The errors this application can raise, and what each one is worth.",
+    " *",
+    " * Generated from the APPWITHAI log specification — do not edit by hand. A code",
+    " * names its category, its HTTP status and the message a caller is shown when",
+    " * the error may not show its own. The category decides the level the request",
+    " * is logged at and how much of the error leaves the server.",
+    " */",
+    "",
+    "export type ErrorCategory =",
+    ...categoryUnion,
+    "",
+    'export type ErrorExposure = "message" | "code" | "generic";',
+    "",
+    "export const ERROR_CATEGORIES: Record<",
+    "  ErrorCategory,",
+    '  { level: "warn" | "info" | "error" | "fatal"; expose: ErrorExposure; statuses: number[] }',
+    "> = {",
+    ...categoryRows,
+    "};",
+    "",
+    "export const ERROR_CATALOGUE = {",
+    ...codeRows,
+    "} as const satisfies Record<string, { category: ErrorCategory; status: number; message: string }>;",
+    "",
+    "export type ErrorCode = keyof typeof ERROR_CATALOGUE;",
+    ""
+  ].join(`
+`);
 }
 
 // language/state-field.ts
@@ -16170,6 +16224,7 @@ class NestJsBackendGenerator extends BaseGenerator {
   }
   async createAdditionalDirectories(outputDir) {
     const dirs = [
+      "src/common/errors",
       "src/common/filters",
       "src/common/guards",
       "src/common/interceptors",
@@ -16424,6 +16479,11 @@ class NestJsBackendGenerator extends BaseGenerator {
     }
     await mkdir(join(outputDir, "src/common/logging"), { recursive: true });
     await writeFile(join(outputDir, "src/common/logging/log-spec.json"), generatedLogSpec());
+    await mkdir(join(outputDir, "src/common/errors"), { recursive: true });
+    await writeFile(join(outputDir, "src/common/errors/catalogue.ts"), generatedErrorCatalogue());
+    for (const file of ["app-error.ts", "classify.ts"]) {
+      await copyFile(join(this.resolvedTemplateDir, "src/common/errors", file), join(outputDir, "src/common/errors", file));
+    }
     try {
       const publicDecoratorContent = await this.renderTemplate("src/modules/auth/decorators/public.decorator.ts.hbs", context);
       await writeFile(join(outputDir, "src/modules/auth/decorators/public.decorator.ts"), publicDecoratorContent);

@@ -2,146 +2,20 @@
  * HTTP Exception Filter
  *
  * Generated: {{now}}
+ *
+ * The one place an exception becomes a response. It does not log: the Fastify
+ * `onResponse` hook in common/logging writes the single `http.request.*` line
+ * for every request, including the ones a guard rejected before any handler
+ * ran. This filter's job is to say *what* failed and hand that to the hook.
+ *
+ * What it decides lives in `../errors/classify.ts`, which has no Fastify in it
+ * and is tested with plain objects.
  */
 
-import {
-  ExceptionFilter,
-  Catch,
-  ArgumentsHost,
-  HttpException,
-  HttpStatus,
-  Logger,
-} from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
-/**
- * A database driver error, as `pg` and the SQLite driver report one.
- *
- * `code` is the SQLSTATE for Postgres ('23505', …) or a `SQLITE_CONSTRAINT*`
- * string. `detail` is where Postgres names the offending columns.
- */
-interface DriverError {
-  code?: string;
-  detail?: string;
-  constraint?: string;
-  table?: string;
-  column?: string;
-  message?: string;
-}
-
-/** `Key (smiles)=(CC(=O)O) already exists.` → `smiles` */
-function columnsFromDetail(detail?: string): string | null {
-  const named = /^Key \(([^)]+)\)=/.exec(detail ?? "");
-  return named?.[1] ?? null;
-}
-
-/** Turn a snake_case column list into something readable. */
-function humanize(columns: string): string {
-  return columns
-    .split(/\s*,\s*/)
-    .map((c) => c.trim().replace(/_/g, " "))
-    .join(" and ");
-}
-
-/**
- * Map a database constraint violation onto the status it actually deserves.
- *
- * These reach the filter as plain `Error`s, so without this every one of them
- * was reported as a 500 — telling the caller the server broke when in fact
- * their payload conflicted with data that was already there. The create path in
- * BusService mapped unique violations itself, but nothing else did: an update,
- * a lifecycle hook, a rule action or a workflow step hitting the same
- * constraint still produced a 500.
- *
- * Values are deliberately never echoed back — only column names — since the
- * conflicting value can be someone else's data.
- */
-function mapDatabaseError(
-  error: DriverError,
-  method: string,
-): { status: number; message: string; error: string } | null {
-  const code = error.code ?? "";
-  const columns = columnsFromDetail(error.detail);
-  const where = columns ? ` (${humanize(columns)})` : "";
-
-  // Unique violation. SQLite reports the whole family under one code, and the
-  // driver only distinguishes them in the message.
-  if (
-    code === "23505" ||
-    code === "SQLITE_CONSTRAINT_UNIQUE" ||
-    code === "SQLITE_CONSTRAINT_PRIMARYKEY" ||
-    (code === "SQLITE_CONSTRAINT" && /UNIQUE constraint failed/i.test(error.message ?? ""))
-  ) {
-    return {
-      status: HttpStatus.CONFLICT,
-      message: `A record with the same value${where} already exists.`,
-      error: "Conflict",
-    };
-  }
-
-  // Foreign key. Deleting a parent that still has children is a conflict;
-  // writing a reference to something that is not there is a bad request. The
-  // driver reports both the same way, so the verb is what separates them.
-  if (code === "23503" || code === "SQLITE_CONSTRAINT_FOREIGNKEY") {
-    return method === "DELETE"
-      ? {
-          status: HttpStatus.CONFLICT,
-          message: "This record is still referenced by other records.",
-          error: "Conflict",
-        }
-      : {
-          status: HttpStatus.BAD_REQUEST,
-          message: `A referenced record${where} does not exist.`,
-          error: "Bad Request",
-        };
-  }
-
-  if (code === "23502" || code === "SQLITE_CONSTRAINT_NOTNULL") {
-    const field = error.column ? ` (${humanize(error.column)})` : where;
-    return {
-      status: HttpStatus.BAD_REQUEST,
-      message: `A required field${field} was missing.`,
-      error: "Bad Request",
-    };
-  }
-
-  if (code === "23514" || code === "SQLITE_CONSTRAINT_CHECK") {
-    return {
-      status: HttpStatus.BAD_REQUEST,
-      message: `A value${where} failed a database constraint.`,
-      error: "Bad Request",
-    };
-  }
-
-  if (code === "23P01") {
-    return {
-      status: HttpStatus.CONFLICT,
-      message: `A record with an overlapping value${where} already exists.`,
-      error: "Conflict",
-    };
-  }
-
-  // Value too long for its column.
-  if (code === "22001") {
-    return {
-      status: HttpStatus.BAD_REQUEST,
-      message: "A value was too long for its column.",
-      error: "Bad Request",
-    };
-  }
-
-  // Malformed input for the column type — a non-uuid where a uuid is expected,
-  // a word where a number is expected.
-  if (code === "22P02" || code === "22007" || code === "22008") {
-    return {
-      status: HttpStatus.BAD_REQUEST,
-      message: "A value was not valid for its column type.",
-      error: "Bad Request",
-    };
-  }
-
-  return null;
-}
+import { classify } from '../errors/classify';
 
 export interface ErrorResponse {
   statusCode: number;
@@ -149,136 +23,45 @@ export interface ErrorResponse {
   error: string;
   timestamp: string;
   path: string;
+  /** The request id. Quote it to find this request in the logs. */
+  ref?: string;
+  /** Same value as `ref`, kept for clients written before `ref` existed. */
   requestId?: string;
-  details?: any;
+  /** Always carries `code` and `category`; may carry more, never a cause. */
+  details: Record<string, unknown>;
   errors?: string[] | Record<string, string[]>;
 }
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger('ExceptionFilter');
-
   catch(exception: unknown, host: ArgumentsHost) {
-    const methodName = 'catch';
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<FastifyReply>();
     const request = ctx.getRequest<FastifyRequest>();
 
-    // Handed to the `onResponse` hook in common/logging, which is the one place
-    // that sees every response — including the ones a guard rejected before any
-    // of this ran. That hook writes the single `http.request.*` line for this
-    // request; the error is stashed here because this is the one place that
-    // sees *it*.
+    const classified = classify(exception, request.method);
+
+    // Handed to the `onResponse` hook, which is the one place that sees every
+    // response. The exception goes with it so a 5xx line carries its stack;
+    // the classification is what chooses the event, the level and the
+    // `errorCategory` / `errorCode` fields.
     (request as any).__logError = exception;
+    (request as any).__logClassified = { category: classified.category, code: classified.code };
 
-    // This method used to write about twenty `error` lines per exception,
-    // including the entire request body. Two things were wrong with that. A
-    // routine 401 produced a wall of red for a non-event, so the lines that
-    // mattered were unfindable. And the body of a POST is business data — on a
-    // sign-up or a password change it is a credential — which is now going to a
-    // log collector and staying there. The structured line the hook writes,
-    // plus the one below, say everything those twenty did except the parts that
-    // should never have been logged.
-
-    let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message: string | string[] = 'Internal server error';
-    let error = 'Internal Server Error';
-    let details: any = undefined;
-    let errors: string[] | Record<string, string[]> | undefined = undefined;
-
-    if (exception instanceof HttpException) {
-      status = exception.getStatus();
-      const exceptionResponse = exception.getResponse();
-
-      if (typeof exceptionResponse === 'string') {
-        message = exceptionResponse;
-        // `new HttpException('text', 403)` carries no `error` of its own, and the
-        // default above would label a 403 "Internal Server Error".
-        error = this.getErrorName(status);
-      } else if (typeof exceptionResponse === 'object') {
-        const responseObj = exceptionResponse as any;
-        message = responseObj.message || message;
-        error = responseObj.error || this.getErrorName(status);
-        details = responseObj.details;
-        errors = responseObj.errors;
-
-      }
-    } else if (exception instanceof Error) {
-      // A constraint violation is the caller's problem, not the server's.
-      const mapped = mapDatabaseError(exception as unknown as DriverError, request.method);
-      if (mapped) {
-        status = mapped.status;
-        message = mapped.message;
-        error = mapped.error;
-        details = { constraint: (exception as any).constraint, table: (exception as any).table };
-        this.logger.warn(
-          `[${methodName}] Database constraint (${(exception as any).code}) → ${status}: ${message}`,
-        );
-      } else {
-        message = exception.message;
-      }
-    }
+    const ref = (request as any).__logRequestId ?? request.id;
 
     const errorResponse: ErrorResponse = {
-      statusCode: status,
-      message,
-      error,
+      statusCode: classified.status,
+      message: classified.message,
+      error: classified.error,
       timestamp: new Date().toISOString(),
       path: request.url,
-      requestId: request.id,
-      ...(details && { details }),
-      ...(errors && { errors }),
+      ref,
+      requestId: ref,
+      details: classified.details,
+      ...(classified.errors && { errors: classified.errors }),
     };
 
-    // A 5xx is the server's fault and gets a stack; a 4xx is the caller's and
-    // gets a line. Both are also covered by the `http.request.*` event the
-    // response hook writes — this one carries the message the caller was given,
-    // which is what someone reading a support ticket is holding.
-    if (status >= 500) {
-      this.logger.error(
-        `${request.method} ${request.url} → ${status}: ${message}`,
-        exception instanceof Error ? exception.stack : undefined,
-      );
-    } else {
-      this.logger.warn(`${request.method} ${request.url} → ${status}: ${message}`);
-    }
-
-    response.status(status).send(errorResponse);
-  }
-
-  /**
-   * Sanitize headers to remove sensitive information
-   */
-  private sanitizeHeaders(headers: any): any {
-    const sanitized = { ...headers };
-
-    // Remove sensitive headers from logs
-    const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key'];
-    sensitiveHeaders.forEach(header => {
-      if (sanitized[header]) {
-        sanitized[header] = '[REDACTED]';
-      }
-    });
-
-    return sanitized;
-  }
-
-  private getErrorName(status: number): string {
-    const errorNames: Record<number, string> = {
-      400: 'Bad Request',
-      401: 'Unauthorized',
-      403: 'Forbidden',
-      404: 'Not Found',
-      405: 'Method Not Allowed',
-      409: 'Conflict',
-      412: 'Precondition Failed',
-      422: 'Unprocessable Entity',
-      429: 'Too Many Requests',
-      500: 'Internal Server Error',
-      502: 'Bad Gateway',
-      503: 'Service Unavailable',
-    };
-
-    return errorNames[status] || 'Unknown Error';
+    response.status(classified.status).send(errorResponse);
   }
 }

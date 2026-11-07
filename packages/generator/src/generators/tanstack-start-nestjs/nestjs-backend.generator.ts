@@ -27,7 +27,7 @@ import {
   type Relationship,
 } from "@appwithai/core/types";
 import { type CompiledHook, HOOK_CONTRACTS, hooksByEntity } from "../../hooks";
-import { generatedLogSpec } from "../../logging/generated-spec";
+import { generatedErrorCatalogue, generatedLogSpec } from "../../logging/generated-spec";
 import type { EntityCategory } from "../../parsers/category.parser";
 import { type CompiledRbac, hasRbacRules, rbacRoleNames } from "../../rbac";
 import { deriveAccess } from "../../rbac/roles";
@@ -326,6 +326,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
          never written, and creating it left every generated application with
          an empty directory. The auth decorators live under
          `src/modules/auth/decorators`, which is created with that module. */
+      "src/common/errors",
       "src/common/filters",
       "src/common/guards",
       "src/common/interceptors",
@@ -745,6 +746,21 @@ export class NestJsBackendGenerator extends BaseGenerator {
       path.join(outputDir, "src/common/logging/log-spec.json"),
       generatedLogSpec()
     );
+
+    // The errors the application can raise. The catalogue is derived from the
+    // same spec as log-spec.json, so a code means one thing in the log and in the
+    // response; the two modules beside it are plain TypeScript and are copied.
+    await fs.mkdir(path.join(outputDir, "src/common/errors"), { recursive: true });
+    await fs.writeFile(
+      path.join(outputDir, "src/common/errors/catalogue.ts"),
+      generatedErrorCatalogue()
+    );
+    for (const file of ["app-error.ts", "classify.ts"]) {
+      await fs.copyFile(
+        path.join(this.resolvedTemplateDir, "src/common/errors", file),
+        path.join(outputDir, "src/common/errors", file)
+      );
+    }
 
     // Auth module decorators and guards (in module path for BetterAuth integration)
     try {
