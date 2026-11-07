@@ -1930,6 +1930,13 @@ export async function executeCustomValidateHooks(
       path.join(outputDir, "src/common/field-values.ts")
     );
 
+    // Cascading lookups: which reference fields wait for another, with any circular
+    // wait broken so a form can always be started (Portfolio: household / risk profile).
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "../../common/cascade-lookups.ts"),
+      path.join(outputDir, "src/common/cascade-lookups.ts")
+    );
+
     // Seed default AnkaReport layouts for every entity into sys_report_designs.
     const reportDesignsSeedContent = await this.renderTemplate(
       "../../common/seeds/report-designs.ts.hbs",
