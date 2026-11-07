@@ -12517,11 +12517,11 @@ function entityToBusEntity(entity, declared) {
     displayName: formatDisplayName(entity.name),
     windowOwner: entity.parentEntity ?? entity.name,
     indexes: mergeIndexes(entity),
-    attributes: withIdentifiers(entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey, declared)), entity.primaryKey)
+    attributes: withIdentifiers(entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey, declared)), entity.primaryKey, entity.name)
   };
 }
-function withIdentifiers(attributes, primaryKey) {
-  const identifiers = new Set(identifierColumnNames(attributes, primaryKey));
+function withIdentifiers(attributes, primaryKey, entityName) {
+  const identifiers = new Set(identifierColumnNames(attributes, primaryKey, entityName));
   return attributes.map((attribute) => ({
     ...attribute,
     isIdentifier: identifiers.has(attribute.name)
@@ -12547,19 +12547,40 @@ var SEMANTIC_REFERENCE = {
   password: ReferenceType.PASSWORD,
   color: ReferenceType.COLOR
 };
-function identifierColumnNames(attributes, primaryKey) {
-  const names = new Set(attributes.map((attribute) => attribute.name));
-  const has = (name) => names.has(name);
+function identifierColumnNames(attributes, primaryKey, entityName) {
+  const byName = new Map(attributes.map((attribute) => [attribute.name, attribute]));
+  const has = (name) => byName.has(name);
+  const prefixes = [
+    primaryKey?.endsWith("_id") ? primaryKey.slice(0, -3) : undefined,
+    entityName ? entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() : undefined
+  ].filter((prefix, i, all) => !!prefix && all.indexOf(prefix) === i);
+  const prefixed = (...suffixes) => {
+    for (const prefix of prefixes) {
+      for (const suffix of suffixes) {
+        const attribute = byName.get(`${prefix}_${suffix}`);
+        if (attribute && !attribute.isForeignKey && !attribute.enumReferenceId) {
+          return attribute.name;
+        }
+      }
+    }
+    return;
+  };
   for (const candidate of ["name", "full_name", "display_name", "title", "label", "subject"]) {
     if (has(candidate))
       return [candidate];
   }
+  const ownName = prefixed("name", "title", "label");
+  if (ownName)
+    return [ownName];
   if (has("first_name") && has("last_name"))
     return ["first_name", "last_name"];
   for (const candidate of ["code", "reference", "number"]) {
     if (has(candidate))
       return [candidate];
   }
+  const ownCode = prefixed("code", "reference", "number");
+  if (ownCode)
+    return [ownCode];
   const references = attributes.filter((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName(attribute.name));
   if (references.length >= 2)
     return references.slice(0, 2).map((attribute) => attribute.name);
@@ -19507,7 +19528,7 @@ class DictionaryGenerator {
         _tempId: tableId
       };
       sysTables.push(sysTable);
-      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey));
+      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey, entity.name));
       const columnEntries = busAttrs.map((attr, _index) => {
         const colId = `col_${++columnCounter}`;
         return {

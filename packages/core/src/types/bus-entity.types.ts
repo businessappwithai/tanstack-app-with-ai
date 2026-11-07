@@ -148,7 +148,8 @@ export function entityToBusEntity(entity: Entity, declared?: Map<string, string>
       entity.attributes.map((attr, index) =>
         attributeToBusAttribute(attr, index, entity.primaryKey, declared)
       ),
-      entity.primaryKey
+      entity.primaryKey,
+      entity.name
     ),
   };
 }
@@ -156,9 +157,10 @@ export function entityToBusEntity(entity: Entity, declared?: Map<string, string>
 /** Mark the columns that make up the record's display value. */
 function withIdentifiers(
   attributes: BusEntityAttribute[],
-  primaryKey?: string
+  primaryKey?: string,
+  entityName?: string
 ): BusEntityAttribute[] {
-  const identifiers = new Set(identifierColumnNames(attributes, primaryKey));
+  const identifiers = new Set(identifierColumnNames(attributes, primaryKey, entityName));
   return attributes.map((attribute) => ({
     ...attribute,
     isIdentifier: identifiers.has(attribute.name),
@@ -241,15 +243,39 @@ export function identifierColumnNames(
     isForeignKey?: boolean;
     enumReferenceId?: number;
   }>,
-  primaryKey?: string
+  primaryKey?: string,
+  entityName?: string
 ): string[] {
-  const names = new Set(attributes.map((attribute) => attribute.name));
-  const has = (name: string) => names.has(name);
+  const byName = new Map(attributes.map((attribute) => [attribute.name, attribute]));
+  const has = (name: string) => byName.has(name);
+
+  /* The entity's own name, as its columns are prefixed with it: `department_name`
+     and `department_code` on `Department`, whose key is `department_id`. A model that
+     prefixes every column this way has no bare `name` or `code`, and without this the
+     record fell through to the join-entity rule and was called by its parents —
+     `FACILITY 3 · FACILITY 3` for a department. Never a reference, never an enum. */
+  const prefixes = [
+    primaryKey?.endsWith("_id") ? primaryKey.slice(0, -3) : undefined,
+    entityName ? entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() : undefined,
+  ].filter((prefix, i, all): prefix is string => !!prefix && all.indexOf(prefix) === i);
+  const prefixed = (...suffixes: string[]): string | undefined => {
+    for (const prefix of prefixes) {
+      for (const suffix of suffixes) {
+        const attribute = byName.get(`${prefix}_${suffix}`);
+        if (attribute && !attribute.isForeignKey && !attribute.enumReferenceId) {
+          return attribute.name;
+        }
+      }
+    }
+    return undefined;
+  };
 
   /* One column that names the record outright. */
   for (const candidate of ["name", "full_name", "display_name", "title", "label", "subject"]) {
     if (has(candidate)) return [candidate];
   }
+  const ownName = prefixed("name", "title", "label");
+  if (ownName) return [ownName];
 
   /* A person: two columns that only mean anything together. This is the case
      the concatenation exists for, and the one the old rule could not express. */
@@ -260,6 +286,8 @@ export function identifierColumnNames(
   for (const candidate of ["code", "reference", "number"]) {
     if (has(candidate)) return [candidate];
   }
+  const ownCode = prefixed("code", "reference", "number");
+  if (ownCode) return [ownCode];
 
   /* A join entity, whose identity is the pair of records it joins.
      `CampaignMember` is a campaign and a contact; nothing else about it names

@@ -152,7 +152,7 @@ export class DictionaryGenerator {
 
       // Generate sys_column entries. Which columns identify a record is the
       // dictionary's own question, answered once for the whole table.
-      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey));
+      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey, entity.name));
       const columnEntries = busAttrs.map((attr, _index) => {
         const colId = `col_${++columnCounter}`;
         return {
