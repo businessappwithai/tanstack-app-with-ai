@@ -1,6 +1,9 @@
 import { createRootRoute, Outlet, Link, useLocation } from '@tanstack/react-router'
 import { AppLayout } from '@/components/layout/app-layout'
 import { Meta, Scripts } from '@tanstack/start'
+import { useEffect } from 'react'
+import { errorCode, errorRef, describeError } from '../lib/api-error'
+import { getClientLogger, reportClientError } from '../lib/logger'
 import { Providers } from '../providers'
 import { THEME_BOOT_SCRIPT } from '../components/theme/theme-provider'
 import globalsCssUrl from '../styles/globals.css?url'
@@ -27,6 +30,21 @@ function ThemeBootScript() {
 }
 
 function RootErrorComponent({ error }: { error: Error }) {
+  // Told to the server once, with the request id of the call that failed when
+  // there was one: the same id is on that request's line in the server log.
+  const ref = errorRef(error)
+  useEffect(() => {
+    getClientLogger('root').error('The page failed to render', { code: errorCode(error), ref })
+    reportClientError({
+      level: 'error',
+      source: 'boundary',
+      message: error?.message || 'The page failed to render',
+      stack: error?.stack,
+      code: errorCode(error),
+      ref,
+    })
+  }, [error, ref])
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -43,7 +61,7 @@ function RootErrorComponent({ error }: { error: Error }) {
             <h2 className="font-display text-xl font-semibold text-foreground">
               Something went wrong
             </h2>
-            <p className="text-sm text-muted-foreground">{error?.message || 'An unexpected error occurred'}</p>
+            <p className="text-sm text-muted-foreground">{describeError(error, 'An unexpected error occurred')}</p>
             <button
               onClick={() => window.location.reload()}
               className="text-sm text-primary hover:underline font-medium"

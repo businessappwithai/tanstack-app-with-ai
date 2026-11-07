@@ -152,6 +152,9 @@ const SHARED_SUITES = [
   // and a broken reference fail for different reasons and want different names.
   "02b-dictionary-layout.test.ts",
   "02c-dictionary-references.test.ts",
+  // The error envelope: the code, category and ref every failure carries, and the
+  // route the browser reports its own errors to.
+  "02d-error-envelope.test.ts",
   "04-bulk-seed.test.ts",
   "06-rules-workflow.test.ts",
   // The state machine, driven edge by edge — after the rule-triggered

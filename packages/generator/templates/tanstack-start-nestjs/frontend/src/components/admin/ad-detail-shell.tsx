@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { type FieldMetadata, useEntityMetadata } from "@/hooks/use-entities";
+import { withReference } from "@/lib/api-error";
 import { apiClient, type PaginatedResponse } from "@/lib/api-client";
 import {
   type AnyRecord as ConflictRecord,
@@ -118,7 +119,7 @@ function ChildPanel({ childTab, parentRecord, selfLevel, parentContext }: ChildP
         ? err.message.join(", ")
         : (err?.message ?? "Failed to create");
       setCreateErrors(specific ?? [fallback]);
-      toast.error(specific?.[0] ?? fallback);
+      toast.error(withReference(specific?.[0] ?? fallback, err));
     },
   });
 
@@ -846,7 +847,7 @@ export function ADDetailShell({
         ? err.message.join(", ")
         : (err?.message ?? "Save failed");
       setSaveErrors(specific ?? [fallback]);
-      toast.error(specific?.[0] ?? fallback);
+      toast.error(withReference(specific?.[0] ?? fallback, err));
     },
   });
 

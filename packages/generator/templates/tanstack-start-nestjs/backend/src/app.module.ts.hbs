@@ -24,6 +24,7 @@ import { ElectricModule } from './modules/electric/electric.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ClientLogsModule } from './modules/client-logs/client-logs.module';
 
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -100,6 +101,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     // out of the audit trail. Imported after AuditModule because that is where
     // the rows it serves are written.
     NotificationsModule,
+    ClientLogsModule,
   ],
   providers: [
     // Global exception filter

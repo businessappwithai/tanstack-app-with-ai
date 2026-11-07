@@ -260,6 +260,9 @@ export class NestJsBackendGenerator extends BaseGenerator {
     // Generate the notifications module (static files) — the bell's backend
     await this.generateNotificationsModule(outputDir);
 
+    // The route the browser reports its errors to
+    await this.generateClientLogsModule(outputDir);
+
     // Generate workflow-definitions module (static files)
     await this.generateWorkflowDefinitionsModule(outputDir);
 
@@ -344,6 +347,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
       "src/modules/rules/jdm",
       "src/modules/audit",
       "src/modules/notifications",
+      "src/modules/client-logs",
       "src/modules/workflow",
       "src/modules/workflow-definitions",
       "src/trigger",
@@ -2697,6 +2701,25 @@ export async function seed(db: Kysely<any>): Promise<void> {
       } catch (_e) {
         console.warn(`Trigger test template not found: ${tpl}`);
       }
+    }
+  }
+
+  /**
+   * Copy the client-logs module (static): where the browser reports its errors.
+   */
+  private async generateClientLogsModule(outputDir: string): Promise<void> {
+    const templateDir = path.join(
+      resolveTemplateDir("tanstack-start-nestjs/backend"),
+      "src/modules/client-logs"
+    );
+    const outDir = path.join(outputDir, "src/modules/client-logs");
+    await fs.mkdir(outDir, { recursive: true });
+    for (const file of [
+      "client-log-rules.ts",
+      "client-logs.controller.ts",
+      "client-logs.module.ts",
+    ]) {
+      await fs.copyFile(path.join(templateDir, file), path.join(outDir, file));
     }
   }
 

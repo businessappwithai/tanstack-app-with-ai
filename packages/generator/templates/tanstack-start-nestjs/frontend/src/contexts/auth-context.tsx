@@ -14,6 +14,9 @@ import {
   signUp as authSignUp,
   getSession,
 } from "@/lib/auth";
+import { getClientLogger } from "@/lib/logger";
+
+const log = getClientLogger("auth");
 
 interface User {
   id: string;
@@ -58,7 +61,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // load this resolves while the page is still hydrating.
       startTransition(() => setUser(next));
     } catch (error) {
-      console.error("Failed to refresh session:", error);
+      log.error("Failed to refresh session", error);
     }
   };
 

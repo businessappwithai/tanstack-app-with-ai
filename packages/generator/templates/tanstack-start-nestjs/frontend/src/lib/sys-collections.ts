@@ -31,6 +31,9 @@ import type {
   SysTab,
   SysWindow,
 } from '@/hooks/use-field-metadata';
+import { getClientLogger } from "./logger";
+
+const log = getClientLogger("dictionary");
 
 /**
  * Where shape requests go. This is the backend proxy, never the Electric server
@@ -156,9 +159,7 @@ function latchShapeSyncUnavailable(reason: string): void {
   } catch {
     /* A tab that cannot remember still gets the in-memory latch. */
   }
-  console.info(
-    `[dictionary] Electric sync unavailable (${reason}); reading the dictionary over HTTP.`
-  );
+  log.info(`Electric sync unavailable (${reason}); reading the dictionary over HTTP.`);
 }
 
 /**
@@ -261,7 +262,7 @@ function dictionaryCollection<T extends Row>(table: string, getKey: (row: T) => 
          */
         onError: (error: unknown) => {
           if (shapeSyncUnavailable) return;
-          console.warn(`[dictionary] shape stream for ${table} failed:`, error);
+          log.warn(`shape stream for ${table} failed`, error);
         },
       },
       getKey,
