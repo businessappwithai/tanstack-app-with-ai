@@ -263,6 +263,9 @@ export class NestJsBackendGenerator extends BaseGenerator {
     // The route the browser reports its errors to
     await this.generateClientLogsModule(outputDir);
 
+    // Administrators change a log level on a running process
+    await this.generateLoggingModule(outputDir, context);
+
     // Generate workflow-definitions module (static files)
     await this.generateWorkflowDefinitionsModule(outputDir);
 
@@ -348,6 +351,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
       "src/modules/audit",
       "src/modules/notifications",
       "src/modules/client-logs",
+      "src/modules/logging",
       "src/modules/workflow",
       "src/modules/workflow-definitions",
       "src/trigger",
@@ -2702,6 +2706,36 @@ export async function seed(db: Kysely<any>): Promise<void> {
         console.warn(`Trigger test template not found: ${tpl}`);
       }
     }
+  }
+
+  /**
+   * Copy the logging module (static): the administrator-only log-level routes.
+   */
+  private async generateLoggingModule(
+    outputDir: string,
+    context: any
+  ): Promise<void> {
+    const backend = resolveTemplateDir("tanstack-start-nestjs/backend");
+    const outDir = path.join(outputDir, "src/modules/logging");
+    await fs.mkdir(outDir, { recursive: true });
+    for (const file of ["logging.controller.ts", "logging.module.ts"]) {
+      await fs.copyFile(path.join(backend, "src/modules/logging", file), path.join(outDir, file));
+    }
+    // Plain modules the controller and the guards import.
+    for (const file of ["level-control.ts", "trace-context.ts"]) {
+      await fs.copyFile(
+        path.join(backend, "src/common/logging", file),
+        path.join(outputDir, "src/common/logging", file)
+      );
+    }
+    await fs.copyFile(
+      path.join(backend, "src/modules/auth/guards/admin-roles.ts"),
+      path.join(outputDir, "src/modules/auth/guards/admin-roles.ts")
+    );
+    await fs.writeFile(
+      path.join(outputDir, "src/modules/auth/guards/admin-only.guard.ts"),
+      await this.renderTemplate("src/modules/auth/guards/admin-only.guard.ts.hbs", context)
+    );
   }
 
   /**

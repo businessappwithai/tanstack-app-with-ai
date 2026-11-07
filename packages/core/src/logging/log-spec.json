@@ -204,6 +204,12 @@
       "description": "What the browser tells the server about itself: render errors, unhandled rejections, failed queries. Reported, never stored.",
       "level": "info",
       "surfaces": ["generated"]
+    },
+    {
+      "name": "logging",
+      "description": "The logging system itself: level changes made through the administrator endpoint.",
+      "level": "warn",
+      "surfaces": ["generated"]
     }
   ],
   "events": [
@@ -926,6 +932,14 @@
       "level": "info",
       "message": "Browser reported a message",
       "fields": ["level", "source", "message", "url", "component", "userId"]
+    },
+    {
+      "id": "logging.level.changed",
+      "channel": "logging",
+      "level": "warn",
+      "message": "Log level changed",
+      "fields": ["channel", "from", "to", "by"],
+      "surfaces": ["generated"]
     }
   ]
 }
