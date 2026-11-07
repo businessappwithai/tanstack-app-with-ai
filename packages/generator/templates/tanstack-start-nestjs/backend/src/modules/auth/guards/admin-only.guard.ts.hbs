@@ -1,0 +1,25 @@
+/**
+ * Admin Only Guard — every method, reads included.
+ *
+ * `DictionaryWriteGuard` lets anyone read and restricts writes, which is right for the
+ * dictionary (every screen is drawn from it) and wrong for anything whose *contents* are
+ * administrative. The log levels are one: reading them tells a caller which subsystems are
+ * being watched. This guard has no read exemption.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+
+import { appError } from '../../../common/errors/app-error';
+import { isAdministrator } from './admin-roles';
+
+@Injectable()
+export class AdminOnlyGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    if (isAdministrator(request.user)) return true;
+    throw appError('FORBIDDEN', { message: 'This requires an administrator.' });
+  }
+}

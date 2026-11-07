@@ -25,6 +25,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ClientLogsModule } from './modules/client-logs/client-logs.module';
+import { LoggingModule } from './modules/logging/logging.module';
 
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -102,6 +103,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     // the rows it serves are written.
     NotificationsModule,
     ClientLogsModule,
+    LoggingModule,
   ],
   providers: [
     // Global exception filter

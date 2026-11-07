@@ -1,0 +1,116 @@
+/**
+ * Changing a log level on a running application — and who may.
+ *
+ * `GET/PUT/DELETE /logging/levels` turn one channel up or down until the process restarts.
+ * What is held here is the access rule, because that is what is easy to get wrong: reading
+ * the levels tells a caller which subsystems are being watched, so the endpoint is closed to
+ * non-administrators on **GET as well as PUT** (the dictionary guard it must not be confused
+ * with leaves reads open).
+ *
+ *   - anonymous callers are refused;
+ *   - an administrator lists the channels, sets one, sees it take effect, and resets it;
+ *   - a signed-in non-administrator is refused on every method;
+ *   - an unknown channel is a 404 and an unknown level a 400.
+ *
+ * Whatever the suite changes it puts back.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import { config, harness, HttpClient, login, roleAccounts } from "../harness/index.ts";
+
+interface LevelRow {
+  channel: string;
+  declared: string;
+  effective: string;
+  overridden: boolean;
+}
+
+interface Envelope {
+  data?: LevelRow[] | { channel: string; from: string; to: string };
+  details?: { category?: string };
+}
+
+const rows = (body: Envelope): LevelRow[] => (Array.isArray(body.data) ? body.data : []);
+
+describe("log levels", () => {
+  let admin: HttpClient;
+  let member: HttpClient | null = null;
+
+  beforeAll(async () => {
+    await harness.setup();
+    admin = harness.client;
+
+    // A signed-in account that is not an administrator, when the model declares roles.
+    const account = roleAccounts.find((candidate) => !candidate.isAdmin);
+    if (account) {
+      const client = new HttpClient();
+      try {
+        await login(client, account.email, config.admin.password);
+        member = client;
+      } catch {
+        member = null;
+      }
+    }
+  });
+
+  afterAll(async () => {
+    await admin.delete("/logging/levels/http", { allowFailure: true }).catch(() => undefined);
+    await harness.teardown();
+  });
+
+  it("refuses an anonymous caller", async () => {
+    const response = await new HttpClient().get<Envelope>("/logging/levels", { allowFailure: true });
+    expect(response.status).toBe(401);
+  });
+
+  it("lists every channel with its declared and effective level", async () => {
+    const response = await admin.get<Envelope>("/logging/levels");
+    const list = rows(response.data);
+    expect(list.length).toBeGreaterThan(0);
+    const http = list.find((row) => row.channel === "http");
+    expect(http).toBeDefined();
+    expect(http?.overridden).toBe(false);
+    expect(typeof http?.declared).toBe("string");
+  });
+
+  it("sets a channel's level, shows it as overridden, and resets it", async () => {
+    const set = await admin.put<Envelope>("/logging/levels/http", { level: "debug" });
+    expect(set.status).toBe(200);
+
+    const during = rows((await admin.get<Envelope>("/logging/levels")).data).find((r) => r.channel === "http");
+    expect(during?.effective).toBe("debug");
+    expect(during?.overridden).toBe(true);
+
+    const reset = await admin.delete<Envelope>("/logging/levels/http");
+    expect(reset.status).toBe(200);
+
+    const after = rows((await admin.get<Envelope>("/logging/levels")).data).find((r) => r.channel === "http");
+    expect(after?.overridden).toBe(false);
+  });
+
+  it("answers an unknown channel with 404 and an unknown level with 400", async () => {
+    const unknown = await admin.put<Envelope>("/logging/levels/no_such_channel", { level: "debug" }, {
+      allowFailure: true,
+    });
+    expect(unknown.status).toBe(404);
+
+    const badLevel = await admin.put<Envelope>("/logging/levels/http", { level: "loud" }, { allowFailure: true });
+    expect(badLevel.status).toBe(400);
+    expect(badLevel.data.details?.category).toBe("validation");
+  });
+
+  it("refuses a signed-in non-administrator on every method, reads included", async () => {
+    if (!member) return; // the model declares no roles beyond the administrator
+    const get = await member.get<Envelope>("/logging/levels", { allowFailure: true });
+    expect(get.status).toBe(403);
+
+    const put = await member.put<Envelope>("/logging/levels/http", { level: "debug" }, { allowFailure: true });
+    expect(put.status).toBe(403);
+
+    const del = await member.delete<Envelope>("/logging/levels/http", { allowFailure: true });
+    expect(del.status).toBe(403);
+  });
+});

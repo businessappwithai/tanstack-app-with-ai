@@ -34,6 +34,8 @@ import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 
 import { categoryForStatus, FALLBACK_CODE } from '../errors/app-error';
+import { describeLevels, type ChannelLevelReport } from './level-control';
+import { keepDebug, parseTraceparent, sampleRate } from './trace-context';
 import { ERROR_CATEGORIES } from '../errors/catalogue';
 
 /* -------------------------------------------------------------------------- */
@@ -191,6 +193,9 @@ export type LogFields = Record<string, unknown>;
 export interface RequestContext {
   requestId?: string;
   userId?: string | null;
+  /** From the caller's W3C `traceparent` header (or the active OpenTelemetry span). */
+  traceId?: string;
+  spanId?: string;
   /**
    * Who the audit trail records for this request.
    *
@@ -300,10 +305,42 @@ function getRoot(): PinoLogger {
   return root;
 }
 
+/** Read once: the sampling rate does not change while the process runs. */
+const DEBUG_SAMPLE_RATE = sampleRate(process.env.LOG_SAMPLE_DEBUG);
+
+/**
+ * The active OpenTelemetry span's ids, when an SDK is registered and `@opentelemetry/api` is
+ * installed. It is not a dependency of this application: it is looked up once, only when
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` or `LOG_TRACE_IDS=true` is set, and its absence is not an
+ * error. Install it and register an SDK to turn this on.
+ */
+let otelApi: any;
+let otelTried = false;
+
+function activeTrace(): { traceId: string; spanId: string } | undefined {
+  if (!otelTried) {
+    otelTried = true;
+    if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.LOG_TRACE_IDS === 'true') {
+      try {
+        otelApi = require('@opentelemetry/api');
+      } catch {
+        otelApi = undefined;
+      }
+    }
+  }
+  const span = otelApi?.trace?.getActiveSpan?.();
+  const ids = span?.spanContext?.();
+  if (!ids?.traceId || /^0+$/.test(ids.traceId)) return undefined;
+  return { traceId: ids.traceId, spanId: ids.spanId };
+}
+
 function wrap(logger: PinoLogger, channel: string, level: ConfiguredLevel): ChannelLogger {
   return {
     channel,
-    level,
+    // Read from the Pino child, so an override set through the endpoint is what this reports.
+    get level(): ConfiguredLevel {
+      return (logger.level as ConfiguredLevel) ?? level;
+    },
 
     event(id: string, fields: LogFields = {}): void {
       const declared = EVENTS.get(id);
@@ -320,7 +357,15 @@ function wrap(logger: PinoLogger, channel: string, level: ConfiguredLevel): Chan
 
       // Request context first, so an explicit field always wins over it.
       const context = currentRequestContext();
-      const merged: LogFields = { ...context, ...fields };
+
+      // Debug and trace lines may be sampled (LOG_SAMPLE_DEBUG); a request is kept or dropped
+      // whole. Anything at warn or above is never asked.
+      if ((declared.level === 'debug' || declared.level === 'trace') && !keepDebug(context.requestId, DEBUG_SAMPLE_RATE)) {
+        return;
+      }
+
+      const trace = context.traceId ? undefined : activeTrace();
+      const merged: LogFields = { ...context, ...(trace ?? {}), ...fields };
 
       // Checked against the merged object: a field the context supplies is
       // present, and reporting it as missing would be wrong.
@@ -351,9 +396,57 @@ export function getLogger(channel: string): ChannelLogger {
   if (cached) return cached;
 
   const level = resolveLevel(channel);
-  const logger = wrap(getRoot().child({ channel }, { level }), channel, level);
+  const child = getRoot().child({ channel }, { level });
+  channelChildren.set(channel, child);
+  const logger = wrap(child, channel, level);
   cache.set(channel, logger);
   return logger;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Changing a level while running                                             */
+/* -------------------------------------------------------------------------- */
+
+/** The Pino child behind each channel, so its level can be changed in place. */
+const channelChildren = new Map<string, PinoLogger>();
+
+/** Levels set through the endpoint. In memory only: a restart returns to the configured ones. */
+const overrides = new Map<string, string>();
+
+/** Every channel the spec declares, its configured level and what it logs at now. */
+export function getChannelLevels(): ChannelLevelReport[] {
+  return describeLevels(
+    spec.channels,
+    (channel) => (getLogger(channel).level as string) ?? resolveLevel(channel),
+    overrides,
+  );
+}
+
+export interface LevelChange {
+  channel: string;
+  from: string;
+  to: string;
+}
+
+/** Null when the spec declares no such channel. */
+export function setChannelLevel(channel: string, level: ConfiguredLevel): LevelChange | null {
+  if (!CHANNELS.has(channel)) return null;
+  const logger = getLogger(channel);
+  const from = String(logger.level);
+  channelChildren.get(channel)!.level = level;
+  overrides.set(channel, level);
+  return { channel, from, to: level };
+}
+
+/** Back to what the spec and the environment say. Null when the channel is unknown. */
+export function resetChannelLevel(channel: string): LevelChange | null {
+  if (!CHANNELS.has(channel)) return null;
+  const logger = getLogger(channel);
+  const from = String(logger.level);
+  const configured = resolveLevel(channel);
+  channelChildren.get(channel)!.level = configured;
+  overrides.delete(channel);
+  return { channel, from, to: configured };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -503,7 +596,13 @@ export function installHttpLogging(fastify: {
 
     // Everything logged for the rest of this request carries the id, without
     // any of it having to be handed one.
-    beginRequestContext({ requestId: request.__logRequestId, userId: null });
+    // A caller's trace, when it sent one, so these lines can be found from the trace.
+    const trace = parseTraceparent(request.headers?.['traceparent']);
+    beginRequestContext({
+      requestId: request.__logRequestId,
+      userId: null,
+      ...(trace && { traceId: trace.traceId, spanId: trace.spanId }),
+    });
 
     try {
       reply.header('x-request-id', request.__logRequestId);

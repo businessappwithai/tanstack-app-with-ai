@@ -155,6 +155,8 @@ const SHARED_SUITES = [
   // The error envelope: the code, category and ref every failure carries, and the
   // route the browser reports its own errors to.
   "02d-error-envelope.test.ts",
+  // Changing a log level on a running process: administrators only, reads included.
+  "02e-log-levels.test.ts",
   "04-bulk-seed.test.ts",
   "06-rules-workflow.test.ts",
   // The state machine, driven edge by edge — after the rule-triggered

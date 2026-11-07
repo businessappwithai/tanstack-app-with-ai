@@ -13334,6 +13334,12 @@ var log_spec_default = {
       description: "What the browser tells the server about itself: render errors, unhandled rejections, failed queries. Reported, never stored.",
       level: "info",
       surfaces: ["generated"]
+    },
+    {
+      name: "logging",
+      description: "The logging system itself: level changes made through the administrator endpoint.",
+      level: "warn",
+      surfaces: ["generated"]
     }
   ],
   events: [
@@ -14056,6 +14062,14 @@ var log_spec_default = {
       level: "info",
       message: "Browser reported a message",
       fields: ["level", "source", "message", "url", "component", "userId"]
+    },
+    {
+      id: "logging.level.changed",
+      channel: "logging",
+      level: "warn",
+      message: "Log level changed",
+      fields: ["channel", "from", "to", "by"],
+      surfaces: ["generated"]
     }
   ]
 };
@@ -16578,6 +16592,7 @@ class NestJsBackendGenerator extends BaseGenerator {
     await this.generateAuditModule(outputDir);
     await this.generateNotificationsModule(outputDir);
     await this.generateClientLogsModule(outputDir);
+    await this.generateLoggingModule(outputDir, context);
     await this.generateWorkflowDefinitionsModule(outputDir);
     await this.generateModelContextModule(outputDir, context);
     await this.generateMigrations(outputDir, context);
@@ -16628,6 +16643,7 @@ class NestJsBackendGenerator extends BaseGenerator {
       "src/modules/audit",
       "src/modules/notifications",
       "src/modules/client-logs",
+      "src/modules/logging",
       "src/modules/workflow",
       "src/modules/workflow-definitions",
       "src/trigger",
@@ -18126,6 +18142,19 @@ export async function seed(db: Kysely<any>): Promise<void> {
       }
     }
   }
+  async generateLoggingModule(outputDir, context) {
+    const backend = resolveTemplateDir("tanstack-start-nestjs/backend");
+    const outDir = join(outputDir, "src/modules/logging");
+    await mkdir(outDir, { recursive: true });
+    for (const file of ["logging.controller.ts", "logging.module.ts"]) {
+      await copyFile(join(backend, "src/modules/logging", file), join(outDir, file));
+    }
+    for (const file of ["level-control.ts", "trace-context.ts"]) {
+      await copyFile(join(backend, "src/common/logging", file), join(outputDir, "src/common/logging", file));
+    }
+    await copyFile(join(backend, "src/modules/auth/guards/admin-roles.ts"), join(outputDir, "src/modules/auth/guards/admin-roles.ts"));
+    await writeFile(join(outputDir, "src/modules/auth/guards/admin-only.guard.ts"), await this.renderTemplate("src/modules/auth/guards/admin-only.guard.ts.hbs", context));
+  }
   async generateClientLogsModule(outputDir) {
     const templateDir = join(resolveTemplateDir("tanstack-start-nestjs/backend"), "src/modules/client-logs");
     const outDir = join(outputDir, "src/modules/client-logs");
@@ -19178,6 +19207,7 @@ var SHARED_SUITES = [
   "02b-dictionary-layout.test.ts",
   "02c-dictionary-references.test.ts",
   "02d-error-envelope.test.ts",
+  "02e-log-levels.test.ts",
   "04-bulk-seed.test.ts",
   "06-rules-workflow.test.ts",
   "06b-workflow-transitions.test.ts",
