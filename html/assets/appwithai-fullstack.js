@@ -14070,6 +14070,14 @@ var log_spec_default = {
       message: "Log level changed",
       fields: ["channel", "from", "to", "by"],
       surfaces: ["generated"]
+    },
+    {
+      id: "logging.overrides.unavailable",
+      channel: "logging",
+      level: "warn",
+      message: "Stored log levels could not be read or written",
+      fields: ["err"],
+      surfaces: ["generated"]
     }
   ]
 };
@@ -17573,6 +17581,11 @@ export async function executeCustomValidateHooks(
         slug: "widen_workflow_operation",
         template: "src/migrations/024_widen_workflow_operation.ts.hbs",
         required: true
+      },
+      {
+        slug: "log_level_overrides",
+        template: "src/migrations/025_log_level_overrides.ts.hbs",
+        required: true
       }
     ];
     const scaffoldSlugs = new Set(scaffold.map((m) => m.slug));
@@ -18146,7 +18159,11 @@ export async function seed(db: Kysely<any>): Promise<void> {
     const backend = resolveTemplateDir("tanstack-start-nestjs/backend");
     const outDir = join(outputDir, "src/modules/logging");
     await mkdir(outDir, { recursive: true });
-    for (const file of ["logging.controller.ts", "logging.module.ts"]) {
+    for (const file of [
+      "logging.controller.ts",
+      "logging.module.ts",
+      "log-level-store.service.ts"
+    ]) {
       await copyFile(join(backend, "src/modules/logging", file), join(outDir, file));
     }
     for (const file of ["level-control.ts", "trace-context.ts"]) {

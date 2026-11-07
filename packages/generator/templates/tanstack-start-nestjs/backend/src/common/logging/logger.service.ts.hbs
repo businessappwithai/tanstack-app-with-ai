@@ -419,7 +419,35 @@ export function getChannelLevels(): ChannelLevelReport[] {
     spec.channels,
     (channel) => (getLogger(channel).level as string) ?? resolveLevel(channel),
     overrides,
-  );
+  ).map((row) => ({ ...row, persisted: persisted.has(row.channel) }));
+}
+
+/** Channels whose override is also stored in the database. */
+const persisted = new Set<string>();
+
+export function markPersisted(channel: string, isPersisted: boolean): void {
+  if (isPersisted) persisted.add(channel);
+  else persisted.delete(channel);
+}
+
+/**
+ * Make the stored overrides the ones in force. A channel that was stored and no longer is goes
+ * back to its configured level (another instance reset it); an override that was only ever in
+ * memory is left alone.
+ */
+export function applyStoredLevels(rows: Array<{ channel: string; level: ConfiguredLevel }>): void {
+  const stored = new Map(rows.map((row) => [row.channel, row.level]));
+  for (const channel of [...persisted]) {
+    if (!stored.has(channel)) {
+      resetChannelLevel(channel);
+      persisted.delete(channel);
+    }
+  }
+  for (const [channel, level] of stored) {
+    if (!CHANNELS.has(channel)) continue;
+    if (overrides.get(channel) !== level) setChannelLevel(channel, level);
+    persisted.add(channel);
+  }
 }
 
 export interface LevelChange {
