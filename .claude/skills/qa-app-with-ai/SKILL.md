@@ -87,6 +87,20 @@ unique constraints. Suites that matter here: `03-crud.<entity>`, `14-validation`
 `16-api-contract`, `17-display-identifier`, `22-optimistic-locking`,
 `21-reports` (the application's own Analysis screen), `28`, `29`.
 
+### What the generated form does, so a script does not mistake it for a bug
+
+- **Delete lives in edit mode.** Open the record, press **Edit**, then **Delete**, then
+  confirm in the dialog. A script that looks for Delete in the view toolbar finds none.
+- **A lookup can wait for another** ("Select department first…"): choose the parent, then
+  the child's options load. Choose an option *different* from the preselected one or no
+  change event fires.
+- **`<entity>_id` on a `PK FK` model is the record's own key**, offered as a lookup of
+  existing ids; picking one collides with the unique key. Leave it empty. A column named
+  that way that the form marks required is a real parent reference (a hierarchy): fill it.
+- **If every other required lookup is filled and one is still disabled, that is a bug.**
+  Two lookups that each say "select the other first" (Portfolio: household / risk profile)
+  can never be started — fixed by `breakCascadeCycles`; check any model that shows it.
+
 ## Phase 3 — reports on Enterprise Reporting
 
 Sign in as the administrator and reach each screen from the sidebar.
@@ -117,6 +131,9 @@ Sign in as a second reporting account (addresses are in `reporting/README.md`,
   tables**, not an empty table and not a crash.
 - `tables: []` in a pack role means *every table for the administrator only*.
 - Sign-in is rate limited (5 a minute): one client per account, no sign-out loops.
+- **An empty table for a narrow role is not a pass.** Check the same report's data URL
+  answers 403 and that the screen says so (`data-testid="report-data-error"`). A viewer that
+  returned `body.data` without checking `res.ok` drew every refusal as "No results".
 
 ## Method — borrowed from gstack's `/qa`
 
@@ -167,7 +184,9 @@ one report and one chart each is enough.
   in the **QA copy** of the Dockerfiles and set `NODE_EXTRA_CA_CERTS`. Never
   disable verification.
 - **Docker Hub rate limits (429)** stop a loop that deletes base images between
-  models. Keep them (`down -v --rmi local` only removes the project's own) and
-  prune build cache by size, not `-af`.
+  models. Keep them (`down -v --rmi local` only removes the project's own).
+- **The disk is a fixed allowance** (a few GB free after the first model): prune the build
+  cache between models (`docker builder prune -af`) — an `ENOSPC` or a Postgres that keeps
+  restarting is the disk, not the product.
 - A frontend image build peaks near 6 GB; a very large model (200 entities) can
   take far longer than the CRM. Budget the wait and say so rather than killing it.

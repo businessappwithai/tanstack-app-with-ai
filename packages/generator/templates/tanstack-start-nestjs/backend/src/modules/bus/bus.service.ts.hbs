@@ -19,6 +19,7 @@ import { PromotionDispatcher } from './promotion-dispatcher.service';
 import { EntityPromotionService } from './entity-promotion.service';
 import type { PromotionActor, PromotionResult } from './entity-promotion.service';
 import { WorkflowService } from '../workflow/workflow.service';
+import { breakCascadeCycles } from '../../common/cascade-lookups';
 import { currentRequestContext, getLogger } from '../../common/logging/logger.service';
 import { stateFieldOf } from '../../common/state-fields';
 import { lifecycleOf, phaseOf, saveMode, type Lifecycle } from '../../common/lifecycle';
@@ -1156,8 +1157,14 @@ export class BusService {
         }
       }));
 
+      // Two lookups that each name the other as their parent would both wait forever.
+      const startable = breakCascadeCycles(
+        cascadeMap,
+        metadata.columns.map((c: any) => c.column_name as string),
+      );
+
       for (const col of metadata.columns) {
-        const cascade = cascadeMap[col.column_name];
+        const cascade = startable[col.column_name];
         if (cascade) {
           col.ref_filter_param = cascade.ref_filter_param;
           col.ref_filter_source = cascade.ref_filter_source;

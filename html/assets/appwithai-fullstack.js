@@ -17105,6 +17105,7 @@ export async function executeCustomValidateHooks(
     await copyFile(join(this.resolvedTemplateDir, "src/common/ttl-cache.ts"), join(outputDir, "src/common/ttl-cache.ts"));
     await copyFile(join(this.resolvedTemplateDir, "../../common/field-logic.ts"), join(outputDir, "src/common/field-logic.ts"));
     await copyFile(join(this.resolvedTemplateDir, "../../common/field-values.ts"), join(outputDir, "src/common/field-values.ts"));
+    await copyFile(join(this.resolvedTemplateDir, "../../common/cascade-lookups.ts"), join(outputDir, "src/common/cascade-lookups.ts"));
     const reportDesignsSeedContent = await this.renderTemplate("../../common/seeds/report-designs.ts.hbs", context);
     await writeFile(join(outputDir, "seeds/06_report_designs.ts"), reportDesignsSeedContent);
     const systemConfigContent = await this.renderTemplate("../../common/seeds/system-config.ts.hbs", context);
