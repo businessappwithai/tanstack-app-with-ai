@@ -135,6 +135,35 @@ Sign in as a second reporting account (addresses are in `reporting/README.md`,
   answers 403 and that the screen says so (`data-testid="report-data-error"`). A viewer that
   returned `body.data` without checking `res.ok` drew every refusal as "No results".
 
+## Scripts — the click-only run, ready to use
+
+`scripts/` holds what produced the results this skill records. Copy it to a working directory
+(`QA_DIR`, default `/tmp/qa`), serve the site (`python3 -m http.server 8080` in the website
+checkout), and run models one after another:
+
+```bash
+export QA_DIR=/tmp/qa QA_OUT=./qa-out NODE_PATH=$(npm root -g)   # Playwright is a global module
+cp .claude/skills/qa-app-with-ai/scripts/* $QA_DIR/
+for k in crm drug hospital dance investment education airport shipping service unified sales construction; do
+  $QA_DIR/pipeline.sh $k
+done
+```
+
+| Script | What it does |
+|---|---|
+| `dl.js <key>` | Opens `run-in-browser.html#<key>`, presses Generate, then *Download the deployable app (.zip)* |
+| `pipeline.sh <key>` | The whole run for one model, logged to `$QA_DIR/log/<key>.log` |
+| `shot.js <key>` | Reporting home, a dashboard, a report, a chart, a pie and a line chart, the app's dashboard and a list |
+| `crud.js <key> AUTO:6` | Create, edit, read and delete on the first six entities, by clicks. Reports `create` / `update` / `read` / `delete` per entity |
+| `rolecheck.js <key>` | Signs in as a narrow reporting role and opens up to twelve reports: how many it may read, how many are refused, and the refusal text |
+| `sandbox-ca.py` | **Sandbox only** — see *In a sandbox* |
+
+`crud.js` is a generic form filler, so a failure is a finding only once it is traced: read the
+screenshot first. Every failure it has raised so far was one of three things — the script (an
+ordering, a field type, a sidebar label), the model (a rule refusing the edit: reported as
+*refused by a model rule*), or a real defect (circular lookups, wrong display names, a refusal
+drawn as "No results"), and the last kind is the only one to fix in the product.
+
 ## Method — borrowed from gstack's `/qa`
 
 [gstack](https://github.com/garrytan/gstack)'s QA skill is a good shape for the
