@@ -200,6 +200,12 @@ After running all phases, summarise:
 If any phase fails, report the specific assertion, the suite, and whether the
 failure is in rules, workflows, lifecycle, RBAC, or the two-transaction pattern.
 
+## Companion skill — CRUD and reports
+
+This skill stops at the lifecycle. For CRUD on every entity and for reports,
+charts and dashboards on the generated Enterprise Reporting platform (and that
+the two products agree), run **`qa-reports-crud`** as well.
+
 ## Fixture Model
 
 `tests/test-data/dance-studio-workflows.eml.mmd` — all 25 behaviour constructs.

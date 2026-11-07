@@ -66,6 +66,7 @@ FIRST, before any other tool. When in doubt, invoke the skill.
 | Full review pipeline | `/autoplan` |
 | Bugs / errors | `/investigate` |
 | **Any QA / testing request** (modelling tool, generated app, recent changes) | `qa-lifecycle-workflows` — **mandatory**; never `/qa` or `/qa-only` |
+| CRUD and reports on the generated app and the generated reporting platform | `qa-reports-crud` — run with `qa-lifecycle-workflows` |
 | Code review / diff check | `/review` |
 | Visual polish | `/design-review` |
 | Ship / deploy / PR | `/ship` or `/land-and-deploy` |
