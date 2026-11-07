@@ -96,7 +96,7 @@ async function fill1(p,second){
       await p.screenshot({path:S+`crud-${ent.replace(/\W/g,'')}-4a-confirm.png`});
       await p.getByRole('alertdialog').getByRole('button',{name:/^Delete$/}).click(); await p.waitForTimeout(3000);
       const m3=(await p.locator('[role=alert],[data-sonner-toast],.toast').allInnerTexts()).join(' | ').slice(0,160); r.deleteMsg=m3;
-      r.delete=/delet/i.test(m3)&&!/fail|cannot|refus|final|locked/i.test(m3)?'pass':(/final|locked|refus|cannot/i.test(m3)?'refused':'fail');
+      r.delete=/could not be deleted|restrict|still referenced|violates/i.test(m3)?'refused (other records still reference it)':(/delet/i.test(m3)&&!/fail|cannot|refus|final|locked/i.test(m3)?'pass':(/final|locked|refus|cannot/i.test(m3)?'refused':'fail'));
       await p.screenshot({path:S+`crud-${ent.replace(/\W/g,'')}-4-deleted.png`});
     } else r.delete='no delete control (Edit '+(await edit2.count()?(await edit2.isEnabled()?'enabled':'disabled'):'absent')+')';
    }
