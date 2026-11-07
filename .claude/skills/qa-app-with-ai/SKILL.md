@@ -1,5 +1,5 @@
 ---
-name: qa-reports-crud
+name: qa-app-with-ai
 description: QA CRUD and reports on both products a model generates — the application (every entity's create, read, update, delete through the browser and the API) and the Enterprise Reporting platform (saved queries, reports, charts, dashboards, per-role access, and the data the seeder loaded). Use when asked to test the downloaded zip under docker compose, check that the reporting application has good data and reports, run CRUD tests, or QA every published model one after another. Companion to qa-lifecycle-workflows, which covers lifecycle, rules and workflows.
 ---
 

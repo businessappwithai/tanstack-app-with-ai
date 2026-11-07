@@ -204,7 +204,7 @@ failure is in rules, workflows, lifecycle, RBAC, or the two-transaction pattern.
 
 This skill stops at the lifecycle. For CRUD on every entity and for reports,
 charts and dashboards on the generated Enterprise Reporting platform (and that
-the two products agree), run **`qa-reports-crud`** as well.
+the two products agree), run **`qa-app-with-ai`** as well.
 
 ## Fixture Model
 
