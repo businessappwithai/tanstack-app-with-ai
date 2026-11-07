@@ -13,10 +13,11 @@
  * Project: {{project.name}}
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, } from '@nestjs/common';
 import { sendEmailTask, EmailTaskPayload } from '../../trigger/email.task';
 import { generateReportTask, ReportTaskPayload } from '../../trigger/report.task';
 import { syncEntityTask, SyncTaskPayload } from '../../trigger/sync.task';
+import { getLogger } from '../../common/logging/logger.service';
 
 // Re-export payload types to preserve the existing public API surface
 export type EmailJobData = EmailTaskPayload;
@@ -25,7 +26,7 @@ export type SyncJobData = SyncTaskPayload;
 
 @Injectable()
 export class JobQueueService {
-  private readonly logger = new Logger(JobQueueService.name);
+  private readonly log = getLogger('jobs');
 
   /**
    * Trigger an email send task.
@@ -35,7 +36,7 @@ export class JobQueueService {
    */
   async addEmailJob(data: EmailJobData, _delay = 0): Promise<string> {
     const handle = await sendEmailTask.trigger(data);
-    this.logger.log(`Email task triggered: ${handle.id} -> ${data.to}`);
+    this.log.event('jobs.task.triggered', { task: 'email', handleId: handle.id, target: null });
     return handle.id;
   }
 
@@ -46,7 +47,7 @@ export class JobQueueService {
    */
   async addReportJob(data: ReportJobData): Promise<string> {
     const handle = await generateReportTask.trigger(data);
-    this.logger.log(`Report task triggered: ${handle.id} -> ${data.reportType}`);
+    this.log.event('jobs.task.triggered', { task: 'report', handleId: handle.id, target: data.reportType });
     return handle.id;
   }
 
@@ -57,7 +58,11 @@ export class JobQueueService {
    */
   async addSyncJob(data: SyncJobData): Promise<string> {
     const handle = await syncEntityTask.trigger(data);
-    this.logger.log(`Sync task triggered: ${handle.id} -> ${data.entityType}:${data.action}`);
+    this.log.event('jobs.task.triggered', {
+      task: 'sync',
+      handleId: handle.id,
+      target: `${data.entityType}:${data.action}`,
+    });
     return handle.id;
   }
 

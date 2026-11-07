@@ -34,7 +34,6 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
-  Logger,
   NotFoundException,
   UnprocessableEntityException,
   forwardRef,
@@ -101,7 +100,7 @@ export interface TransitionResult {
 
 @Injectable()
 export class TransitionService {
-  private readonly logger = new Logger(TransitionService.name);
+  private readonly log = getLogger('entity');
 
   constructor(
     @Inject(KYSELY_CONNECTION) private readonly db: Kysely<any>,
@@ -213,7 +212,7 @@ export class TransitionService {
         .execute();
     } catch (error: any) {
       // The log is a record of what happened, not a condition of it happening.
-      this.logger.warn(`Could not log the move on ${row.tableName}/${row.id}: ${error?.message ?? error}`);
+      this.log.event('entity.transition.unlogged', { entity: row.tableName, recordId: row.id, err: error });
     }
   }
 

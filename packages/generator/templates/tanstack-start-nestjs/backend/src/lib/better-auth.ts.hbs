@@ -11,6 +11,7 @@ import { betterAuth } from 'better-auth';
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { config } from 'dotenv';
+import { getLogger } from '../common/logging/logger.service';
 import * as path from 'path';
 
 // Load .env from backend root regardless of cwd
@@ -96,10 +97,10 @@ export function buildAuthOptions(): any {
         requireEmailVerification: false,
         minPasswordLength: 8,
         sendResetPassword: async ({ user, url: _url }: { user: { email?: string; id: string; name: string }; url: string; token: string }) => {
-          console.log('Password reset requested for:', user.email || user.id);
+          getLogger('auth').event('auth.email.not_sent', { kind: 'password reset', userId: user.id });
         },
         sendVerificationEmail: async ({ user, url: _url }: { user: { email?: string; id: string; name: string }; url: string; token: string }) => {
-          console.log('Verification email sent to:', user.email || user.id);
+          getLogger('auth').event('auth.email.not_sent', { kind: 'verification', userId: user.id });
         },
       },
       session: {

@@ -21,13 +21,14 @@
  * Project: {{project.name}}
  */
 
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { sql, type Kysely } from 'kysely';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { InjectDatabase } from '../../database/database.service.decorator';
 import { chunkModel, extractEnums, type RagChunk } from './rag';
 import { SystemConfigService } from '../sys/services/system-config.service';
+import { getLogger } from '../../common/logging/logger.service';
 
 export interface RetrievedChunk {
   kind: string;
@@ -38,7 +39,7 @@ export interface RetrievedChunk {
 
 @Injectable()
 export class ModelContextService implements OnModuleInit {
-  private readonly logger = new Logger(ModelContextService.name);
+  private readonly log = getLogger('modelcontext');
   private ready = false;
 
   constructor(
@@ -61,7 +62,7 @@ export class ModelContextService implements OnModuleInit {
    */
   async onModuleInit(): Promise<void> {
     void this.ingest().catch((error) => {
-      this.logger.warn(`Model context unavailable: ${error?.message ?? error}`);
+      this.log.event('modelcontext.unavailable', { reason: error?.message ?? String(error) });
     });
   }
 
@@ -69,7 +70,7 @@ export class ModelContextService implements OnModuleInit {
   async ingest(): Promise<{ ingested: number }> {
     const document = await this.readModel();
     if (!document) {
-      this.logger.warn('No model/model.eml.mmd shipped with this application.');
+      this.log.event('modelcontext.unavailable', { reason: 'no model/model.eml.mmd shipped with this application' });
       return { ingested: 0 };
     }
 
@@ -101,7 +102,7 @@ export class ModelContextService implements OnModuleInit {
     });
 
     this.ready = true;
-    this.logger.log(`Model context ready: ${chunks.length} chunks embedded.`);
+    this.log.event('modelcontext.ready', { chunks: chunks.length });
     return { ingested: chunks.length };
   }
 

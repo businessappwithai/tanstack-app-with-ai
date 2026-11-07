@@ -21,10 +21,11 @@
  * Project: {{project.name}}
  */
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ZenEngine } from '@gorules/zen-engine';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { getLogger } from '../../common/logging/logger.service';
 
 export interface RuleAction {
   type: 'validate' | 'notify' | 'prevent' | 'transform' | 'cascade-update' | 'cascade-delete' | 'cascade-create' | 'trigger-workflow';
@@ -81,7 +82,7 @@ function asZenInput(data: Record<string, unknown>): Record<string, unknown> {
 
 @Injectable()
 export class RulesEngine implements OnModuleDestroy {
-  private readonly logger = new Logger(RulesEngine.name);
+  private readonly log = getLogger('rules');
 
   /** Single ZenEngine instance — thread-safe, reused across requests */
   private readonly engine: ZenEngine;
@@ -117,14 +118,13 @@ export class RulesEngine implements OnModuleDestroy {
     action: 'create' | 'update' | 'delete',
     dbRuleName?: string,
   ): Promise<RuleEvaluationResult[]> {
-    this.logger.log(`Evaluating rules for ${entityType}:${action}`);
 
     // A %%rule drawn as a flowchart with no %%action rows is documentation: its
     // switch and expression nodes carry no `content`, which the engine rejects
     // with "missing field `content`". It decides nothing, so say nothing —
     // rather than logging an error on every write to the entity.
     if (this.isDiagramOnly(jdmContent)) {
-      this.logger.debug(`Rule ${dbRuleName ?? ''} on ${entityType} is a diagram only; skipped`);
+      this.log.event('rules.engine.skipped', { entity: entityType, reason: 'the rule is a diagram only' });
       return [];
     }
 
@@ -156,7 +156,7 @@ export class RulesEngine implements OnModuleDestroy {
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error evaluating rules for ${entityType}: ${message}`);
+      this.log.event('rules.evaluation.failed', { entity: entityType, rule: null, err: error });
       return [
         {
           ruleId: 'engine-error',
@@ -182,11 +182,10 @@ export class RulesEngine implements OnModuleDestroy {
     data: Record<string, unknown>,
     action: 'create' | 'update' | 'delete',
   ): Promise<RuleEvaluationResult[]> {
-    this.logger.log(`Evaluating rules for ${entityType}:${action}`);
 
     const jdmFile = this.jdmFiles[entityType];
     if (!jdmFile) {
-      this.logger.debug(`No JDM rules configured for entity: ${entityType}`);
+      this.log.event('rules.engine.skipped', { entity: entityType, reason: 'no rules configured' });
       return [];
     }
 
@@ -195,7 +194,7 @@ export class RulesEngine implements OnModuleDestroy {
     try {
       content = readFileSync(jdmPath);
     } catch {
-      this.logger.warn(`JDM file not found for ${entityType}: ${jdmPath}`);
+      this.log.event('rules.definition.missing', { entity: entityType, path: jdmPath });
       return [];
     }
 
@@ -220,7 +219,7 @@ export class RulesEngine implements OnModuleDestroy {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error evaluating rules for ${entityType}: ${message}`);
+      this.log.event('rules.evaluation.failed', { entity: entityType, rule: null, err: error });
       return [
         {
           ruleId: 'engine-error',
@@ -566,7 +565,7 @@ export class RulesEngine implements OnModuleDestroy {
       const parsed = JSON.parse(value);
       return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
     } catch {
-      this.logger.warn(`Rule action data is not valid JSON: ${value}`);
+      this.log.event('rules.engine.skipped', { entity: null, reason: 'rule action data is not valid JSON' });
       return undefined;
     }
   }

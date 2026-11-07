@@ -15,7 +15,7 @@
  * Project: {{project.name}}
  */
 
-import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards, } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -37,7 +37,6 @@ import {
 @UseGuards(SessionAuthGuard, RolesGuard)
 @Controller('rules')
 export class RulesController {
-  private readonly logger = new Logger(RulesController.name);
 
   constructor(private readonly rulesService: RulesService) {}
 

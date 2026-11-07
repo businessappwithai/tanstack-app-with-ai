@@ -8,7 +8,7 @@
  * Project: {{project.name}}
  */
 
-import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import type { Kysely } from 'kysely';
 import { InjectDatabase } from '../../database/database.service.decorator';
 import { RulesEngine } from './rules-engine.service';
@@ -167,7 +167,7 @@ export function evaluateArithmetic(expression: string, record: Record<string, un
 
 @Injectable()
 export class RulesService {
-  private readonly logger = new Logger(RulesService.name);
+  private readonly log = getLogger('rules');
 
   constructor(
     private readonly rulesEngine: RulesEngine,
@@ -277,7 +277,13 @@ export class RulesService {
       .returningAll()
       .executeTakeFirst();
 
-    this.logger.log(`Created rule ${rule.rule_name} for ${rule.entity_name}:${rule.operation}`);
+    this.log.event('rules.definition.changed', {
+      rule: rule.rule_name,
+      entity: rule.entity_name,
+      operation: rule.operation,
+      change: 'created',
+      version: 1,
+    });
 
     return this.mapDbRuleToRule(rule);
   }
@@ -338,7 +344,13 @@ export class RulesService {
       .returningAll()
       .executeTakeFirst();
 
-    this.logger.log(`Updated rule ${updated.rule_name} (version ${updated.version})`);
+    this.log.event('rules.definition.changed', {
+      rule: updated.rule_name,
+      entity: updated.entity_name,
+      operation: updated.operation,
+      change: 'updated',
+      version: updated.version,
+    });
 
     return this.mapDbRuleToRule(updated);
   }
@@ -358,7 +370,13 @@ export class RulesService {
       .where('id', '=', id)
       .execute();
 
-    this.logger.log(`Deactivated rule ${rule.ruleName}`);
+    this.log.event('rules.definition.changed', {
+      rule: rule.ruleName,
+      entity: rule.entityName,
+      operation: rule.operation,
+      change: 'deactivated',
+      version: rule.version,
+    });
   }
 
   /**
@@ -376,7 +394,13 @@ export class RulesService {
       throw new BadRequestException('Deactivate the rule before deleting it permanently');
     }
     await this.db.deleteFrom('sys_rule_definitions').where('id', '=', id).execute();
-    this.logger.log(`Deleted rule ${rule.ruleName} permanently`);
+    this.log.event('rules.definition.changed', {
+      rule: rule.ruleName,
+      entity: rule.entityName,
+      operation: rule.operation,
+      change: 'deleted',
+      version: rule.version,
+    });
   }
 
   /**
@@ -651,7 +675,7 @@ export class RulesService {
           .executeTakeFirst();
 
         if (existing) {
-          this.logger.log(`Rule ${ruleName} already exists, skipping migration`);
+          this.log.event('rules.migration.completed', { rule: ruleName, file, outcome: 'exists' });
           continue;
         }
 
@@ -666,10 +690,10 @@ export class RulesService {
         );
 
         migrated++;
-        this.logger.log(`Migrated rule ${ruleName} from ${file}`);
+        this.log.event('rules.migration.completed', { rule: ruleName, file, outcome: 'migrated' });
       } catch (error) {
         const errorMsg = `Failed to migrate ${file}: ${error instanceof Error ? error.message : String(error)}`;
-        this.logger.error(errorMsg);
+        this.log.event('rules.migration.failed', { file, err: error });
         errors.push(errorMsg);
       }
     }
@@ -836,7 +860,7 @@ export class RulesService {
           .where('deleted_at' as any, 'is', null)
           .execute();
       } catch (err: any) {
-        this.logger.warn(`followStateWrites: could not reload ${table}: ${err?.message ?? err}`);
+        this.log.event('rules.evaluation.failed', { entity: table, rule: null, err });
         continue;
       }
       for (const row of rows) {
@@ -859,9 +883,12 @@ export class RulesService {
     const db = options.db ?? this.db;
     const depth = options.depth ?? 0;
     if (depth > MAX_STATE_WRITE_DEPTH) {
-      this.logger.warn(
-        `executeMatchedActions: ${entityName}:${entityId} moved state ${depth} times from one write — stopping`,
-      );
+      this.log.event('rules.action.skipped', {
+        entity: entityName,
+        rule: null,
+        action: null,
+        reason: `${entityName}:${entityId} moved state ${depth} times from one write — stopping`,
+      });
       return;
     }
 
@@ -874,12 +901,7 @@ export class RulesService {
       if (options.throwOnError) {
         throw new Error(`Could not evaluate business rules for ${entityName}: ${err?.message ?? err}`);
       }
-      this.logger.warn(`executeMatchedActions: evaluate failed for ${entityName}: ${err?.message}`);
-      getLogger('rules').event('rules.evaluation.failed', {
-        entity: entityName,
-        rule: null,
-        err,
-      });
+      this.log.event('rules.evaluation.failed', { entity: entityName, rule: null, err });
       return;
     }
 
@@ -890,10 +912,20 @@ export class RulesService {
           if (action.type === 'trigger-workflow') {
             const wfName = action.config.workflowName as string | undefined;
             if (!wfName) {
-              this.logger.warn(`trigger-workflow action in rule "${result.ruleName}" has no workflowName — skipping`);
+              this.log.event('rules.action.skipped', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              reason: `trigger-workflow action in rule "${result.ruleName}" has no workflowName — skipping`,
+            });
               continue;
             }
-            this.logger.log(`Rule "${result.ruleName}" triggering workflow "${wfName}" for ${entityName}:${entityId}`);
+            this.log.event('rules.action.performed', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              detail: `Rule "${result.ruleName}" triggering workflow "${wfName}" for ${entityName}:${entityId}`,
+            });
             // Only hand our connection over when the caller opened a transaction —
             // otherwise the workflow service uses its own, as it always has.
             const mutations = await this.workflowService.triggerByWorkflowName(
@@ -917,7 +949,12 @@ export class RulesService {
                 .set(updateData as any)
                 .where(linkField as any, '=', entityId)
                 .execute();
-              this.logger.log(`Cascade-update: updated ${targetEntity} where ${linkField}=${entityId}`);
+              this.log.event('rules.action.performed', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              detail: `Cascade-update: updated ${targetEntity} where ${linkField}=${entityId}`,
+            });
             }
           } else if (action.type === 'cascade-delete') {
             const targetEntity = action.config.targetEntity as string | undefined;
@@ -927,11 +964,19 @@ export class RulesService {
                 .deleteFrom(targetEntity as any)
                 .where(linkField as any, '=', entityId)
                 .execute();
-              this.logger.log(`Cascade-delete: deleted from ${targetEntity} where ${linkField}=${entityId}`);
+              this.log.event('rules.action.performed', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              detail: `Cascade-delete: deleted from ${targetEntity} where ${linkField}=${entityId}`,
+            });
             } else {
-              this.logger.warn(
-                `cascade-delete in rule "${result.ruleName}" needs targetEntity and linkField — skipping`,
-              );
+              this.log.event('rules.action.skipped', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              reason: `cascade-delete in rule "${result.ruleName}" needs targetEntity and linkField — skipping`,
+            });
             }
           } else if (action.type === 'cascade-create') {
             const targetEntity = action.config.targetEntity as string | undefined;
@@ -949,11 +994,19 @@ export class RulesService {
                   updated_at: now,
                 } as any)
                 .execute();
-              this.logger.log(`Cascade-create: inserted into ${targetEntity} for ${entityName}:${entityId}`);
+              this.log.event('rules.action.performed', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              detail: `Cascade-create: inserted into ${targetEntity} for ${entityName}:${entityId}`,
+            });
             } else {
-              this.logger.warn(
-                `cascade-create in rule "${result.ruleName}" needs targetEntity and createData — skipping`,
-              );
+              this.log.event('rules.action.skipped', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              reason: `cascade-create in rule "${result.ruleName}" needs targetEntity and createData — skipping`,
+            });
             }
           } else if (action.type === 'transform') {
             const transformData = action.config.transformData as Record<string, unknown> | undefined;
@@ -978,11 +1031,19 @@ export class RulesService {
                 .set({ ...computed, updated_at: new Date() } as any)
                 .where('id' as any, '=', entityId)
                 .execute();
-              this.logger.log(
-                `Transform: applied ${Object.keys(transformData).join(', ')} to ${entityName}:${entityId}`,
-              );
+              this.log.event('rules.action.performed', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              detail: `Transform: applied ${Object.keys(transformData).join(', ')} to ${entityName}:${entityId}`,
+            });
             } else {
-              this.logger.warn(`transform in rule "${result.ruleName}" has no transformData — skipping`);
+              this.log.event('rules.action.skipped', {
+              entity: entityName,
+              rule: result.ruleName,
+              action: action.type,
+              reason: `transform in rule "${result.ruleName}" has no transformData — skipping`,
+            });
             }
           }
         } catch (err: any) {
@@ -991,8 +1052,7 @@ export class RulesService {
               `Rule "${result.ruleName}" action "${action.type}" failed: ${err?.message ?? err}`,
             );
           }
-          this.logger.error(`executeMatchedActions: action "${action.type}" failed for rule "${result.ruleName}": ${err?.message}`);
-          getLogger('rules').event('rules.evaluation.failed', {
+          this.log.event('rules.action.failed', {
             entity: entityName,
             rule: result.ruleName,
             action: action.type,

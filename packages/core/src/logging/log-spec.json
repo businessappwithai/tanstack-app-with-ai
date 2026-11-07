@@ -160,7 +160,7 @@
     {
       "name": "entity",
       "description": "Business-entity reads and writes in a generated application.",
-      "level": "info",
+      "level": "debug",
       "surfaces": ["generated"]
     },
     {
@@ -174,6 +174,30 @@
       "description": "Process lifecycle: startup, readiness, configuration, shutdown.",
       "level": "info",
       "surfaces": ["generator", "generated"]
+    },
+    {
+      "name": "audit",
+      "description": "Audit trail and record history: the PostgreSQL log and, when enabled, immudb proofs.",
+      "level": "info",
+      "surfaces": ["generated"]
+    },
+    {
+      "name": "jobs",
+      "description": "Background tasks handed to the job runner.",
+      "level": "info",
+      "surfaces": ["generated"]
+    },
+    {
+      "name": "notifications",
+      "description": "Notifications and the dictionary reads behind them.",
+      "level": "warn",
+      "surfaces": ["generated"]
+    },
+    {
+      "name": "modelcontext",
+      "description": "The model-context assistant's index of this application's model.",
+      "level": "info",
+      "surfaces": ["generated"]
     }
   ],
   "events": [
@@ -436,7 +460,7 @@
       "channel": "rules",
       "level": "info",
       "message": "Rule action performed",
-      "fields": ["entity", "rule", "action"]
+      "fields": ["entity", "rule", "action", "detail"]
     },
     {
       "id": "rules.write.prevented",
@@ -485,7 +509,7 @@
       "channel": "workflow",
       "level": "debug",
       "message": "Workflow step completed",
-      "fields": ["workflow", "step", "type", "durationMs"]
+      "fields": ["workflow", "step", "type", "durationMs", "detail"]
     },
     {
       "id": "workflow.step.failed",
@@ -540,8 +564,348 @@
       "id": "entity.validation.failed",
       "channel": "entity",
       "level": "warn",
-      "message": "Record rejected by validation",
-      "fields": ["entity", "field", "reason"]
+      "message": "Record failed validation",
+      "fields": ["entity", "mode", "count"]
+    },
+    {
+      "id": "http.proxy.failed",
+      "channel": "http",
+      "level": "error",
+      "message": "Proxy request failed",
+      "fields": ["target", "err"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "workflow.step.skipped",
+      "channel": "workflow",
+      "level": "warn",
+      "message": "Workflow step skipped",
+      "fields": ["workflow", "step", "type", "reason"]
+    },
+    {
+      "id": "workflow.run.completed",
+      "channel": "workflow",
+      "level": "info",
+      "message": "Workflow completed",
+      "fields": ["workflow", "entity", "recordId", "mutations", "trigger"]
+    },
+    {
+      "id": "workflow.run.failed",
+      "channel": "workflow",
+      "level": "error",
+      "message": "Workflow failed",
+      "fields": ["workflow", "entity", "recordId", "trigger", "err"]
+    },
+    {
+      "id": "workflow.definition.unavailable",
+      "channel": "workflow",
+      "level": "warn",
+      "message": "Workflow definition could not be loaded",
+      "fields": ["workflow", "entity", "err"]
+    },
+    {
+      "id": "workflow.run.unrecorded",
+      "channel": "workflow",
+      "level": "warn",
+      "message": "Workflow run could not be recorded",
+      "fields": ["workflow", "err"]
+    },
+    {
+      "id": "workflow.trigger.ignored",
+      "channel": "workflow",
+      "level": "debug",
+      "message": "Workflow trigger ignored",
+      "fields": ["workflow", "entity", "recordId", "reason"]
+    },
+    {
+      "id": "workflow.lifecycle.unavailable",
+      "channel": "workflow",
+      "level": "warn",
+      "message": "Stored status flows could not be read",
+      "fields": ["reason"]
+    },
+    {
+      "id": "workflow.lifecycle.ignored",
+      "channel": "workflow",
+      "level": "warn",
+      "message": "Stored status flow ignored",
+      "fields": ["entity", "reason"]
+    },
+    {
+      "id": "rules.definition.changed",
+      "channel": "rules",
+      "level": "info",
+      "message": "Rule changed",
+      "fields": ["rule", "entity", "operation", "change", "version"]
+    },
+    {
+      "id": "rules.migration.completed",
+      "channel": "rules",
+      "level": "info",
+      "message": "Rule migrated",
+      "fields": ["rule", "file", "outcome"]
+    },
+    {
+      "id": "rules.migration.failed",
+      "channel": "rules",
+      "level": "error",
+      "message": "Rule migration failed",
+      "fields": ["file", "err"]
+    },
+    {
+      "id": "rules.action.skipped",
+      "channel": "rules",
+      "level": "warn",
+      "message": "Rule action skipped",
+      "fields": ["entity", "rule", "action", "reason"]
+    },
+    {
+      "id": "rules.action.failed",
+      "channel": "rules",
+      "level": "error",
+      "message": "Rule action failed",
+      "fields": ["entity", "rule", "action", "err"]
+    },
+    {
+      "id": "rules.definition.missing",
+      "channel": "rules",
+      "level": "warn",
+      "message": "Rule definition file missing",
+      "fields": ["entity", "path"]
+    },
+    {
+      "id": "rules.engine.skipped",
+      "channel": "rules",
+      "level": "debug",
+      "message": "Rule evaluation skipped",
+      "fields": ["entity", "reason"]
+    },
+    {
+      "id": "rules.warning.raised",
+      "channel": "rules",
+      "level": "warn",
+      "message": "Rule raised a warning",
+      "fields": ["entity", "event", "warning"]
+    },
+    {
+      "id": "entity.window.clause_dropped",
+      "channel": "entity",
+      "level": "warn",
+      "message": "Window clause dropped",
+      "fields": ["entity", "clause", "reason"]
+    },
+    {
+      "id": "entity.reread.failed",
+      "channel": "entity",
+      "level": "warn",
+      "message": "Record could not be re-read",
+      "fields": ["entity", "recordId", "err"]
+    },
+    {
+      "id": "entity.labels.unresolved",
+      "channel": "entity",
+      "level": "warn",
+      "message": "Reference labels could not be resolved",
+      "fields": ["entity", "err"]
+    },
+    {
+      "id": "entity.dictionary.provisioned",
+      "channel": "entity",
+      "level": "info",
+      "message": "Dictionary provisioned for entity",
+      "fields": ["entity", "created"]
+    },
+    {
+      "id": "entity.promotion.completed",
+      "channel": "entity",
+      "level": "debug",
+      "message": "Record promotion completed",
+      "fields": ["entity", "recordId", "operation", "outcome", "steps"]
+    },
+    {
+      "id": "entity.promotion.failed",
+      "channel": "entity",
+      "level": "error",
+      "message": "Record promotion failed",
+      "fields": ["entity", "recordId", "step", "err"]
+    },
+    {
+      "id": "entity.promotion.refused",
+      "channel": "entity",
+      "level": "warn",
+      "message": "Record promotion refused",
+      "fields": ["entity", "recordId", "reason"]
+    },
+    {
+      "id": "entity.promotion.queued",
+      "channel": "entity",
+      "level": "info",
+      "message": "Record promotion queued",
+      "fields": ["entity", "recordId", "operation", "runId"]
+    },
+    {
+      "id": "entity.promotion.dispatch_failed",
+      "channel": "entity",
+      "level": "error",
+      "message": "Record promotion could not be queued",
+      "fields": ["entity", "recordId", "err"]
+    },
+    {
+      "id": "entity.transition.unlogged",
+      "channel": "entity",
+      "level": "warn",
+      "message": "Move could not be logged",
+      "fields": ["entity", "recordId", "err"]
+    },
+    {
+      "id": "audit.ready",
+      "channel": "audit",
+      "level": "info",
+      "message": "Audit store ready",
+      "fields": ["store"]
+    },
+    {
+      "id": "audit.write.failed",
+      "channel": "audit",
+      "level": "error",
+      "message": "Audit write failed",
+      "fields": ["store", "err"]
+    },
+    {
+      "id": "audit.immudb.connected",
+      "channel": "audit",
+      "level": "info",
+      "message": "immudb connected",
+      "fields": ["host", "port", "database"]
+    },
+    {
+      "id": "audit.immudb.unavailable",
+      "channel": "audit",
+      "level": "warn",
+      "message": "immudb unavailable",
+      "fields": ["host", "port", "reason"]
+    },
+    {
+      "id": "audit.immudb.failed",
+      "channel": "audit",
+      "level": "error",
+      "message": "immudb operation failed",
+      "fields": ["operation", "err"]
+    },
+    {
+      "id": "audit.history.degraded",
+      "channel": "audit",
+      "level": "warn",
+      "message": "Record history degraded",
+      "fields": ["reason"]
+    },
+    {
+      "id": "jobs.task.triggered",
+      "channel": "jobs",
+      "level": "info",
+      "message": "Background task triggered",
+      "fields": ["task", "handleId", "target"]
+    },
+    {
+      "id": "notifications.send.failed",
+      "channel": "notifications",
+      "level": "warn",
+      "message": "Notification step failed",
+      "fields": ["step", "err"]
+    },
+    {
+      "id": "modelcontext.ready",
+      "channel": "modelcontext",
+      "level": "info",
+      "message": "Model context ready",
+      "fields": ["chunks"]
+    },
+    {
+      "id": "modelcontext.unavailable",
+      "channel": "modelcontext",
+      "level": "warn",
+      "message": "Model context unavailable",
+      "fields": ["reason"]
+    },
+    {
+      "id": "auth.session.unavailable",
+      "channel": "auth",
+      "level": "error",
+      "message": "Session could not be checked",
+      "fields": ["step", "err"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "auth.guard.unavailable",
+      "channel": "auth",
+      "level": "error",
+      "message": "Access guard could not decide",
+      "fields": ["step", "reason"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "auth.capability.unsynced",
+      "channel": "auth",
+      "level": "warn",
+      "message": "Not listening for access changes",
+      "fields": ["err"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "app.admin.bootstrap",
+      "channel": "app",
+      "level": "info",
+      "message": "Administrator account ensured",
+      "fields": ["email", "step"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "app.admin.password_generated",
+      "channel": "app",
+      "level": "warn",
+      "message": "Administrator password generated",
+      "fields": ["email"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "app.admin.failed",
+      "channel": "app",
+      "level": "warn",
+      "message": "Administrator account could not be ensured",
+      "fields": ["err"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "app.admin.password_ignored",
+      "channel": "app",
+      "level": "warn",
+      "message": "ADMIN_PASSWORD ignored",
+      "fields": ["reason"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "db.seed.completed",
+      "channel": "db",
+      "level": "info",
+      "message": "Seed completed",
+      "fields": ["name", "durationMs"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "db.seed.failed",
+      "channel": "db",
+      "level": "error",
+      "message": "Seed failed",
+      "fields": ["name", "err"],
+      "surfaces": ["generated"]
+    },
+    {
+      "id": "auth.email.not_sent",
+      "channel": "auth",
+      "level": "warn",
+      "message": "Email delivery is not configured; the email was not sent",
+      "fields": ["kind", "userId"],
+      "surfaces": ["generated"]
     }
   ]
 }

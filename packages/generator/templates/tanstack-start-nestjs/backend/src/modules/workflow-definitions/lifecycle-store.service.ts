@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { Injectable, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import { InjectDatabase } from "../../database/database.service.decorator";
 import {
@@ -8,6 +8,7 @@ import {
   lifecycleOf,
   type Lifecycle,
 } from "../../common/lifecycle";
+import { getLogger } from "../../common/logging/logger.service";
 
 /**
  * The status flows an administrator redrew, loaded into `common/lifecycle.ts`.
@@ -22,7 +23,6 @@ import {
  */
 @Injectable()
 export class LifecycleStore implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(LifecycleStore.name);
   private listener: { end(): Promise<void> } | null = null;
   private stopped = false;
 
@@ -61,7 +61,7 @@ export class LifecycleStore implements OnModuleInit, OnModuleDestroy {
         .orderBy("updated_at", "asc")
         .execute()) as any;
     } catch (error: any) {
-      this.logger.warn(`Could not read the stored status flows (${error?.message ?? error}); running the model's.`);
+      getLogger("workflow").event("workflow.lifecycle.unavailable", { reason: error?.message ?? String(error) });
       return;
     }
     const next: Record<string, Lifecycle> = {};
@@ -71,7 +71,10 @@ export class LifecycleStore implements OnModuleInit, OnModuleDestroy {
       // by hand, runs exactly as this build reads it.
       const { lifecycle, problems } = lifecycleFromDiagram(row.entity_name, row.mermaid_code ?? "");
       if (!lifecycle) {
-        this.logger.warn(`The stored status flow of ${row.entity_name} is not used: ${problems.join(" ")}`);
+        getLogger("workflow").event("workflow.lifecycle.ignored", {
+          entity: row.entity_name,
+          reason: problems.join(" "),
+        });
         continue;
       }
       next[row.entity_name] = lifecycle;
@@ -101,10 +104,9 @@ export class LifecycleStore implements OnModuleInit, OnModuleDestroy {
       await client.query("LISTEN lifecycle_changed");
       this.listener = client;
     } catch (error: any) {
-      this.logger.warn(
-        `Not listening for status flow changes (${error?.message ?? error}); ` +
-          "another instance's edit is picked up when this one restarts.",
-      );
+      getLogger("workflow").event("workflow.lifecycle.unavailable", {
+        reason: `not listening for status flow changes (${error?.message ?? error}); another instance's edit is picked up on restart`,
+      });
     }
   }
 }
