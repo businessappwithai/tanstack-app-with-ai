@@ -17,10 +17,17 @@ export {
 } from "./logger";
 
 export {
+  categoryForStatus,
   type ConfiguredLevel,
   channelNames,
+  type ErrorCategory,
+  type ErrorDefinition,
+  type ErrorExposure,
+  errorCodes,
   eventIds,
   findChannel,
+  findError,
+  findErrorCategory,
   findEvent,
   LEVELS,
   type LogChannel,
