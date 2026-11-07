@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const key=process.argv[2]||'x'; const ents=(process.argv[3]||'').split('|').filter(Boolean);
 const S=(process.env.QA_OUT||'./qa-out')+'/'+key+'/'; require('fs').mkdirSync(S,{recursive:true});
 const TS=Date.now().toString(36);
-let CUR=''; let PICK=1; async function fill(p){
+let CUR=''; let PICK=1; let MINIMAL=false; async function fill(p){
  await fill1(p); const r=await fill1(p,true);
  // Dependent lookups load only after their parent is chosen and may sit earlier in the form
  // than the parent: keep going until no dropdown that has options is left empty.
@@ -12,17 +12,20 @@ let CUR=''; let PICK=1; async function fill(p){
   for(const e of await p.locator('main select[name]:not([disabled])').elementHandles()){
    const info=await e.evaluate(x=>({nm:x.name,val:x.value,n:[...x.options].filter(o=>o.value).length,vis:!!x.offsetParent}));
    if(!info.vis||info.val||!info.n||info.nm===CUR.toLowerCase().replace(/\s+/g,'_')+'_id') continue;
+   if(MINIMAL && !(await isRequired(e))) continue;
    const v=await e.evaluate(x=>[...x.options].map(o=>o.value).filter(Boolean)[0]); await e.selectOption(v); changed++; await p.waitForTimeout(700);
   }
   if(!changed) break;
  }
  return r; }
+async function isRequired(e){ return e.evaluate(x=>{ const l=x.id&&document.querySelector('label[for="'+x.id+'"]'); const w=x.closest('div'); const t=(l?l.textContent:(w&&w.parentElement?w.parentElement.textContent:''))||''; return t.includes('*'); }); }
 async function fill1(p,second){
  const els=await p.locator('form input, form select, form textarea, main input, main select, main textarea').elementHandles(); const log=[]; let n=0;
  for(const e of els){
   const info=await e.evaluate(x=>({t:x.tagName,ty:x.type,nm:x.name||x.id,vis:!!(x.offsetParent),ro:x.readOnly||x.disabled}));
   if(!info.vis||info.ro||!info.nm||/search/i.test(info.nm)) continue;
   if(info.nm===CUR.toLowerCase().replace(/\s+/g,'_')+'_id') continue; // the record's own id mirror, not an input
+  if(MINIMAL && !(await isRequired(e))) continue; // retry: required fields only, as a person leaves optional ones empty
   try{
    if(info.t==='SELECT'){ for(let w=0;w<(second?14:3);w++){ if((await e.evaluate(s=>s.options.length))>1) break; await e.page?.waitForTimeout?.(300); await new Promise(r=>setTimeout(r,300)); } const opts=await e.evaluate(s=>[...s.options].map(o=>o.value).filter(v=>v)); if(opts.length) {await e.selectOption(opts[PICK===0?0:(opts.length>1?1:0)]); n++;} }
    else if(info.ty==='checkbox'||info.ty==='file'||info.ty==='hidden') {}
@@ -68,14 +71,15 @@ async function fill1(p,second){
    await p.screenshot({path:S+`crud-${ent.replace(/\W/g,'')}-2-created.png`});
    r.create=/created/i.test(r.createMsg)?'pass':'fail';
    if(r.create==='fail' && r.createMsg && !/validation|unique/i.test(r.createMsg)){
-     // A model rule refused the generated values (a "resolved" case with no notes). Choose each
-     // dropdown's first option — the default state — and try once more.
-     r.firstAttempt=r.createMsg.slice(0,100); PICK=0;
+     // A model rule refused the generated values (an optional "resolved at" date filled while its
+     // "resolution notes" stay hidden). Fill required fields only, each dropdown's first option
+     // — what a person does — and try once more.
+     r.firstAttempt=r.createMsg.slice(0,100); PICK=0; MINIMAL=true;
      await p.getByRole('button',{name:'New',exact:true}).first().click(); await p.waitForTimeout(2000);
      CUR=ent; await fill(p);
      await p.getByRole('button',{name:'Create',exact:true}).first().click(); await p.waitForTimeout(3500);
      r.createMsg=(await p.locator('[role=alert],[data-sonner-toast],.toast').allInnerTexts()).join(' | ').slice(0,200);
-     r.create=/created/i.test(r.createMsg)?'pass (after retrying with default options)':'fail'; PICK=1;
+     r.create=/created/i.test(r.createMsg)?'pass (after retrying with required fields only)':'fail'; PICK=1; MINIMAL=false;
    }
    if(r.create.startsWith('pass')) r.create='pass';
    if(r.create==='fail') r.invalid=(await p.locator('.text-destructive,[class*=error],[aria-invalid=true]').evaluateAll(n=>n.slice(0,6).map(x=>(x.getAttribute('name')||x.textContent||'').trim().slice(0,60)))).join(' ; ');
