@@ -2732,12 +2732,18 @@ export async function seed(db: Kysely<any>): Promise<void> {
       await fs.copyFile(path.join(backend, "src/modules/logging", file), path.join(outDir, file));
     }
     // Plain modules the controller and the guards import.
-    for (const file of ["level-control.ts", "trace-context.ts"]) {
+    for (const file of ["level-control.ts", "trace-context.ts", "shutdown.ts"]) {
       await fs.copyFile(
         path.join(backend, "src/common/logging", file),
         path.join(outputDir, "src/common/logging", file)
       );
     }
+    // Distributed tracing, off until OTEL_EXPORTER_OTLP_ENDPOINT is set.
+    await fs.mkdir(path.join(outputDir, "src/common/tracing"), { recursive: true });
+    await fs.copyFile(
+      path.join(backend, "src/common/tracing/tracing.ts"),
+      path.join(outputDir, "src/common/tracing/tracing.ts")
+    );
     await fs.copyFile(
       path.join(backend, "src/modules/auth/guards/admin-roles.ts"),
       path.join(outputDir, "src/modules/auth/guards/admin-roles.ts")

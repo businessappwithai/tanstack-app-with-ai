@@ -948,6 +948,14 @@
       "message": "Stored log levels could not be read or written",
       "fields": ["err"],
       "surfaces": ["generated"]
+    },
+    {
+      "id": "telemetry.start_failed",
+      "channel": "app",
+      "level": "warn",
+      "message": "Tracing could not be started; requests run untraced",
+      "fields": ["err"],
+      "surfaces": ["generated"]
     }
   ]
 }

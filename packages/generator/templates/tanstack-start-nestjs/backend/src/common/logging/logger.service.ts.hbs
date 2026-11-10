@@ -35,7 +35,9 @@ import { AsyncLocalStorage } from 'async_hooks';
 
 import { categoryForStatus, FALLBACK_CODE } from '../errors/app-error';
 import { describeLevels, type ChannelLevelReport } from './level-control';
+import { runShutdownHooks } from './shutdown';
 import { keepDebug, parseTraceparent, sampleRate } from './trace-context';
+import { initTracing, startServerSpan, tracingEnabled } from '../tracing/tracing';
 import { ERROR_CATEGORIES } from '../errors/catalogue';
 
 /* -------------------------------------------------------------------------- */
@@ -570,7 +572,7 @@ export function installProcessLogging(): void {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       log.event('app.shutdown', { signal, uptimeMs: Date.now() - startedAt });
-      void flushLogs().then(() => process.exit(0));
+      void Promise.allSettled([flushLogs(), runShutdownHooks()]).then(() => process.exit(0));
     });
   }
 }
@@ -625,7 +627,32 @@ export function installHttpLogging(fastify: {
     // Everything logged for the rest of this request carries the id, without
     // any of it having to be handed one.
     // A caller's trace, when it sent one, so these lines can be found from the trace.
-    const trace = parseTraceparent(request.headers?.['traceparent']);
+    let trace: { traceId: string; spanId: string } | null = parseTraceparent(
+      request.headers?.['traceparent'],
+    );
+
+    // With a collector configured (OTEL_EXPORTER_OTLP_ENDPOINT) the request is a server span.
+    // Its ids replace the caller's, so a trace and its log lines share one id.
+    if (tracingEnabled()) {
+      await initTracing();
+      const route = request.routeOptions?.url ?? request.routerPath ?? request.url ?? 'unknown';
+      const span = startServerSpan(
+        `${request.method} ${route}`,
+        {
+          'http.request.method': String(request.method),
+          'http.route': String(route),
+          'request.id': request.__logRequestId,
+        },
+        request.headers ?? {},
+      );
+      if (span) {
+        request.__logSpan = span;
+        trace = { traceId: span.traceId, spanId: span.spanId };
+      }
+    }
+
+    request.__logTrace = trace;
+
     beginRequestContext({
       requestId: request.__logRequestId,
       userId: null,
@@ -644,6 +671,11 @@ export function installHttpLogging(fastify: {
     const durationMs = Date.now() - (request.__logStartedAt ?? Date.now());
     const status = reply.statusCode ?? 0;
 
+    (request.__logSpan as { end: (r: { status: number; err?: unknown }) => void } | undefined)?.end({
+      status,
+      err: request.__logError,
+    });
+
     // The route pattern, not the concrete URL: `/api/bus/:entity` aggregates,
     // `/api/bus/compound/9f3c…` is a distinct "message" per record and cannot
     // be grouped by anything.
@@ -652,6 +684,11 @@ export function installHttpLogging(fastify: {
       method: request.method ?? 'unknown',
       path,
       requestId: request.__logRequestId ?? null,
+      // This hook can run outside the request's async context, so the ids are read off the request.
+      ...(request.__logTrace && {
+        traceId: request.__logTrace.traceId,
+        spanId: request.__logTrace.spanId,
+      }),
     };
 
     // What the exception filter decided this was. A response it never saw — a

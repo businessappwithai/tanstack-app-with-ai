@@ -192,6 +192,10 @@ services:
       # 429 either way, but a ceiling it never reaches keeps a run short.
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100000}
       PORT: {{project.backendPort}}
+      # Tracing: off until a collector is named. With `--profile observability`, set this to
+      # http://otel-collector:4318 and open Jaeger on http://localhost:16686.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-{{project.id}}-backend}
       # No immudb service is composed here; left unset the backend tries to
       # connect on start and logs a gRPC login error. Audit rows go to PostgreSQL.
       IMMUDB_ENABLED: ${IMMUDB_ENABLED:-false}
@@ -483,6 +487,29 @@ services:
       report-seeder:
         condition: service_completed_successfully
   # </e2e>
+
+  # ── Tracing (optional) ──────────────────────────────────────────────────────
+  # docker compose --profile observability up -d
+  # Nothing here starts without the profile, and the backend exports nothing until
+  # OTEL_EXPORTER_OTLP_ENDPOINT is set.
+  otel-collector:
+    image: otel/opentelemetry-collector:0.116.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
 
 volumes:
   postgres_data:
