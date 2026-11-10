@@ -30,6 +30,15 @@ describe("generated application tracing", () => {
     expect(src).toMatch(/request\.__logSpan[\s\S]*\.end\(/);
   });
 
+  it("enters the request context before the first await", () => {
+    // enterWith after `await initTracing()` never reached the guards, so the audit trail lost the
+    // user behind every write (suite 20 failed only with tracing on).
+    const src = read("backend/src/common/logging/logger.service.ts.hbs");
+    const hook = src.slice(src.indexOf("addHook('onRequest'"));
+    expect(hook.indexOf("beginRequestContext(")).toBeGreaterThan(-1);
+    expect(hook.indexOf("beginRequestContext(")).toBeLessThan(hook.indexOf("await initTracing();"));
+  });
+
   it("flushes the exporter on SIGTERM", () => {
     expect(read("backend/src/common/logging/logger.service.ts.hbs")).toContain("runShutdownHooks()");
   });

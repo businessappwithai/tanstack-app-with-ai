@@ -631,6 +631,16 @@ export function installHttpLogging(fastify: {
       request.headers?.['traceparent'],
     );
 
+    // The context is entered BEFORE the first await. `enterWith` inside an async hook only reaches
+    // what runs in this hook's own continuation; entered after `await initTracing()` it never
+    // reached the guards or services, and the audit trail lost the user who made the write.
+    beginRequestContext({
+      requestId: request.__logRequestId,
+      userId: null,
+      ...(trace && { traceId: trace.traceId, spanId: trace.spanId }),
+    });
+    request.__logTrace = trace;
+
     // With a collector configured (OTEL_EXPORTER_OTLP_ENDPOINT) the request is a server span.
     // Its ids replace the caller's, so a trace and its log lines share one id.
     if (tracingEnabled()) {
@@ -648,16 +658,10 @@ export function installHttpLogging(fastify: {
       if (span) {
         request.__logSpan = span;
         trace = { traceId: span.traceId, spanId: span.spanId };
+        request.__logTrace = trace;
+        setRequestContext({ traceId: span.traceId, spanId: span.spanId });
       }
     }
-
-    request.__logTrace = trace;
-
-    beginRequestContext({
-      requestId: request.__logRequestId,
-      userId: null,
-      ...(trace && { traceId: trace.traceId, spanId: trace.spanId }),
-    });
 
     try {
       reply.header('x-request-id', request.__logRequestId);
