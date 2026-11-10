@@ -14078,6 +14078,14 @@ var log_spec_default = {
       message: "Stored log levels could not be read or written",
       fields: ["err"],
       surfaces: ["generated"]
+    },
+    {
+      id: "telemetry.start_failed",
+      channel: "app",
+      level: "warn",
+      message: "Tracing could not be started; requests run untraced",
+      fields: ["err"],
+      surfaces: ["generated"]
     }
   ]
 };
@@ -18166,9 +18174,11 @@ export async function seed(db: Kysely<any>): Promise<void> {
     ]) {
       await copyFile(join(backend, "src/modules/logging", file), join(outDir, file));
     }
-    for (const file of ["level-control.ts", "trace-context.ts"]) {
+    for (const file of ["level-control.ts", "trace-context.ts", "shutdown.ts"]) {
       await copyFile(join(backend, "src/common/logging", file), join(outputDir, "src/common/logging", file));
     }
+    await mkdir(join(outputDir, "src/common/tracing"), { recursive: true });
+    await copyFile(join(backend, "src/common/tracing/tracing.ts"), join(outputDir, "src/common/tracing/tracing.ts"));
     await copyFile(join(backend, "src/modules/auth/guards/admin-roles.ts"), join(outputDir, "src/modules/auth/guards/admin-roles.ts"));
     await writeFile(join(outputDir, "src/modules/auth/guards/admin-only.guard.ts"), await this.renderTemplate("src/modules/auth/guards/admin-only.guard.ts.hbs", context));
   }
@@ -19770,7 +19780,8 @@ tests/.e2e-seed-manifest.json
       { template: "Dockerfile.hbs", output: "Dockerfile" },
       { template: ".dockerignore.hbs", output: ".dockerignore" },
       { template: ".env.example.root.hbs", output: ".env.example" },
-      { template: "docker-start.sh.hbs", output: "docker-start.sh", executable: true }
+      { template: "docker-start.sh.hbs", output: "docker-start.sh", executable: true },
+      { template: "observability/otel-collector.yaml.hbs", output: "observability/otel-collector.yaml" }
     ];
     const certsDir = join(outputDir, "docker", "ca-certificates");
     await mkdir(certsDir, { recursive: true });
@@ -19789,6 +19800,7 @@ tests/.e2e-seed-manifest.json
         const source = join(templateDir, "tanstack-start-nestjs", file.template);
         const rendered = render(await readFile(source, "utf-8"));
         const destination = join(outputDir, file.output);
+        await mkdir(dirname(destination), { recursive: true });
         await writeFile(destination, rendered);
         if (file.executable)
           await chmod(destination, 493).catch(() => {});

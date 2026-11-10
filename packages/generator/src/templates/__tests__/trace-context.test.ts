@@ -86,6 +86,6 @@ describe("the wiring", () => {
       "utf-8"
     );
     expect(logger).toMatch(/declared\.level === 'debug' \|\| declared\.level === 'trace'\) && !keepDebug/);
-    expect(logger).toContain("parseTraceparent(request.headers?.['traceparent'])");
+    expect(logger).toMatch(/parseTraceparent\(\s*request\.headers\?\.\['traceparent'\]/);
   });
 });

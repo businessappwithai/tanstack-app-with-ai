@@ -396,6 +396,8 @@ tests/.e2e-seed-manifest.json
       // two things no default can supply.
       { template: ".env.example.root.hbs", output: ".env.example" },
       { template: "docker-start.sh.hbs", output: "docker-start.sh", executable: true },
+      // The collector the `observability` compose profile mounts. Plain YAML: no placeholders.
+      { template: "observability/otel-collector.yaml.hbs", output: "observability/otel-collector.yaml" },
     ];
 
     // The Dockerfile copies this directory unconditionally, so it has to exist
@@ -431,6 +433,7 @@ tests/.e2e-seed-manifest.json
         const source = path.join(templateDir, "tanstack-start-nestjs", file.template);
         const rendered = render(await fs.readFile(source, "utf-8"));
         const destination = path.join(outputDir, file.output);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.writeFile(destination, rendered);
         // chmod is best-effort: Windows and some CI filesystems reject it.
         if (file.executable) await fs.chmod(destination, 0o755).catch(() => {});
