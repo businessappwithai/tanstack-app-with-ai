@@ -12,6 +12,9 @@ import { KYSELY_CONNECTION } from './database.constants';
 import { DatabaseService } from './database.service';
 import { getLogger } from '../common/logging/logger.service';
 
+// pg's own default, stated so the log line is true. The WebAssembly Postgres Pool has no `options`.
+const POOL_MAX = 10;
+
 function buildPoolConfig(configService: ConfigService) {
   const url = configService.get<string>('DATABASE_URL');
   if (url) {
@@ -50,14 +53,14 @@ function describeTarget(configService: ConfigService): { host: string; database:
       provide: KYSELY_CONNECTION,
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => {
-        const pool = new Pool(buildPoolConfig(configService));
+        const pool = new Pool({ ...buildPoolConfig(configService), max: POOL_MAX });
         const db = new Kysely<any>({ dialect: new PostgresDialect({ pool }) });
 
         try {
           await db.selectFrom('information_schema.tables' as any).limit(1).execute();
           getLogger('db').event('db.connected', {
             ...describeTarget(configService),
-            poolMax: pool.options.max ?? 10,
+            poolMax: POOL_MAX,
           });
         } catch (error) {
           getLogger('db').event('db.connection.failed', {
