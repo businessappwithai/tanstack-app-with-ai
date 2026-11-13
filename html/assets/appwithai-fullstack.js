@@ -13215,6 +13215,7 @@ var log_spec_default = {
     { code: "FORBIDDEN", category: "authorization", status: 403, message: "You do not have permission to do this.", surfaces: ["generated"] },
     { code: "ENTITY_ACCESS_DENIED", category: "authorization", status: 403, message: "You do not have access to this kind of record.", surfaces: ["generated"] },
     { code: "TRANSITION_FORBIDDEN", category: "authorization", status: 403, message: "You may not make this move.", surfaces: ["generated"] },
+    { code: "CHAT_ONLY", category: "authorization", status: 403, message: "This application is used through the assistant.", surfaces: ["generated"] },
     { code: "STATE_FIELD_SYSTEM_MANAGED", category: "authorization", status: 403, message: "The status moves only by its action buttons.", surfaces: ["generated"] },
     { code: "NOT_FOUND", category: "not_found", status: 404, message: "Not found.", surfaces: ["generated"] },
     { code: "ENTITY_NOT_FOUND", category: "not_found", status: 404, message: "This kind of record does not exist.", surfaces: ["generated"] },
@@ -17653,6 +17654,7 @@ export async function executeCustomValidateHooks(
     await writeFile(join(outputDir, "src/common/state-fields.ts"), this.renderStateFields(context));
     await writeFile(join(outputDir, "src/common/lifecycle.ts"), this.renderLifecycle(context));
     await copyFile(join(this.resolvedTemplateDir, "src/common/ttl-cache.ts"), join(outputDir, "src/common/ttl-cache.ts"));
+    await copyFile(join(this.resolvedTemplateDir, "src/common/chat-bridge.ts"), join(outputDir, "src/common/chat-bridge.ts"));
     await copyFile(join(this.resolvedTemplateDir, "../../common/field-logic.ts"), join(outputDir, "src/common/field-logic.ts"));
     await copyFile(join(this.resolvedTemplateDir, "../../common/field-values.ts"), join(outputDir, "src/common/field-values.ts"));
     await copyFile(join(this.resolvedTemplateDir, "../../common/cascade-lookups.ts"), join(outputDir, "src/common/cascade-lookups.ts"));

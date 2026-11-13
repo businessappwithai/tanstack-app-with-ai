@@ -921,6 +921,41 @@ Things learned bringing it up on the CRM model (63/63 API suites, 7/7 browser sp
 - **Node's strip-only mode rejects TypeScript parameter properties** (`constructor(readonly x)`) in harness code.
 - Reporting sign-in is rate limited (5 a minute): one client per account, no sign-out, wait out a 429.
 
+### The chat assistant's side of a generated application — two switches, embed mode, chat-only
+
+An orchestrator (`app-and-report-with-ai-tanstack`, `assistant/`) can put a chat assistant in front of
+a generated application and its reporting platform. The assistant has no access of its own: it forwards
+the person's own session and every guard here answers as it would for the browser. What the generated
+application carries for it:
+
+| Piece | Where |
+|---|---|
+| `CHAT_ENABLED` (default true) and `CHAT_ONLY_MODE` (default false), category `chat` | `templates/common/seeds/system-config.ts.hbs`; toggled on Admin → System Config; served as `chatEnabled` / `chatOnlyMode` by `GET /api/sys/app-info` |
+| Chat-only mode, enforced on the server | `backend/src/common/chat-bridge.ts`, asked by `SessionAuthGuard` on every request: 403 `CHAT_ONLY` |
+| Embed mode: no sidebar or header inside a frame | `frontend/src/components/layout/app-layout.tsx` (`isEmbedded` in `lib/api-client.ts`) |
+| A 401 inside the frame tells the assistant instead of drawing a sign-in page | `frontend/src/contexts/auth-context.tsx` (`postMessage({ type: "app:signed-out" })`) |
+| Outside the frame, a `CHAT_ONLY` refusal sends the browser to `/chat/` | `frontend/src/lib/api-client.ts` |
+
+Things to keep true:
+
+- **Chat-only decides where people work, not what they may read.** The access guards protect records
+  wherever a request comes from. So it locks nothing when `CHAT_BRIDGE_SECRET` is unset (under 32
+  characters), when the switch cannot be read, or for an administrator — somebody must be able to reach
+  the application to turn it off.
+- **"Came through the assistant" is one of two signed things**: the `chat_embed` cookie naming that
+  person (a page in the frame), or the `x-chat-bridge` header (the assistant's own calls). Both are
+  `<base64url(JSON)>.<base64url(HMAC-SHA256)>`; the assistant's `signing.ts` writes them and the
+  reporting platform carries a third copy of the verifier. Keep the three in step.
+- **`CHAT_ONLY` is in the error catalogue** (`log-spec.json` and `common/errors/catalogue.ts`). A code
+  the catalogue does not name is replaced by `FORBIDDEN` on the way out, and the front end then never
+  sees the one it redirects on. Found by running a generated application, not by reading it.
+- **`chat-bridge.ts` is copied by name** in `nestjs-backend.generator.ts`, like `ttl-cache.ts`: nothing
+  scans `src/common/`. A file that is not copied is an import that does not resolve in every
+  generated backend.
+- The browser (`--standalone`) stack has none of this; there is no assistant in a tab.
+
+Held by `templates/__tests__/chat-bridge.test.ts`.
+
 ### Project wizard flow
 
 ```

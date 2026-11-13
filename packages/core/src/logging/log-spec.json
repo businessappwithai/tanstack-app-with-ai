@@ -85,6 +85,7 @@
     {"code": "FORBIDDEN", "category": "authorization", "status": 403, "message": "You do not have permission to do this.", "surfaces": ["generated"]},
     {"code": "ENTITY_ACCESS_DENIED", "category": "authorization", "status": 403, "message": "You do not have access to this kind of record.", "surfaces": ["generated"]},
     {"code": "TRANSITION_FORBIDDEN", "category": "authorization", "status": 403, "message": "You may not make this move.", "surfaces": ["generated"]},
+    {"code": "CHAT_ONLY", "category": "authorization", "status": 403, "message": "This application is used through the assistant.", "surfaces": ["generated"]},
     {"code": "STATE_FIELD_SYSTEM_MANAGED", "category": "authorization", "status": 403, "message": "The status moves only by its action buttons.", "surfaces": ["generated"]},
     {"code": "NOT_FOUND", "category": "not_found", "status": 404, "message": "Not found.", "surfaces": ["generated"]},
     {"code": "ENTITY_NOT_FOUND", "category": "not_found", "status": 404, "message": "This kind of record does not exist.", "surfaces": ["generated"]},

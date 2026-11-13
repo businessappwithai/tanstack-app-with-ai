@@ -1945,6 +1945,12 @@ export async function executeCustomValidateHooks(
       path.join(this.resolvedTemplateDir, "src/common/ttl-cache.ts"),
       path.join(outputDir, "src/common/ttl-cache.ts")
     );
+    // The chat assistant's switches and chat-only mode, which the session
+    // guard asks on every request (see the file's own header).
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "src/common/chat-bridge.ts"),
+      path.join(outputDir, "src/common/chat-bridge.ts")
+    );
 
     // Field logic — the bus service enforces mandatory and read-only logic on
     // every write, and the sys service refuses a condition that does not parse.

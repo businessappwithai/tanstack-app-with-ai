@@ -114,6 +114,24 @@ export interface PaginatedResponse<T> {
   };
 }
 
+/** Where the chat assistant lives, when an orchestrator has put one beside this application. */
+export const CHAT_PATH = "/chat/";
+
+/**
+ * True when this page is shown inside a frame — in practice, the chat
+ * assistant's. A frame knows it is one, and that stays true as the person
+ * moves between pages inside it.
+ */
+export function isEmbedded(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    // A cross-origin parent throws on access: that is a frame too.
+    return true;
+  }
+}
+
 export interface ApiError {
   statusCode: number;
   message: string | string[];
@@ -228,6 +246,18 @@ class ApiClient {
 
     if (response.status === 204) {
       return undefined as T;
+    }
+
+    // Chat-only mode: the administrator has made the chat assistant the only
+    // way in, and this page was opened outside it. Go there.
+    if (response.status === 403 && typeof window !== "undefined" && !isEmbedded()) {
+      const refusal = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      if (refusal?.details?.code === "CHAT_ONLY") {
+        window.location.replace(CHAT_PATH);
+      }
     }
 
     if (contentType?.includes("application/json")) {
