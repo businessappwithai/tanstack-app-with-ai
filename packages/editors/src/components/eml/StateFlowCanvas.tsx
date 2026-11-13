@@ -46,7 +46,11 @@ function StateNode({ data, selected }: NodeProps) {
             : "border-sky-400 bg-sky-50"
       } ${selected ? "ring-2 ring-offset-1 ring-primary" : ""}`}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={{ width: 14, height: 14, background: "#94a3b8", border: "2px solid white", cursor: "crosshair" }}
+      />
       <div className="flex items-center justify-center gap-1.5">
         {stateData.isInitial && <Play className="h-3 w-3 text-emerald-700" />}
         {stateData.isTerminal && <Flag className="h-3 w-3 text-slate-700" />}
@@ -66,7 +70,11 @@ function StateNode({ data, selected }: NodeProps) {
           ))}
         </div>
       )}
-      <Handle type="source" position={Position.Right} />
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ width: 14, height: 14, background: "#64748b", border: "2px solid white", cursor: "crosshair" }}
+      />
     </div>
   );
 }
