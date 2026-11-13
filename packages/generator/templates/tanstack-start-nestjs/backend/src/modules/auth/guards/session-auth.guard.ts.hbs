@@ -107,13 +107,18 @@ export class SessionAuthGuard implements CanActivate {
       // Chat-only mode: when the administrator has made the chat assistant the
       // only way in, a request that did not come through it is refused for
       // everybody but administrators. See common/chat-bridge.ts.
+      //
+      // `!== false`, not `=== true`: when the lookup above failed, nobody knows
+      // whether this is an administrator, and the one person who can turn the
+      // switch off must not be locked out by a fault. The mode fails open, as
+      // it does when the switch itself cannot be read.
       if (
         this.db &&
         (await chatOnlyRefuses({
           kysely: this.db.kysely,
           headers: request.headers,
           email: (session.user as any)?.email,
-          isMaster: request.user.isMaster === true,
+          isMaster: request.user.isMaster !== false,
         }))
       ) {
         throw new ForbiddenException({

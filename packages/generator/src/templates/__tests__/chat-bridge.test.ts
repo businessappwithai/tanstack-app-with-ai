@@ -138,6 +138,8 @@ describe("every piece reaches a generated application", () => {
     const guard = read("tanstack-start-nestjs/backend/src/modules/auth/guards/session-auth.guard.ts.hbs");
     expect(guard).toContain("chatOnlyRefuses(");
     expect(guard).toContain("details: { code: CHAT_ONLY_CODE }");
+    // An administrator whose access could not be read is not refused.
+    expect(guard).toContain("isMaster: request.user.isMaster !== false");
     // Without this the catch below turns the refusal into a 503 "try again".
     expect(guard).toContain("error instanceof ForbiddenException");
   });
