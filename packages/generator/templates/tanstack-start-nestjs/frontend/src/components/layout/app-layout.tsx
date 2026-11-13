@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { Header, Sidebar } from "@/components/layout";
 import { MobileSidebar } from "@/components/ui/mobile-sidebar";
 import { useAuth } from "@/contexts/auth-context";
+import { isEmbedded } from "@/lib/api-client";
 import { APP_NAME } from "@/lib/app-meta";
 
 /**
@@ -51,8 +52,22 @@ export function AppLayout({ children }: AppLayoutProps) {
     setNavigationOpen(false);
   }, [pathname]);
 
+  // Inside the chat assistant's frame the assistant is the navigation: the
+  // sidebar and header are left out and the page fills the frame. Decided after
+  // mount, so the server and the first client render agree.
+  const [embedded, setEmbedded] = useState(false);
+  useEffect(() => {
+    setEmbedded(isEmbedded());
+  }, []);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
+      // A sign-in page inside the assistant's frame would be a second front
+      // door; the assistant is told instead (see auth-context).
+      if (isEmbedded()) {
+        window.parent.postMessage({ type: "app:signed-out" }, window.location.origin);
+        return;
+      }
       navigate({ to: "/auth/login" });
     }
   }, [isAuthenticated, isLoading, navigate]);
@@ -70,6 +85,14 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   if (!isAuthenticated) {
     return null;
+  }
+
+  if (embedded) {
+    return (
+      <main ref={mainRef} className="h-screen overflow-auto p-4" data-embedded="true">
+        {children}
+      </main>
+    );
   }
 
   return (

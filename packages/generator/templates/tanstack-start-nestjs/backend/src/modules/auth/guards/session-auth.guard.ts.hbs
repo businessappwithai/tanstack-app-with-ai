@@ -8,7 +8,7 @@
  * and validates it against BetterAuth's session store.
  */
 
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ServiceUnavailableException, Inject, Optional } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, ForbiddenException, UnauthorizedException, ServiceUnavailableException, Inject, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { getAuth } from '../../../lib/better-auth';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
@@ -16,6 +16,7 @@ import { DatabaseService } from '../../../database/database.service';
 import { setRequestContext } from '../../../common/logging/logger.service';
 import { CapabilityService } from '../capability.service';
 import { getLogger } from '../../../common/logging/logger.service';
+import { CHAT_ONLY_CODE, chatOnlyRefuses } from '../../../common/chat-bridge';
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
@@ -103,9 +104,33 @@ export class SessionAuthGuard implements CanActivate {
         }
       }
 
+      // Chat-only mode: when the administrator has made the chat assistant the
+      // only way in, a request that did not come through it is refused for
+      // everybody but administrators. See common/chat-bridge.ts.
+      //
+      // `!== false`, not `=== true`: when the lookup above failed, nobody knows
+      // whether this is an administrator, and the one person who can turn the
+      // switch off must not be locked out by a fault. The mode fails open, as
+      // it does when the switch itself cannot be read.
+      if (
+        this.db &&
+        (await chatOnlyRefuses({
+          kysely: this.db.kysely,
+          headers: request.headers,
+          email: (session.user as any)?.email,
+          isMaster: request.user.isMaster !== false,
+        }))
+      ) {
+        throw new ForbiddenException({
+          message: 'This application is used through the assistant. Open the assistant to continue.',
+          error: 'Forbidden',
+          details: { code: CHAT_ONLY_CODE },
+        });
+      }
+
       return true;
     } catch (error) {
-      if (error instanceof UnauthorizedException) throw error;
+      if (error instanceof UnauthorizedException || error instanceof ForbiddenException) throw error;
       // Not being able to *check* a session says nothing about whether it is valid. A 401 here
       // — a database that was busy, a connection that dropped — tells the front end to sign the
       // person out, and every screen they had open bounces to the sign-in page for a fault that

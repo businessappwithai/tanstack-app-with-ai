@@ -672,6 +672,10 @@ export class SysController {
     return {
       name: this.systemConfigService.getAppName(),
       description: this.systemConfigService.getAppDescription(),
+      // The administrator's two switches for the chat assistant. The assistant
+      // reads them here, with the session of whoever is using it.
+      chatEnabled: this.systemConfigService.getBoolean('CHAT_ENABLED', true),
+      chatOnlyMode: this.systemConfigService.getBoolean('CHAT_ONLY_MODE', false),
     };
   }
 

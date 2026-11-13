@@ -82,6 +82,24 @@ const rows: ConfigRow[] = [
     description: 'When true, the AI model-context assistant is available.',
     is_sensitive: false,
   },
+  {
+    config_key: 'CHAT_ENABLED',
+    config_value: 'true',
+    data_type: 'boolean',
+    category: 'chat',
+    description:
+      'When true, people may use the chat assistant where one is deployed beside this application. It reaches only what each person may already reach here.',
+    is_sensitive: false,
+  },
+  {
+    config_key: 'CHAT_ONLY_MODE',
+    config_value: 'false',
+    data_type: 'boolean',
+    category: 'chat',
+    description:
+      'When true, the chat assistant is the only way in: everybody but administrators is sent to it, and this application answers them only through it.',
+    is_sensitive: false,
+  },
 
   // ── Features ─────────────────────────────────────────────────────────
   {

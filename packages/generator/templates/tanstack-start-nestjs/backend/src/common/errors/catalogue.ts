@@ -48,6 +48,7 @@ export const ERROR_CATALOGUE = {
   FORBIDDEN: { category: "authorization", status: 403, message: "You do not have permission to do this." },
   ENTITY_ACCESS_DENIED: { category: "authorization", status: 403, message: "You do not have access to this kind of record." },
   TRANSITION_FORBIDDEN: { category: "authorization", status: 403, message: "You may not make this move." },
+  CHAT_ONLY: { category: "authorization", status: 403, message: "This application is used through the assistant." },
   STATE_FIELD_SYSTEM_MANAGED: { category: "authorization", status: 403, message: "The status moves only by its action buttons." },
   NOT_FOUND: { category: "not_found", status: 404, message: "Not found." },
   ENTITY_NOT_FOUND: { category: "not_found", status: 404, message: "This kind of record does not exist." },

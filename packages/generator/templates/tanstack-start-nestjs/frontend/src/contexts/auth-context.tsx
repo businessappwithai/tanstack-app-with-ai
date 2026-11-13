@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { setUnauthorizedCallback } from "@/lib/api-client";
+import { isEmbedded, setUnauthorizedCallback } from "@/lib/api-client";
 import {
   signIn as authSignIn,
   signOut as authSignOut,
@@ -80,6 +80,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Register 401 unauthorized callback for API client
     setUnauthorizedCallback(async () => {
       setUser(null);
+      // Inside the chat assistant's frame the sign-in belongs to the assistant:
+      // tell it, and do not draw a sign-in page inside the frame or end the
+      // session the assistant itself is using.
+      if (isEmbedded()) {
+        window.parent.postMessage({ type: "app:signed-out" }, window.location.origin);
+        return;
+      }
       await authSignOut();
       window.location.href = "/auth/login";
     });
