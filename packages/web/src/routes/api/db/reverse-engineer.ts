@@ -29,16 +29,8 @@ export const Route = createFileRoute("/api/db/reverse-engineer")({
             return json({ error: "targetDbConnection is required" }, 400);
           }
 
-          const { decryptConnectionString } = await import("@/lib/encrypt");
-          let connectionString: string;
-          try {
-            connectionString = decryptConnectionString(body.targetDbConnection);
-          } catch {
-            return json({ error: "Invalid or corrupted connection string" }, 400);
-          }
-
           const { introspectDatabase } = await import("@appwithai/core/services");
-          const schema = await introspectDatabase({ connectionString });
+          const schema = await introspectDatabase({ connectionString: body.targetDbConnection });
 
           return json({
             mermaidCode: schema.eml,

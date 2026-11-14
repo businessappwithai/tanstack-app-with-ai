@@ -23,6 +23,7 @@
     "@appwithai/core": "workspace:*",
     "@appwithai/generator": "workspace:*",
     "@appwithai/yamltecture": "workspace:*",
+    "@faker-js/faker": "^10.6.0",
     "@copilotkit/react-core": "^1.68.1",
     "@copilotkit/react-ui": "^1.68.1",
     "@copilotkit/runtime": "^1.68.1",

@@ -40,6 +40,10 @@ import { Route as ApiAuthRegisterRouteImport } from './routes/api/auth/register'
 import { Route as ApiCopilotkitSplatRouteImport } from './routes/api/copilotkit/$'
 import { Route as ApiDbGenerateSchemaRouteImport } from './routes/api/db/generate-schema'
 import { Route as ApiDbReverseEngineerRouteImport } from './routes/api/db/reverse-engineer'
+import { Route as ApiDbSeedDataRouteImport } from './routes/api/db/seed-data'
+import { Route as ApiDbStudioRouteImport } from './routes/api/db/studio'
+import { Route as ApiDbStudioOpenRouteImport } from './routes/api/db/studio-open'
+import { Route as ApiDbTestConnectionRouteImport } from './routes/api/db/test-connection'
 import { Route as ApiEmlValidateRouteImport } from './routes/api/eml/validate'
 import { Route as ApiMermaidIndexRouteImport } from './routes/api/mermaid/index'
 import { Route as ApiMermaidFilenameRouteImport } from './routes/api/mermaid/$filename'
@@ -238,6 +242,26 @@ const ApiDbGenerateSchemaRoute = ApiDbGenerateSchemaRouteImport.update({
 const ApiDbReverseEngineerRoute = ApiDbReverseEngineerRouteImport.update({
   id: '/api/db/reverse-engineer',
   path: '/api/db/reverse-engineer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbSeedDataRoute = ApiDbSeedDataRouteImport.update({
+  id: '/api/db/seed-data',
+  path: '/api/db/seed-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbStudioRoute = ApiDbStudioRouteImport.update({
+  id: '/api/db/studio',
+  path: '/api/db/studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbStudioOpenRoute = ApiDbStudioOpenRouteImport.update({
+  id: '/api/db/studio-open',
+  path: '/api/db/studio-open',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbTestConnectionRoute = ApiDbTestConnectionRouteImport.update({
+  id: '/api/db/test-connection',
+  path: '/api/db/test-connection',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiEmlValidateRoute = ApiEmlValidateRouteImport.update({
@@ -503,6 +527,10 @@ export interface FileRoutesByFullPath {
   '/api/copilotkit/$': typeof ApiCopilotkitSplatRoute
   '/api/db/generate-schema': typeof ApiDbGenerateSchemaRoute
   '/api/db/reverse-engineer': typeof ApiDbReverseEngineerRoute
+  '/api/db/seed-data': typeof ApiDbSeedDataRoute
+  '/api/db/studio': typeof ApiDbStudioRoute
+  '/api/db/studio-open': typeof ApiDbStudioOpenRoute
+  '/api/db/test-connection': typeof ApiDbTestConnectionRoute
   '/api/eml/validate': typeof ApiEmlValidateRoute
   '/api/mermaid/$filename': typeof ApiMermaidFilenameRoute
   '/api/mermaid/parse': typeof ApiMermaidParseRoute
@@ -579,6 +607,10 @@ export interface FileRoutesByTo {
   '/api/copilotkit/$': typeof ApiCopilotkitSplatRoute
   '/api/db/generate-schema': typeof ApiDbGenerateSchemaRoute
   '/api/db/reverse-engineer': typeof ApiDbReverseEngineerRoute
+  '/api/db/seed-data': typeof ApiDbSeedDataRoute
+  '/api/db/studio': typeof ApiDbStudioRoute
+  '/api/db/studio-open': typeof ApiDbStudioOpenRoute
+  '/api/db/test-connection': typeof ApiDbTestConnectionRoute
   '/api/eml/validate': typeof ApiEmlValidateRoute
   '/api/mermaid/$filename': typeof ApiMermaidFilenameRoute
   '/api/mermaid/parse': typeof ApiMermaidParseRoute
@@ -656,6 +688,10 @@ export interface FileRoutesById {
   '/api/copilotkit/$': typeof ApiCopilotkitSplatRoute
   '/api/db/generate-schema': typeof ApiDbGenerateSchemaRoute
   '/api/db/reverse-engineer': typeof ApiDbReverseEngineerRoute
+  '/api/db/seed-data': typeof ApiDbSeedDataRoute
+  '/api/db/studio': typeof ApiDbStudioRoute
+  '/api/db/studio-open': typeof ApiDbStudioOpenRoute
+  '/api/db/test-connection': typeof ApiDbTestConnectionRoute
   '/api/eml/validate': typeof ApiEmlValidateRoute
   '/api/mermaid/$filename': typeof ApiMermaidFilenameRoute
   '/api/mermaid/parse': typeof ApiMermaidParseRoute
@@ -734,6 +770,10 @@ export interface FileRouteTypes {
     | '/api/copilotkit/$'
     | '/api/db/generate-schema'
     | '/api/db/reverse-engineer'
+    | '/api/db/seed-data'
+    | '/api/db/studio'
+    | '/api/db/studio-open'
+    | '/api/db/test-connection'
     | '/api/eml/validate'
     | '/api/mermaid/$filename'
     | '/api/mermaid/parse'
@@ -810,6 +850,10 @@ export interface FileRouteTypes {
     | '/api/copilotkit/$'
     | '/api/db/generate-schema'
     | '/api/db/reverse-engineer'
+    | '/api/db/seed-data'
+    | '/api/db/studio'
+    | '/api/db/studio-open'
+    | '/api/db/test-connection'
     | '/api/eml/validate'
     | '/api/mermaid/$filename'
     | '/api/mermaid/parse'
@@ -886,6 +930,10 @@ export interface FileRouteTypes {
     | '/api/copilotkit/$'
     | '/api/db/generate-schema'
     | '/api/db/reverse-engineer'
+    | '/api/db/seed-data'
+    | '/api/db/studio'
+    | '/api/db/studio-open'
+    | '/api/db/test-connection'
     | '/api/eml/validate'
     | '/api/mermaid/$filename'
     | '/api/mermaid/parse'
@@ -962,6 +1010,10 @@ export interface RootRouteChildren {
   ApiAuthRegisterRoute: typeof ApiAuthRegisterRoute
   ApiDbGenerateSchemaRoute: typeof ApiDbGenerateSchemaRoute
   ApiDbReverseEngineerRoute: typeof ApiDbReverseEngineerRoute
+  ApiDbSeedDataRoute: typeof ApiDbSeedDataRoute
+  ApiDbStudioRoute: typeof ApiDbStudioRoute
+  ApiDbStudioOpenRoute: typeof ApiDbStudioOpenRoute
+  ApiDbTestConnectionRoute: typeof ApiDbTestConnectionRoute
   ApiEmlValidateRoute: typeof ApiEmlValidateRoute
   ApiMermaidFilenameRoute: typeof ApiMermaidFilenameRoute
   ApiMermaidParseRoute: typeof ApiMermaidParseRoute
@@ -1226,6 +1278,34 @@ declare module '@tanstack/react-router' {
       path: '/api/db/reverse-engineer'
       fullPath: '/api/db/reverse-engineer'
       preLoaderRoute: typeof ApiDbReverseEngineerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/seed-data': {
+      id: '/api/db/seed-data'
+      path: '/api/db/seed-data'
+      fullPath: '/api/db/seed-data'
+      preLoaderRoute: typeof ApiDbSeedDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/studio': {
+      id: '/api/db/studio'
+      path: '/api/db/studio'
+      fullPath: '/api/db/studio'
+      preLoaderRoute: typeof ApiDbStudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/studio-open': {
+      id: '/api/db/studio-open'
+      path: '/api/db/studio-open'
+      fullPath: '/api/db/studio-open'
+      preLoaderRoute: typeof ApiDbStudioOpenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/test-connection': {
+      id: '/api/db/test-connection'
+      path: '/api/db/test-connection'
+      fullPath: '/api/db/test-connection'
+      preLoaderRoute: typeof ApiDbTestConnectionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/eml/validate': {
@@ -1583,6 +1663,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthRegisterRoute: ApiAuthRegisterRoute,
   ApiDbGenerateSchemaRoute: ApiDbGenerateSchemaRoute,
   ApiDbReverseEngineerRoute: ApiDbReverseEngineerRoute,
+  ApiDbSeedDataRoute: ApiDbSeedDataRoute,
+  ApiDbStudioRoute: ApiDbStudioRoute,
+  ApiDbStudioOpenRoute: ApiDbStudioOpenRoute,
+  ApiDbTestConnectionRoute: ApiDbTestConnectionRoute,
   ApiEmlValidateRoute: ApiEmlValidateRoute,
   ApiMermaidFilenameRoute: ApiMermaidFilenameRoute,
   ApiMermaidParseRoute: ApiMermaidParseRoute,

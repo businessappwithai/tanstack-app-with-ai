@@ -11,20 +11,19 @@ import {
   Clock,
   Database,
   Download,
+  ExternalLink,
   FileCode2,
   FileText,
   FolderOpen,
   GitCommit,
   History,
   Library,
-  List,
   Loader2,
   Maximize2,
   Minimize2,
   RefreshCw,
   RotateCcw,
   Save,
-  Search,
   Send,
   Sparkles,
   Upload,
@@ -38,6 +37,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CopilotProvider } from "@/components/CopilotProvider";
 import { DbOperationsModal } from "@/components/DbOperationsModal";
+import { SeedDataModal } from "@/components/SeedDataModal";
 import { ErdFlowViewer } from "@/components/ErdFlowViewer";
 import { JourneyArc } from "@/components/JourneyArc";
 import { ProjectGitHistory } from "@/components/project/ProjectGitHistory";
@@ -185,13 +185,13 @@ function DesignPage() {
   const [versions, setVersions] = useState<ERDVersion[]>([]);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
-  const [entitySearch, setEntitySearch] = useState("");
   const [showEntityList, setShowEntityList] = useState(false);
   const [autoRetryCount, setAutoRetryCount] = useState(0);
   const [isAutoRetrying, setIsAutoRetrying] = useState(false);
   const search = useSearch({ from: "/projects/$id/design" });
   const showFlowView = search.view === "flow";
   const [showDbModal, setShowDbModal] = useState(false);
+  const [showSeedModal, setShowSeedModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTab, setImportTab] = useState<"local" | "library">("local");
   const [libraryFiles, setLibraryFiles] = useState<
@@ -465,15 +465,8 @@ function DesignPage() {
     ),
   });
 
-  const filteredEntities = useMemo(() => {
-    if (!entitySearch) return entities;
-    const searchLower = entitySearch.toLowerCase();
-    return entities.filter(
-      (e) =>
-        e.name.toLowerCase().includes(searchLower) ||
-        e.attributes.some((a) => a.toLowerCase().includes(searchLower))
-    );
-  }, [entities, entitySearch]);
+  const [studioUrl, setStudioUrl] = useState("http://localhost:3002");
+  const [studioStatus, setStudioStatus] = useState<"idle" | "starting" | "ready" | "error">("idle");
 
   useEffect(() => {
     mermaid.initialize({
@@ -1126,6 +1119,36 @@ function DesignPage() {
   const handleZoomOut = () => setZoom((z) => Math.max(z - 10, 50));
   const handleZoomReset = () => setZoom(100);
 
+  const handleOpenStudio = async () => {
+    if (showEntityList) {
+      setShowEntityList(false);
+      return;
+    }
+    setStudioStatus("starting");
+    try {
+      const databaseUrl = (project as { database_url?: string } | undefined)?.database_url;
+      const res = await fetch("/api/db/studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ databaseUrl }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? "Failed to start studio");
+      if (data.url) setStudioUrl(data.url);
+      setStudioStatus("ready");
+      setShowEntityList(true);
+    } catch {
+      setStudioStatus("error");
+      setShowEntityList(true);
+    }
+  };
+
+  const handleOpenStudioInBrowser = () => {
+    // Opens via /api/db/studio-open which bridges the auth cookie so the user
+    // lands on the studio without seeing the login page.
+    window.open("/api/db/studio-open", "_blank", "noopener,noreferrer");
+  };
+
   const handleExportMrd = async () => {
     if (!erdCode.trim()) {
       alert("No ERD code to export");
@@ -1270,24 +1293,6 @@ function DesignPage() {
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setShowEntityList(!showEntityList)}
-                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
-                        showEntityList
-                          ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
-                      }`}
-                      title="Browse entities"
-                    >
-                      <List className="w-4 h-4" />
-                      Entities
-                      {entities.length > 0 && (
-                        <span className="px-1.5 py-0.5 text-xs bg-purple-700 text-white rounded-full">
-                          {entities.length}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setShowVersions(!showVersions)}
                       className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
                         showVersions
@@ -1313,49 +1318,6 @@ function DesignPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const newView = showFlowView ? "mermaid" : "flow";
-                        navigate({ to: "/projects/$id/design", params: { id: projectId }, search: (prev) => ({ ...prev, view: newView }) });
-                      }}
-                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
-                        showFlowView
-                          ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
-                      }`}
-                      title="Toggle React Flow view"
-                    >
-                      <Zap className="w-4 h-4" />
-                      {showFlowView ? "Mermaid View" : "Flow View"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowDbModal(true)}
-                      className="flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
-                      title="Database operations"
-                    >
-                      <Database className="w-4 h-4" />
-                      DB Ops
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleValidate}
-                      disabled={isValidating}
-                      className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      {isValidating ? "Validating..." : "Validate"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSave(false)}
-                      disabled={isSaving}
-                      className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      <Save className="w-4 h-4" />
-                      {isSaving ? "Saving..." : "Save Draft"}
-                    </button>
-                    <button
-                      type="button"
                       onClick={handleOpenImportModal}
                       title="Import .mmd file or load from library"
                       className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors"
@@ -1374,12 +1336,82 @@ function DesignPage() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => {
+                        const newView = showFlowView ? "mermaid" : "flow";
+                        navigate({ to: "/projects/$id/design", params: { id: projectId }, search: (prev) => ({ ...prev, view: newView }) });
+                      }}
+                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
+                        showFlowView
+                          ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Toggle React Flow view"
+                    >
+                      <Zap className="w-4 h-4" />
+                      {showFlowView ? "Mermaid View" : "Flow View"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleValidate}
+                      disabled={isValidating}
+                      className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      {isValidating ? "Validating..." : "Validate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDbModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      title="Database operations"
+                    >
+                      <Database className="w-4 h-4" />
+                      DB Ops
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSeedModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      title="Load sample data into tables"
+                    >
+                      <Zap className="w-4 h-4" />
+                      Seed Data
+                    </button>
+                    <button
+                      type="button"
+                      onClick={
+                        studioStatus === "ready"
+                          ? handleOpenStudioInBrowser
+                          : handleOpenStudio
+                      }
+                      disabled={studioStatus === "starting"}
+                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
+                        showEntityList
+                          ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      } disabled:opacity-50`}
+                      title="Open LibreDB Studio"
+                    >
+                      {studioStatus === "starting" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Database className="w-4 h-4" />
+                      )}
+                      {studioStatus === "starting" ? "Starting…" : "Entities"}
+                      {entities.length > 0 && studioStatus !== "starting" && (
+                        <span className="px-1.5 py-0.5 text-xs bg-purple-700 text-white rounded-full">
+                          {entities.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleGenerate}
                       className="flex items-center gap-2 px-6 py-2 text-slate-900 font-bold rounded-xl shadow-lg transition-all active:scale-[0.98]"
                       style={{ backgroundColor: "#FF8400" }}
                     >
                       <Zap className="w-4 h-4" />
-                      Validate & Save
+                      Continue →
                     </button>
                   </div>
                 </div>
@@ -1394,7 +1426,7 @@ function DesignPage() {
             <WizardStepHeader
               stepNumber={2}
               title="Discover Your Data Model"
-              description="Review the Entity-Relationship Diagram that our AI extracted from your business description. Each entity represents a key concept in your domain. Edit relationships as needed before generating code."
+              description="Review the entities and relationships our AI extracted from your business description. Each entity represents a key concept in your domain. Use DB Ops to explore your data before generating code."
               estimatedTime="3-5 min"
             />
             <JourneyArc currentStep="design" projectId={projectId} />
@@ -1405,68 +1437,59 @@ function DesignPage() {
           className={`${isFullscreen ? "fixed inset-0" : "flex-1"} flex overflow-hidden ${isFullscreen ? "z-50" : ""}`}
         >
           {showEntityList && !isFullscreen && (
-            <div className="w-96 border-r border-border bg-card flex flex-col">
-              <div className="p-4 border-b border-border">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-purple-400" />
-                    <h3 className="font-semibold text-foreground">Entity Browser</h3>
+            <div className="w-72 border-r border-border bg-card flex flex-col shrink-0">
+              <div className="p-3 border-b border-border flex items-center gap-2">
+                <Database className="w-4 h-4 text-purple-400 shrink-0" />
+                <span className="font-semibold text-sm text-foreground flex-1">LibreDB Studio</span>
+                <button
+                  type="button"
+                  onClick={() => setShowEntityList(false)}
+                  className="p-1.5 hover:bg-secondary rounded-lg transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+              {studioStatus === "error" ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+                  <Database className="w-10 h-10 text-muted-foreground opacity-40" />
+                  <p className="text-sm font-medium text-foreground">Could not start LibreDB Studio</p>
+                  <p className="text-xs text-muted-foreground">
+                    On first launch it downloads the release archive from GitHub. Check your network and try again.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenStudio}
+                    className="mt-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded-lg transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-purple-500/10 flex items-center justify-center">
+                    <Database className="w-7 h-7 text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">LibreDB Studio</p>
+                    <p className="text-xs text-muted-foreground mt-1 font-mono">{studioUrl}</p>
+                    <p className="text-xs text-green-400 mt-2 flex items-center justify-center gap-1">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
+                      Running
+                    </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowEntityList(false)}
-                    className="p-1.5 hover:bg-secondary rounded-lg transition-colors"
+                    onClick={handleOpenStudioInBrowser}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-xl transition-colors"
                   >
-                    <X className="w-4 h-4 text-muted-foreground" />
+                    <ExternalLink className="w-4 h-4" />
+                    Open in Browser
                   </button>
+                  <p className="text-xs text-muted-foreground">
+                    Opens pre-authenticated — no login required.
+                  </p>
                 </div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                  <input
-                    type="text"
-                    value={entitySearch}
-                    onChange={(e) => setEntitySearch(e.target.value)}
-                    placeholder="Search entities..."
-                    className="w-full pl-9 pr-4 py-2 bg-muted border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto">
-                {entities.length === 0 ? (
-                  <div className="p-4 text-center text-muted-foreground text-sm">
-                    <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>No entities found</p>
-                    <p className="text-xs mt-1">Add entities to see them here</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {filteredEntities.map((entity, _idx) => (
-                      <button
-                        type="button"
-                        key={entity.name}
-                        className="w-full text-left p-3 hover:bg-muted transition-colors cursor-pointer"
-                        onClick={() => jumpToEntity(entity.startLine)}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-foreground">{entity.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {entity.attributes.length} attrs
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          Line {entity.startLine + 1}
-                        </div>
-                      </button>
-                    ))}
-                    {filteredEntities.length === 0 && entitySearch && (
-                      <div className="p-4 text-center text-muted-foreground text-sm">
-                        No entities match "{entitySearch}"
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
 
@@ -1653,7 +1676,7 @@ function DesignPage() {
             </div>
           )}
 
-          {!isFullscreen && !showFlowView && (
+          {false && !isFullscreen && !showFlowView && (
             <div
               className={`${
                 showVersions || showEntityList ? "w-1/2" : "w-1/2"
@@ -1773,7 +1796,7 @@ function DesignPage() {
               <ErdFlowViewer erdCode={erdCode} />
             </div>
           ) : (
-            <div
+            false && <div
               className={`${
                 isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
               } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}
@@ -2190,6 +2213,14 @@ function DesignPage() {
           setShowDbModal(false);
         }}
       />
+      {showSeedModal && (
+        <SeedDataModal
+          isOpen={showSeedModal}
+          onClose={() => setShowSeedModal(false)}
+          projectId={projectId}
+          databaseUrl={(project as { database_url?: string } | undefined)?.database_url ?? undefined}
+        />
+      )}
 
       {/* Hidden file input for .mmd import */}
       <input
@@ -2362,25 +2393,6 @@ function DesignPage() {
           </div>
         </div>
       )}
-      <footer className="border-t border-border bg-background/80 backdrop-blur-md sticky bottom-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => navigate({ to: "/projects/$id/init", params: { id: projectId } })}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-secondary text-foreground font-medium transition-all"
-          >
-            ← Back
-          </button>
-          <button
-            type="button"
-            onClick={handleGenerate}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all"
-            style={{ backgroundColor: "#FF8400" }}
-          >
-            Continue →
-          </button>
-        </div>
-      </footer>
     </CopilotSidebar>
   );
 }
