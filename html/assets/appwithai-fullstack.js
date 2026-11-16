@@ -21662,6 +21662,9 @@ function renderSkills(model, options) {
     const machines = model.workflows.filter((workflow) => workflow.entity === entity.name && workflow.transitions.some((t) => t.from !== "[*]"));
     const updaters = model.rbac.operations.find((rule) => rule.entity === entity.name && rule.operation === "update")?.roles;
     const mayUpdate = updaters?.length ? `${updaters.map((role) => title(role)).join(", ")} (anyone who may update it)` : "anyone who may update it";
+    const grantedRoles = (from, to) => [
+      ...new Set(model.rbac.transitions.filter((rule) => rule.entity === entity.name && rule.edges.some((edge) => edge.from === from && edge.to === to)).flatMap((rule) => rule.roles))
+    ];
     for (const machine of machines) {
       lines.push(`## Lifecycle — ${text(machine.name)}`);
       lines.push(`A record starts at ${code(machine.initial ?? "—")}${machine.terminal.length ? ` and is final at ${machine.terminal.map((state) => code(state)).join(" or ")}` : ""}. It moves only by its buttons: read the ones open to this person with ${code("get_record_actions")}, then propose one with ${code("propose_move")} — the person confirms it.`, "", "| From | Button | To | Who may press |", "|---|---|---|---|");
@@ -21669,8 +21672,12 @@ function renderSkills(model, options) {
         if (transition.from === "[*]" || transition.to === "[*]")
           continue;
         const event = transition.trigger ?? `${transition.from}->${transition.to}`;
-        const grant = model.rbac.transitions.find((rule) => rule.entity === entity.name && rule.transition === event);
-        lines.push(`| ${code(transition.from)} | ${moveLabel(event, transition.to)} (${code(event)}) | ${code(transition.to)} | ${grant ? grant.roles.map((role) => title(role)).join(", ") : mayUpdate} |`);
+        const roles = grantedRoles(transition.from, transition.to);
+        lines.push(`| ${code(transition.from)} | ${moveLabel(event, transition.to)} (${code(event)}) | ${code(transition.to)} | ${roles.length ? roles.map((role) => title(role)).join(", ") : mayUpdate} |`);
+      }
+      for (const from of machine.terminal) {
+        const roles = grantedRoles(from, LIFECYCLE_DRAFT);
+        lines.push(`| ${code(from)} | ${moveLabel(REOPEN_EVENT, LIFECYCLE_DRAFT)} (${code(REOPEN_EVENT)}) | ${code(LIFECYCLE_DRAFT)} | ${roles.length ? roles.map((role) => title(role)).join(", ") : "the administrator"} |`);
       }
       lines.push("");
     }

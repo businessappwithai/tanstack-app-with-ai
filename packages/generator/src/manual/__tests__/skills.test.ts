@@ -76,6 +76,28 @@ describe("assistant skills", () => {
     expect(shipment).toContain("`propose_move`");
   });
 
+  it("finds a grant by its resolved edges, whatever the label's spelling, and lists Reopen", () => {
+    const source = [
+      "%%meta name: Deals",
+      "%%rbac role:closer on Deal.Close-Won",
+      "%%rbac role:supervisor on Deal.reopen",
+      "%%workflow DealFlow entity: Deal kind: state",
+      "stateDiagram-v2",
+      "    [*] --> open",
+      "    open --> won : Close Won",
+      "    won --> [*]",
+      "erDiagram",
+      "    Deal {",
+      "        uuid id PK",
+      "        string name",
+      "        string status",
+      "    }",
+    ].join("\n");
+    const deal = renderSkills(parseModel(source), { name: "Deals" })["bus_deal.md"] ?? "";
+    expect(deal).toMatch(/\| `open` \| .* \| `won` \| Closer \|/);
+    expect(deal).toMatch(/\| `won` \| .*\(`reopen`\) \| `draft` \| Supervisor \|/);
+  });
+
   it("names the reports about an entity, found through the reporting pack", () => {
     expect(shipment).toContain("Report: Shipments by status");
   });

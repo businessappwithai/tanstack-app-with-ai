@@ -34,7 +34,7 @@
 
 import type { Entity } from "@appwithai/core/types";
 import { identifierColumnNames } from "@appwithai/core/types";
-import { moveLabel } from "../../../../language/state-field";
+import { LIFECYCLE_DRAFT, moveLabel, REOPEN_EVENT } from "../../../../language/state-field";
 import { referenceIdFor, tableNameFor } from "../generators/wasm/model-bundle";
 import type { ParsedModel } from "../pipeline/generate-application";
 import { deriveAccess } from "../rbac/roles";
@@ -297,6 +297,18 @@ export function renderSkills(model: ParsedModel, options: SkillsOptions): Record
     const mayUpdate = updaters?.length
       ? `${updaters.map((role) => title(role)).join(", ")} (anyone who may update it)`
       : "anyone who may update it";
+    // Match on the edges the RBAC compiler resolved (it normalises event names and
+    // expands reopen), merging every grant that covers an edge.
+    const grantedRoles = (from: string, to: string): string[] => [
+      ...new Set(
+        model.rbac.transitions
+          .filter(
+            (rule) =>
+              rule.entity === entity.name && rule.edges.some((edge) => edge.from === from && edge.to === to)
+          )
+          .flatMap((rule) => rule.roles)
+      ),
+    ];
     for (const machine of machines) {
       lines.push(`## Lifecycle — ${text(machine.name)}`);
       lines.push(
@@ -310,12 +322,19 @@ export function renderSkills(model: ParsedModel, options: SkillsOptions): Record
       for (const transition of machine.transitions) {
         if (transition.from === "[*]" || transition.to === "[*]") continue;
         const event = transition.trigger ?? `${transition.from}->${transition.to}`;
-        const grant = model.rbac.transitions.find(
-          (rule) => rule.entity === entity.name && rule.transition === event
-        );
+        const roles = grantedRoles(transition.from, transition.to);
         lines.push(
           `| ${code(transition.from)} | ${moveLabel(event, transition.to)} (${code(event)}) | ${code(transition.to)} | ${
-            grant ? grant.roles.map((role) => title(role)).join(", ") : mayUpdate
+            roles.length ? roles.map((role) => title(role)).join(", ") : mayUpdate
+          } |`
+        );
+      }
+      // Reopen is not drawn: it takes a final record back to Draft.
+      for (const from of machine.terminal) {
+        const roles = grantedRoles(from, LIFECYCLE_DRAFT);
+        lines.push(
+          `| ${code(from)} | ${moveLabel(REOPEN_EVENT, LIFECYCLE_DRAFT)} (${code(REOPEN_EVENT)}) | ${code(LIFECYCLE_DRAFT)} | ${
+            roles.length ? roles.map((role) => title(role)).join(", ") : "the administrator"
           } |`
         );
       }
