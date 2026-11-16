@@ -19,6 +19,7 @@ import {
   type FullStackGeneratorOptions,
 } from "../generators/full-stack.generator";
 import { renderManual } from "../manual";
+import { renderSkills, SKILLS_DIRECTORY } from "../manual/skills";
 import { buildReportingPack } from "../reporting/pack";
 import { buildModelLogic, renderModelLogic } from "../rules/model-logic";
 import { buildRuleModel, renderRuleModel } from "../rules/rule-model";
@@ -281,6 +282,7 @@ export async function generateApplication(
     stage = "artifacts";
     await writeModelSource(options.outputDir, options.sources, log);
     await writeManual(options.outputDir, model, options, log);
+    await writeSkills(options.outputDir, model, options, log);
     await writeRuleModel(options.outputDir, model, log);
     await writeModelLogic(options.outputDir, options.sources, log);
 
@@ -391,6 +393,37 @@ async function writeManual(
     // silent. This ran for a year as a bare `catch {}`, so a manual that failed
     // to render was indistinguishable from one nobody opened.
     log.event("pipeline.artifact.write_failed", { artifact: "manual.html", err });
+  }
+}
+
+/**
+ * The application described for a chat assistant: one Markdown skill per entity
+ * and an index, in `assistant-skills/` at the project root.
+ *
+ * Beside the manual and from the same derivations (`manual/skills.ts`), so the
+ * two cannot disagree about a form or a button. At the root rather than in the
+ * front end's public directory: they are context for a server-side assistant,
+ * not pages for a browser, and nothing serves them. An orchestrator mounts the
+ * directory into its assistant; the browser (WASM) stack has no assistant and
+ * does not write them.
+ *
+ * Non-fatal, like the manual.
+ */
+async function writeSkills(
+  outputDir: string,
+  model: ParsedModel,
+  options: GenerateApplicationOptions,
+  log: PipelineLogger = NO_LOG
+): Promise<void> {
+  try {
+    const directory = path.join(outputDir, SKILLS_DIRECTORY);
+    await fs.mkdir(directory, { recursive: true });
+    const files = renderSkills(model, { name: options.projectName });
+    for (const [name, content] of Object.entries(files)) {
+      await fs.writeFile(path.join(directory, name), content, "utf-8");
+    }
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: SKILLS_DIRECTORY, err });
   }
 }
 
