@@ -6,8 +6,6 @@ const STUDIO_URL = `http://localhost:${STUDIO_PORT}`;
 
 // Singleton process handle — survives across requests for the lifetime of the dev server.
 let studioProc: ReturnType<typeof import("node:child_process").spawn> | null = null;
-// Track the last seed file path so we can overwrite it when the project DB changes.
-let currentSeedPath: string | null = null;
 
 async function isStudioReady(): Promise<boolean> {
   try {
@@ -139,10 +137,9 @@ async function writeSeedConfig(overrideUrl?: string): Promise<string | null> {
   const yaml = lines.join("\n");
 
   // Write to the fixed stable path so the running studio always polls the same file,
-  // even after Vite hot-reloads reset the in-memory currentSeedPath variable.
+  // even after Vite hot-reloads reset module state.
   await mkdir(SEED_DIR, { recursive: true });
   await writeFile(SEED_FILE, yaml, "utf8");
-  currentSeedPath = SEED_FILE;
   return SEED_FILE;
 }
 
