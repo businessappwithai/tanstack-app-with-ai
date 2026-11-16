@@ -1608,6 +1608,27 @@ Two things make it correct rather than merely present:
   authoritative. `manual/__tests__/screen-layout.test.ts` holds both, and was
   verified non-vacuous by removing the filter and watching it fail.
 
+## The chat assistant's skills — `manual/skills.ts`
+
+Generation writes `assistant-skills/` at the project root beside `manual.html`: one
+`<table>.md` per entity and an `index.md`, for the orchestrator's chat assistant
+(`assistant/`, which mounts the folder and hands a skill out through its `read_skill`
+tool). Each says how a record is named (the display-value columns from
+`identifierColumnNames` — search by those), the form as the Application Dictionary lays
+it out, related records, the lifecycle buttons with the roles that may press them, the
+rules that can refuse a change, who may read it, and the reports and charts about it
+from the reporting pack.
+
+- **Same derivations as the manual** (`manualDictionary`, `deriveAccess`, compiled
+  workflows and `%%rbac` grants, `buildReportingPack`), exported from `manual/index.ts`
+  rather than restated, so the two cannot disagree.
+- **Never an address, a credential or record data.** The assistant's model names an
+  object and an id; the assistant resolves paths. `skills.test.ts` holds this.
+- **A reference column not named after its parent** (`owner_id` → `User`) is paired
+  with the one parent no other column claims; still ambiguous, it says so rather than
+  naming an entity that does not exist (the manual's `referenceTarget` alone does).
+- The browser (`--standalone`) stack writes none: it has no assistant.
+
 ## The published host is written in full — `https://www.appwithai.org`
 
 Every mention of the host in `website/llmtext/llms.txt`
