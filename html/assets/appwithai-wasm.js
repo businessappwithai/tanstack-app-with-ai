@@ -30644,9 +30644,11 @@ function refTableFor(entities, tableName, columnName) {
   if (!attribute?.isForeignKey)
     return;
   if (isPersonRoleColumn2(columnName)) {
-    const user = entities.find((entity) => entity.tableName === "bus_user" || entity.name === "User");
-    if (user)
-      return user.tableName;
+    for (const name of ["User", "Staff", "Employee"]) {
+      const person = entities.find((entity) => entity.name === name || entity.tableName === `bus_${name.toLowerCase()}`);
+      if (person)
+        return person.tableName;
+    }
   }
   const base = columnName.replace(/_id$/, "");
   return entities.find((entity) => entity.tableName === `bus_${base}`)?.tableName;
