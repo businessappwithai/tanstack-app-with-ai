@@ -21513,6 +21513,213 @@ ${processSection}
 `;
 }
 
+// packages/generator/src/manual/skills.ts
+var SKILLS_DIRECTORY = "assistant-skills";
+var REPORTS_PER_ENTITY = 12;
+function text(value) {
+  return String(value ?? "").replace(/\s+/g, " ").replace(/\|/g, "/").replace(/^#+\s*/, "").trim();
+}
+function code(value) {
+  return `\`${String(value).replace(/`/g, "'")}\``;
+}
+function skillFileName(entity) {
+  return `${tableNameFor(entity)}.md`;
+}
+function reportsByTable(pack) {
+  const byTable = new Map;
+  if (!pack)
+    return byTable;
+  const tablesOf = new Map(pack.queries.map((query) => [query.key, query.tables]));
+  const add = (kind, name, queryKey) => {
+    for (const table of tablesOf.get(queryKey) ?? []) {
+      const list = byTable.get(table) ?? [];
+      list.push(`${kind}: ${text(name)}`);
+      byTable.set(table, list);
+    }
+  };
+  for (const report of pack.reports)
+    add("Report", report.name, report.queryKey);
+  for (const chart of pack.charts)
+    add(`Chart (${chart.chartType})`, chart.name, chart.queryKey);
+  return byTable;
+}
+function referenceTargets(model, entity, declared) {
+  const declaredNames = new Set(declared.values());
+  const targets = new Map;
+  const unresolved = [];
+  for (const attribute of entity.attributes) {
+    if (!attribute.isForeignKey)
+      continue;
+    const target = referenceTarget(attribute.name, declared);
+    if (target && declaredNames.has(target))
+      targets.set(attribute.name, target);
+    else
+      unresolved.push(attribute.name);
+  }
+  const parents = model.relationships.filter((relationship) => relationship.targetEntity === entity.name && relationship.cardinality === "oneToMany" || relationship.sourceEntity === entity.name && relationship.cardinality === "manyToOne").map((relationship) => relationship.targetEntity === entity.name ? relationship.sourceEntity : relationship.targetEntity);
+  const claimed = new Set(targets.values());
+  const unclaimed = [...new Set(parents.filter((parent) => !claimed.has(parent)))];
+  if (unresolved.length === 1 && unclaimed.length === 1) {
+    targets.set(unresolved[0], unclaimed[0]);
+  }
+  return targets;
+}
+function renderSkills(model, options) {
+  const access = deriveAccess(model.rbac, {
+    projectId: options.name || "app",
+    entities: model.entities.map((entity) => entity.name)
+  });
+  const dictionary = manualDictionary(model);
+  const declared = declaredNames(model);
+  const categoryOf = new Map;
+  for (const category of model.categories) {
+    for (const name of category.entities)
+      categoryOf.set(name, category.name);
+  }
+  let pack = null;
+  try {
+    pack = buildReportingPack(model, {
+      projectName: options.name || "app",
+      databaseName: options.databaseName || options.name || "app"
+    });
+  } catch {
+    pack = null;
+  }
+  const reports = reportsByTable(pack);
+  const files = {};
+  const indexRows = [];
+  for (const entity of [...model.entities].sort((a, b) => a.name.localeCompare(b.name))) {
+    const object = tableNameFor(entity);
+    const label = title(entity.name);
+    const primaryKey = entity.primaryKey || "id";
+    const identifiers = identifierColumnNames(entity.attributes, primaryKey, entity.name);
+    const readers = access.entityVisibility[entity.name] ?? [];
+    const layout = dictionary.get(entity.name);
+    const byColumn = new Map(entity.attributes.map((attribute) => [attribute.name, attribute]));
+    const labelOf = new Map((layout?.fields ?? []).map((field) => [field.column, field.label]));
+    const fieldLabel = (column) => labelOf.get(column) ?? title(column);
+    const targets = referenceTargets(model, entity, declared);
+    const lines = [];
+    lines.push("---", `object: ${object}`, `entity: ${entity.name}`, `label: ${label}`, `category: ${text(categoryOf.get(entity.name) ?? "General")}`, `identifiers: [${identifiers.join(", ")}]`, `readers: [${readers.join(", ")}]`, "---", "", `# ${label}`, "", entity.description ? text(entity.description) : "The model gives this record type no description.", "");
+    lines.push("## Finding one");
+    if (identifiers.length > 0) {
+      lines.push(`A ${label} is known by ${identifiers.map((column) => `**${fieldLabel(column)}** (${code(column)})`).join(" and ")}. ` + `Search with ${code("search_records")} (recordType ${code(object)}) using that value, then open the match with ${code("open_record")} (object ${code(object)} and the id the search returned).`);
+    } else {
+      lines.push(`A ${label} has no naming field; it is shown by its parents. Search with ${code("search_records")} (recordType ${code(object)}) and open the match with ${code("open_record")}.`);
+    }
+    lines.push("If more than one record matches, list them by that value and ask which one is meant. Never guess an id.", "");
+    lines.push("## The form");
+    if (layout) {
+      lines.push(`Opened in the **${text(layout.window)}** window, on the **${text(layout.tab)}** tab.`, "");
+      const sectionNames = new Set(layout.sections.map((section) => section.name));
+      const sections = layout.sections.length > 0 ? [...layout.sections, { name: "Other fields", unplaced: true }] : [{ name: "" }];
+      for (const section of sections) {
+        const fields = layout.fields.filter((field) => field.onForm && (layout.sections.length === 0 || (section.unplaced ? !field.section || !sectionNames.has(field.section) : field.section === section.name)));
+        if (fields.length === 0)
+          continue;
+        if (section.name) {
+          lines.push(`### ${text(section.name)}${section.help ? ` — ${text(section.help)}` : ""}`);
+        }
+        for (const field of fields) {
+          const attribute = byColumn.get(field.column);
+          const parts = [`**${text(field.label)}** (${code(field.column)})`];
+          if (attribute) {
+            const isPrimary = attribute.name === primaryKey;
+            parts.push(controlFor(attribute, referenceIdFor(attribute, isPrimary)));
+            if (attribute.required && !isPrimary)
+              parts.push("required");
+            if (attribute.unique)
+              parts.push("unique");
+            if (attribute.enumValues?.length) {
+              parts.push(`one of ${attribute.enumValues.map((value) => code(value)).join(", ")}`);
+            }
+            if (attribute.isForeignKey) {
+              const target = targets.get(attribute.name);
+              parts.push(target ? `points at ${title(target)}` : "points at another record (see Related records)");
+            }
+          }
+          if (field.readOnly)
+            parts.push("read only");
+          const help = attribute?.description ? ` — ${text(attribute.description)}` : "";
+          lines.push(`- ${parts.join(", ")}${help}`);
+        }
+        lines.push("");
+      }
+    } else {
+      lines.push("No form layout was derived for this record type.", "");
+    }
+    const related = model.relationships.filter((relationship) => relationship.sourceEntity === entity.name || relationship.targetEntity === entity.name);
+    if (related.length > 0) {
+      lines.push("## Related records");
+      for (const relationship of related) {
+        const outgoing = relationship.sourceEntity === entity.name;
+        const other = title(outgoing ? relationship.targetEntity : relationship.sourceEntity);
+        const many = relationship.cardinality === "oneToMany" && outgoing || relationship.cardinality === "manyToOne" && !outgoing || relationship.cardinality === "manyToMany";
+        lines.push(`- ${many ? `Has many ${other} records` : `Belongs to one ${other}`}.`);
+      }
+      lines.push("");
+    }
+    const machines = model.workflows.filter((workflow) => workflow.entity === entity.name && workflow.transitions.some((t) => t.from !== "[*]"));
+    const updaters = model.rbac.operations.find((rule) => rule.entity === entity.name && rule.operation === "update")?.roles;
+    const mayUpdate = updaters?.length ? `${updaters.map((role) => title(role)).join(", ")} (anyone who may update it)` : "anyone who may update it";
+    const grantedRoles = (from, to) => [
+      ...new Set(model.rbac.transitions.filter((rule) => rule.entity === entity.name && rule.edges.some((edge) => edge.from === from && edge.to === to)).flatMap((rule) => rule.roles))
+    ];
+    for (const machine of machines) {
+      lines.push(`## Lifecycle — ${text(machine.name)}`);
+      lines.push(`A record starts at ${code(machine.initial ?? "—")}${machine.terminal.length ? ` and is final at ${machine.terminal.map((state) => code(state)).join(" or ")}` : ""}. It moves only by its buttons: read the ones open to this person with ${code("get_record_actions")}, then propose one with ${code("propose_move")} — the person confirms it.`, "", "| From | Button | To | Who may press |", "|---|---|---|---|");
+      for (const transition of machine.transitions) {
+        if (transition.from === "[*]" || transition.to === "[*]")
+          continue;
+        const event = transition.trigger ?? `${transition.from}->${transition.to}`;
+        const roles = grantedRoles(transition.from, transition.to);
+        lines.push(`| ${code(transition.from)} | ${moveLabel(event, transition.to)} (${code(event)}) | ${code(transition.to)} | ${roles.length ? roles.map((role) => title(role)).join(", ") : mayUpdate} |`);
+      }
+      for (const from of machine.terminal) {
+        const roles = grantedRoles(from, LIFECYCLE_DRAFT);
+        lines.push(`| ${code(from)} | ${moveLabel(REOPEN_EVENT, LIFECYCLE_DRAFT)} (${code(REOPEN_EVENT)}) | ${code(LIFECYCLE_DRAFT)} | ${roles.length ? roles.map((role) => title(role)).join(", ") : "the administrator"} |`);
+      }
+      lines.push("");
+    }
+    const rules = model.rules.filter((rule) => rule.entity === entity.name);
+    if (rules.length > 0) {
+      lines.push("## What can refuse a change");
+      for (const rule of rules)
+        lines.push(`- Rule ${code(rule.name)}, on ${text(rule.event)} (${text(rule.operation)}).`);
+      lines.push("When a change is refused, report the application's own words; do not retry another way.", "");
+    }
+    lines.push("## Who may read it");
+    lines.push(readers.length > 0 ? `${readers.map((role) => title(role)).join(", ")}, and the Administrator. Other people do not see it at all.` : "Every signed-in person.", "");
+    const about = reports.get(object) ?? [];
+    if (about.length > 0) {
+      lines.push("## Reports and charts about it");
+      lines.push(`On the reporting platform. Find one by name with ${code("search_reports")}, then open it with ${code("open_report")}.`);
+      for (const item of about.slice(0, REPORTS_PER_ENTITY))
+        lines.push(`- ${item}`);
+      if (about.length > REPORTS_PER_ENTITY) {
+        lines.push(`- …and ${about.length - REPORTS_PER_ENTITY} more; search by name.`);
+      }
+      lines.push("");
+    }
+    files[skillFileName(entity)] = `${lines.join(`
+`).trimEnd()}
+`;
+    indexRows.push(`| ${code(object)} | ${label} | ${text(categoryOf.get(entity.name) ?? "General")} | ${identifiers.length ? identifiers.map((column) => code(column)).join(", ") : "—"} | ${text(entity.description ?? "").slice(0, 140)} |`);
+  }
+  files["index.md"] = `${[
+    `# ${text(options.name)} — record types`,
+    "",
+    `Every record type this application keeps. Read one type's skill with ${code("read_skill")} (its object) before working with it: how its records are named, its form, its buttons and the reports about it.`,
+    "",
+    "| Object | Label | Group | Named by | What it is |",
+    "|---|---|---|---|---|",
+    ...indexRows
+  ].join(`
+`)}
+`;
+  return files;
+}
+
 // packages/generator/src/rules/model-logic.ts
 function buildModelLogic(sources) {
   const document = (Array.isArray(sources) ? sources : [sources]).filter(Boolean).join(`
@@ -22514,14 +22721,22 @@ function normalizeGraphActions(graph) {
       if (node.type !== "decisionTableNode" || !Array.isArray(table?.rules)) {
         return node;
       }
-      const inputIds = new Set((table.inputs ?? []).map((column) => column.id));
+      const inputs = (table.inputs ?? []).filter((col) => (col.field ?? "").trim() !== "");
+      const outputs = (table.outputs ?? []).map((col) => ({
+        ...col,
+        field: col.field || col.name || col.id
+      }));
+      const inputIds = new Set(inputs.map((column) => column.id));
+      const outputIds = new Set(outputs.map((column) => column.id));
       return {
         ...node,
         content: withTransformData({
           ...table,
+          inputs,
+          outputs,
           rules: table.rules.map((row) => Object.fromEntries(Object.entries(row).map(([key, cell]) => [
             key,
-            inputIds.has(key) ? emptyMeansBlank(rewrite(cell)) : rewrite(cell)
+            inputIds.has(key) ? emptyMeansBlank(rewrite(cell)) : outputIds.has(key) ? zenCell(rewrite(cell)) : rewrite(cell)
           ])))
         })
       };
@@ -22930,6 +23145,7 @@ async function generateApplication(options) {
     stage = "artifacts";
     await writeModelSource(options.outputDir, options.sources, log);
     await writeManual(options.outputDir, model, options, log);
+    await writeSkills(options.outputDir, model, options, log);
     await writeRuleModel(options.outputDir, model, log);
     await writeModelLogic(options.outputDir, options.sources, log);
     if (options.writeManifestFile !== false) {
@@ -22984,6 +23200,18 @@ async function writeManual(outputDir, model, options, log = NO_LOG) {
     }), "utf-8");
   } catch (err) {
     log.event("pipeline.artifact.write_failed", { artifact: "manual.html", err });
+  }
+}
+async function writeSkills(outputDir, model, options, log = NO_LOG) {
+  try {
+    const directory = join(outputDir, SKILLS_DIRECTORY);
+    await mkdir(directory, { recursive: true });
+    const files = renderSkills(model, { name: options.projectName });
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(directory, name), content, "utf-8");
+    }
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: SKILLS_DIRECTORY, err });
   }
 }
 async function writeModelSource(outputDir, sources, log = NO_LOG) {

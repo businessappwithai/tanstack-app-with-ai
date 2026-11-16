@@ -1676,7 +1676,7 @@ function DesignPage() {
             </div>
           )}
 
-          {false && !isFullscreen && !showFlowView && (
+          {!isFullscreen && !showFlowView && (
             <div
               className={`${
                 showVersions || showEntityList ? "w-1/2" : "w-1/2"
@@ -1693,7 +1693,7 @@ function DesignPage() {
                         </span>
                         <span>•</span>
                         <span>{versions[0]?.description || "Initial version"}</span>
-                        {project.generatedPath && (
+                        {project?.generatedPath && (
                           <>
                             <span>•</span>
                             <span className="text-amber-500">
@@ -1713,13 +1713,13 @@ function DesignPage() {
                 {validationErrors !== null && (
                   <div
                     className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
-                      validationErrors.length === 0
+                      validationErrors?.length === 0
                         ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
                         : "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
                     }`}
                     role="status"
                   >
-                    {validationErrors.length === 0 ? (
+                    {validationErrors?.length === 0 ? (
                       <span className="flex items-center gap-2 font-medium">
                         <CheckCircle2 className="w-4 h-4" />
                         Diagram is valid — {entities.length} entities parsed.
@@ -1731,7 +1731,7 @@ function DesignPage() {
                           The diagram could not be parsed.
                         </span>
                         <ul className="mt-2 space-y-1 font-mono text-xs whitespace-pre-wrap">
-                          {validationErrors.map((message) => (
+                          {(validationErrors ?? []).map((message) => (
                             <li key={message}>{message}</li>
                           ))}
                         </ul>
@@ -1741,7 +1741,7 @@ function DesignPage() {
                 )}
                 {checkReport && (
                   <CheckReportPanel
-                    report={checkReport}
+                    report={checkReport ?? {}}
                     onLine={(line) => jumpToEntity(line - 1)}
                     onClose={() => setCheckReport(null)}
                   />
@@ -1796,7 +1796,7 @@ function DesignPage() {
               <ErdFlowViewer erdCode={erdCode} />
             </div>
           ) : (
-            false && <div
+            <div
               className={`${
                 isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
               } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}

@@ -92,5 +92,9 @@
     "critters": "^0.0.25",
     "openai": "^7.1.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "overrides": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  }
 }

@@ -93,7 +93,7 @@ function slug(value: string): string {
  * a reader a column "points at Kyc Record" about an entity its own dictionary
  * called KYC Record.
  */
-const title = (value: string): string => formatDisplayName(String(value));
+export const title = (value: string): string => formatDisplayName(String(value));
 
 /* ------------------------------------------------------- what a field *is* */
 
@@ -126,7 +126,7 @@ const REFERENCE_NAMES: Record<number, string> = {
  * the field is a dropdown of other records; "Text" tells them it is a box they
  * type into. `string` tells them neither.
  */
-function controlFor(attribute: EntityAttribute, referenceId: number): string {
+export function controlFor(attribute: EntityAttribute, referenceId: number): string {
   if (attribute.enumValues?.length) return "Choice";
   return REFERENCE_NAMES[referenceId] ?? "Text";
 }
@@ -141,7 +141,7 @@ function controlFor(attribute: EntityAttribute, referenceId: number): string {
  * name from the column is what had the manual telling a reader a field
  * "points at Kyc Record" about an entity its own dictionary called KYC Record.
  */
-function referenceTarget(column: string, declared: Map<string, string>): string | null {
+export function referenceTarget(column: string, declared: Map<string, string>): string | null {
   const name = column.toLowerCase();
   if (name.endsWith("_by") || name.endsWith("_by_id")) return "User";
   if (!name.endsWith("_id")) return null;
@@ -150,7 +150,7 @@ function referenceTarget(column: string, declared: Map<string, string>): string 
 }
 
 /** Every entity the model declares, by its name with separators and case removed. */
-function declaredNames(model: ParsedModel): Map<string, string> {
+export function declaredNames(model: ParsedModel): Map<string, string> {
   return new Map(
     model.entities.map((entity) => [entity.name.toLowerCase().replace(/_/g, ""), entity.name])
   );
@@ -314,7 +314,7 @@ ${rows}
 }
 
 /** One entity's screen layout, as the Application Dictionary records it. */
-interface ManualLayout {
+export interface ManualLayout {
   window: string;
   tab: string;
   /** The `%%section` groups on this tab, in order. Empty when there are none. */
@@ -332,7 +332,7 @@ interface ManualLayout {
   }>;
 }
 
-type ManualDictionary = Map<string, ManualLayout>;
+export type ManualDictionary = Map<string, ManualLayout>;
 
 /**
  * Run the dictionary derivation once and index it by entity name.
@@ -341,7 +341,7 @@ type ManualDictionary = Map<string, ManualLayout>;
  * a field names a tab, a tab names a window and a table — so this resolves
  * those once rather than per entity.
  */
-function manualDictionary(model: ParsedModel): ManualDictionary {
+export function manualDictionary(model: ParsedModel): ManualDictionary {
   const context = new DictionaryGenerator({
     databaseType: "postgresql",
     includeRbac: true,
