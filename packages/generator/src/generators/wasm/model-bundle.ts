@@ -704,7 +704,7 @@ function isPersonRoleColumn(columnName: string): boolean {
 }
 
 /** The table a foreign-key column points at, for the form's lookup control. */
-function refTableFor(
+export function refTableFor(
   entities: Array<{
     name: string;
     tableName: string;
@@ -723,10 +723,15 @@ function refTableFor(
      used to reach the form with no reference table and render as a text box
      asking for a uuid. */
   if (isPersonRoleColumn(columnName)) {
-    const user = entities.find(
-      (entity) => entity.tableName === "bus_user" || entity.name === "User"
-    );
-    if (user) return user.tableName;
+    /* The person entity is the first of User, Staff, Employee the model declares —
+       the same order the checker uses (language/checker.ts, personEntityName). A
+       model with only Staff (a car wash, a clinic) must still get its lookup. */
+    for (const name of ["User", "Staff", "Employee"]) {
+      const person = entities.find(
+        (entity) => entity.name === name || entity.tableName === `bus_${name.toLowerCase()}`
+      );
+      if (person) return person.tableName;
+    }
   }
 
   const base = columnName.replace(/_id$/, "");
