@@ -1676,7 +1676,7 @@ function DesignPage() {
             </div>
           )}
 
-          {false && !isFullscreen && !showFlowView && (
+          {!isFullscreen && !showFlowView && (
             <div
               className={`${
                 showVersions || showEntityList ? "w-1/2" : "w-1/2"
@@ -1796,7 +1796,7 @@ function DesignPage() {
               <ErdFlowViewer erdCode={erdCode} />
             </div>
           ) : (
-            false && <div
+            <div
               className={`${
                 isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
               } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}
