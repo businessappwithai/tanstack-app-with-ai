@@ -632,6 +632,10 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
     // Copy static React components (these have complex JSX that doesn't work well with Handlebars)
     const staticComponents = [
       {
+        src: "src/components/admin/record-load-error.tsx",
+        dest: "src/components/admin/record-load-error.tsx",
+      },
+      {
         src: "src/components/forms/dynamic-form.tsx",
         dest: "src/components/forms/dynamic-form.tsx",
       },

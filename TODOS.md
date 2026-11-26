@@ -318,10 +318,11 @@ generator on that branch; these eight were not. Full write-up, with evidence, in
    `ClassSession` renders as `e70aa920-… · 04aa63ca-…`. The WASM runtime does
    this correctly; the two implementations have drifted.
 
-3. **A list the caller may not read says "No records found".** *(medium)*
-   `/payment` as an account with no read grant shows an empty grid and "Click +
-   to create a new payment"; the 403 is swallowed. The dashboard no longer links
-   there, but the address still answers misleadingly.
+3. **A list the caller may not read says "No records found".** — **RESOLVED (2026-09-19)**
+   All three generated record shells now show an access-denied message on a
+   failed 403 read, and a retryable error on other failures. They no longer
+   render an empty grid or a create prompt for failed requests. Behavioral
+   regression tests cover denial and retry in each shell.
 
 4. **The §3.7 identifier ladder can pick an enum column.** *(low)*
    `ClassPack` has one FK and no name or code, so "first text column" selects the

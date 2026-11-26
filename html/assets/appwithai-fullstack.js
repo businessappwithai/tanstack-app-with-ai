@@ -17110,6 +17110,10 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     }
     const staticComponents = [
       {
+        src: "src/components/admin/record-load-error.tsx",
+        dest: "src/components/admin/record-load-error.tsx"
+      },
+      {
         src: "src/components/forms/dynamic-form.tsx",
         dest: "src/components/forms/dynamic-form.tsx"
       },

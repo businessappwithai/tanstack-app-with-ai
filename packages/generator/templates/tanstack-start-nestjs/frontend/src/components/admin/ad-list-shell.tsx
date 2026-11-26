@@ -1,3 +1,4 @@
+import { RecordLoadError } from "./record-load-error";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Home, Plus, Search, X } from "lucide-react";
@@ -373,7 +374,7 @@ export function ADListShell({
   // the list on screen rather than the whole table.
   const { page: _exportPage, limit: _exportLimit, ...exportParams } = fetchParams;
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["ad-list", level.endpoint, fetchParams],
     queryFn: () => apiClient.get<PaginatedResponse<AnyRecord>>(level.endpoint, fetchParams),
   });
@@ -415,6 +416,8 @@ export function ADListShell({
     crumbs.push({ label: parentNames[i] ?? id, href: buildAdminDetailUrl(grandParentCtx, pl, id) });
   }
   crumbs.push({ label: pluralLabel(level.label) }); // current level — no link
+
+  if (isError) return <RecordLoadError error={error} onRetry={() => { void refetch(); }} />;
 
   return (
     <div className="flex flex-col h-full">
