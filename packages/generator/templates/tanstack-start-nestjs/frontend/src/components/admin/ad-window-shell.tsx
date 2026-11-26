@@ -1,3 +1,4 @@
+import { RecordLoadError } from "./record-load-error";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Home, Plus, Search, X } from "lucide-react";
@@ -407,6 +408,8 @@ export function ADWindowShell({ config }: ADWindowShellProps) {
 
   const {
     data: recordsData,
+    isError,
+    error,
     isLoading,
     refetch,
   } = useQuery({
@@ -668,6 +671,8 @@ export function ADWindowShell({ config }: ADWindowShellProps) {
     setAppliedRows([]);
     setCurrentIndex(0);
   };
+
+  if (isError) return <RecordLoadError error={error} onRetry={() => { void refetch(); }} />;
 
   return (
     <div className="flex flex-col h-full">
