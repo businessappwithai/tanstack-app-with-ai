@@ -3,21 +3,17 @@
 // This is the same parser, rule compiler and application assembler that
 // `appwithai-wasm generate` runs; the page imports it so a model generates the
 // same application whether it was submitted from a terminal or from a browser.
-var __defProp = Object.defineProperty;
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
+var __esm = (fn, res, err) => () => {
+  if (fn)
+    try {
+      res = fn(fn = 0);
+    } catch (e) {
+      err = [e];
+    }
+  if (err)
+    throw err[0];
+  return res;
 };
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // node-stub:node:fs
 var missing = () => {
@@ -261,7 +257,7 @@ var appwithai_language_default = {
     E --> F[Response]`
         },
         stateForm: {
-          description: "stateDiagram-v2 expresses a long-running/entity status workflow. States map to a status enum; transitions map to allowed status changes and can be guarded.",
+          description: "stateDiagram-v2 expresses a long-running/entity status workflow. States map to a status enum; transitions are the moves background workflows may make. The state field is system-managed: no person changes it through a form.",
           example: `stateDiagram-v2
     [*] --> Draft
     Draft --> Submitted : submit
@@ -441,9 +437,9 @@ var appwithai_language_default = {
     displayValue: {
       description: "What a record is called wherever something other than the record shows it: a Table Direct dropdown, and a grid cell holding a foreign key. Stored as sys_column.is_identifier, and the display value is the identifier columns concatenated in seq_no order - the same rule in both stacks.",
       derivation: [
-        "1. A column named name, full_name, display_name, title, label or subject - whichever appears first in that order.",
+        "1. A column named name, full_name, display_name, title, label or subject - whichever appears first in that order - or, failing those, the entity's own <entity>_name, <entity>_title or <entity>_label (department_name on Department, key department_id). Never a reference, never an enum column.",
         "2. Otherwise first_name and last_name together, if the entity declares both. This is why the value is a concatenation and not one column.",
-        "3. Otherwise code, reference or number - not a name, but what people quote at each other, and better than a uuid.",
+        "3. Otherwise code, reference or number, or the entity's own <entity>_code, <entity>_reference or <entity>_number - not a name, but what people quote at each other, and better than a uuid.",
         "4. Otherwise, if the entity declares two or more FK columns ending _id/_by, it is a join entity: its first two references are the identifiers, each resolved through the parent's own label. CampaignMember reads as `Spring Promo - Omar Kowalski`.",
         "5. Otherwise the first declared string/text column that is neither the key nor a reference.",
         "6. Otherwise the key, so a lookup still lists something."
@@ -475,13 +471,76 @@ var appwithai_language_default = {
         EML103: "A column the generator manages, declared in the model - the declaration is ignored."
       }
     },
+    fieldLogic: {
+      description: "Compiere's Display Logic, Read Only Logic and Mandatory Logic: three conditions a field carries in the Application Dictionary, each a boolean expression over the values of the record being edited. They are declared on the column with %%field and kept as three separate rules, as Compiere keeps them, because showing a field, letting it be changed and requiring it are three different decisions.",
+      declare: {
+        display: "%%field <Entity>.<column> display: <logic> - the field is on the form only while the logic is true. Compiled to sys_field.display_logic.",
+        readonly: "%%field <Entity>.<column> readonly: <logic> - the field cannot be changed while the logic is true. Compiled to sys_column.read_only_logic and sys_field.read_only_logic.",
+        mandatory: "%%field <Entity>.<column> mandatory: <logic> - the field must have a value while the logic is true. Compiled to sys_column.mandatory_logic and sys_field.mandatory_logic."
+      },
+      syntax: {
+        condition: `<operand> <operator> <operand>, where an operand is @column@ (a column of the same entity), a quoted literal 'x' or "x", or a bare word. One side must be a column.`,
+        operators: {
+          "=": "equal",
+          "!": "not equal (!=, ^ and <> are read the same)",
+          ">": "greater than",
+          "<": "less than",
+          ">=": "greater than or equal",
+          "<=": "less than or equal"
+        },
+        joins: "& (and) and | (or), evaluated strictly left to right with no precedence and no parentheses - a | b & c is (a | b) & c, as Compiere's Evaluator reads it.",
+        values: "A Yes/No column reads Y or N; an empty value is the empty string (@x@='' tests for it, @x@!'' for a value); two operands that both read as numbers compare as numbers, anything else as text - so an ISO date compares in date order.",
+        examples: [
+          "@IsSOTrx@=Y",
+          "@DocStatus@!DR",
+          "@GrandTotal@>1000",
+          "@IsSOTrx@=Y & @DocStatus@=DR",
+          "@DocStatus@=CO | @DocStatus@=CL"
+        ],
+        oneReading: "language/field-logic.ts parses and evaluates it. The checker validates with it and the generated applications evaluate with a byte-identical copy (templates/common/field-logic.ts) and, in the browser stack, its JavaScript twin (templates/wasm/server/lib/field-logic.js), held to the same cases by a parity test."
+      },
+      columnAndField: "Compiere keeps the column (sys_column - storage: data type, mandatory, updateable) apart from the field (sys_field - one window's view of it: shown, read-only, mandatory, layout). The model's read-only and mandatory logic is written to both, so a new window over the same table inherits it; display logic belongs to the field alone. A field's own logic, when an administrator sets one, wins over the column's.",
+      evaluation: {
+        displayed: "The field's is_displayed flag, and then its display logic.",
+        readOnly: "The field's is_read_only flag, or its read-only logic.",
+        mandatory: "The column's is_mandatory flag, or the mandatory logic - and only while the field is displayed: a value nobody can see is not one anybody can be made to enter.",
+        dependencies: "The form re-evaluates all three on every change to a column the logic reads, so a field appears, locks or becomes required as the record is edited."
+      },
+      enforcement: "The form's evaluation is a convenience; the API is the control. Both generated stacks evaluate the same logic on every create and update: a field whose mandatory logic is true for the record as it will be saved, and which is displayed, must have a value (400, 'Validation failed'); a field whose read-only logic is true for the record as it is stored cannot be changed by an update (400). A create has nothing stored to lock, so read-only logic does not refuse one. Display logic hides a field and never refuses a write.",
+      notSupported: "Compiere's global context variables (@#AD_Client_ID@), SQL logic (@SQL=...) and Java callouts. Logic reads the record's own columns only; a rule that needs another table, a role or a computed value belongs in %%action or a %%hook.",
+      checkerCodes: {
+        EML156: "error - a display:, readonly: or mandatory: value that does not parse as Compiere logic.",
+        EML157: "error - the logic reads @column@ that the entity does not declare.",
+        EML158: "warning - display logic that depends on its own field: once hidden, nobody can see it to change it back.",
+        EML159: "warning - logic placed on the primary key or on the state field, neither of which is ever an input."
+      }
+    },
+    optimisticLocking: {
+      description: "Every generated stack refuses a save made against a record version someone else has already moved past, instead of letting the second save silently overwrite the first. It rides on the managed `version` column, so a model declares nothing to get it.",
+      contract: {
+        version: "Starts at 1 on insert and is raised by one on every update, by the application - a `version` supplied in a request body is ignored.",
+        read: 'GET of one record answers with `ETag: "<version>"`; the record body carries `version` too.',
+        write: 'PUT and PATCH take `If-Match: "<version>"` - the version the caller read. `"3"`, `3`, `W/"3"` and `v3` are accepted; a value naming no version is a 400. With no header, or `*`, the save is unconditional.',
+        conflict: 'A save whose If-Match is older than the stored version is refused with 409 and `details: { code: "VERSION_CONFLICT", entity, id, expectedVersion, currentVersion }`. The record itself is not in the body: the client re-reads it through GET, which applies field access.',
+        atomicity: "The comparison and the write are one step - the NestJS stack locks the row (SELECT ... FOR UPDATE) and updates WHERE version = the version it read, the browser stack updates WHERE version = ..., and the node-rest runtime checks and writes synchronously. Two saves of one version therefore produce exactly one 200 and one 409, never two 200s."
+      },
+      form: "The record form sends the version it opened. On VERSION_CONFLICT it lists the fields the other save changed - theirs beside yours, marking fields both changed - and offers Reload their version (discard my edits), Overwrite with mine (save again against the version just read, itself checked) or Keep editing. The NestJS front end draws it as a dialog; the browser build as an inline panel, because it runs inside an iframe where a modal is not guaranteed.",
+      stacks: {
+        "tanstack-nestjs": "bus.controller (If-Match, ETag) and bus.service (row lock + versioned UPDATE); frontend lib/version-conflict.ts and components/admin/version-conflict-dialog.tsx; generated test suite 22-optimistic-locking.",
+        browser: "server/modules/bus.routes.js and ui/views/entity-form.js in the standalone runtime; the same 409 body as the NestJS stack.",
+        "node-rest": "services.js and server.js in the zero-dependency runtime: version, ETag, If-Match and the same 409 body.",
+        "enterprise-reporting": "The generated update server function takes the version the form read and refuses a stale one with VERSION_CONFLICT."
+      },
+      manual: "The generated manual carries a section, When two people change the same record, naming the three choices."
+    },
     alsoDerived: [
-      "Each entity becomes a sys_table with a window and a tab; attributes become fields in declared order (seqNo = (index + 1) * 10).",
+      "Each entity becomes a sys_table with a window and a tab; attributes become fields in declared order (seqNo = (index + 1) * 10), unless the entity declares %%section - then the fields follow the sections and their rows. See formLayout.",
       "%%index becomes real indexes; a unique attribute or a `name` column is indexed automatically (mergeIndexes).",
       "%%category becomes the dashboard grouping; a model declaring none gets a single General category holding every entity.",
       "%%field <Entity>.<column> help: and %%entity <Name> help: become sys_column.description and sys_table.description - the help a reader sees under the field and beside the table. %%entity description: is the same key under its other name.",
       "%%entity <Child> parent: <Parent> makes the child a line item: no window and no dashboard card, a tab inside the parent's window instead. See masterDetail.",
-      "The remaining %%entity keys (label, icon, prefix, softDelete, audited) are validated but not yet compiled. `icon` in particular: an entity's icon is not taken from the model, it is set in the running application through Application Dictionary -> Table and Column, where it may be a lucide name or an uploaded image. Only %%category carries an icon the model decides."
+      "%%entity <Name> icon: becomes sys_table.icon — the entity's dashboard card, its window heading and its navigation entry all draw it. It is a lucide name, and an administrator may override it afterwards in Table and Column, including by uploading an image; the same column holds both. %%category carries an icon the same way, for its heading.",
+      "The remaining %%entity keys (label, prefix, softDelete, audited) are validated but not yet compiled."
     ],
     helpText: {
       description: "The only explanation a generated application has. `%%entity <Name> help:` becomes sys_table.description and opens that entity's section of manual.html; `%%field <Entity>.<column> help:` becomes sys_column.description, the hint under the control, and the column's row in the manual. There is no second source — no hand-written tooltip, no README beside the form, no designer to ask — so a model that skips it produces an application whose manual is a table of dashes.",
@@ -500,6 +559,55 @@ var appwithai_language_default = {
         EML152: "warning — an entity with no `%%entity ... help:` at all.",
         EML153: "warning — the columns of one entity with no `%%field ... help:`, reported once per entity and naming them. One diagnostic per column would bury every other finding on a model that skipped help entirely, which is the common case."
       }
+    },
+    completeness: {
+      description: "Every Application Dictionary value is mandatory, in the model itself. The generated application has no screen, label, lookup, dropdown or explanation the model does not declare, and nothing after authoring adds one — so a value the model leaves out is a gap in every application generated from it.",
+      codes: {
+        EML119: "the FK modifier on a reference column — without it the lookup is lost",
+        EML146: "the %%field ... enum: binding on a status, state or stage column — without it the dropdown is lost",
+        EML151: "help that describes its subject rather than restating its name",
+        EML152: "%%entity <Name> help: on an entity",
+        EML153: "%%field <Entity>.<column> help: on every column but the primary key",
+        EML154: "name: on a %%category — without it the grouping is dropped",
+        EML170: "%%section on every entity — without it the form is one flat, unheaded column of fields",
+        EML172: "every column but the primary key placed in a %%section row — an unplaced column falls into a trailing Other section",
+        EML177: "help: on every %%section that says what the section is for — it is the sentence under the heading"
+      },
+      required: "A delivered model carries none of these nine. They are warnings by severity and gaps by consequence: audit-model.mjs fails a model carrying any of them, and formatReport's verdict names them apart from the advisory warnings (DICTIONARY_COMPLETENESS in language/browser/checker.entry.ts).",
+      planFirst: "Decide every value before writing the document — per entity its help, category and parent; per column its type, modifiers, FK target, enum binding and help; per cross-entity step the row it aims at (targetSource or targetField, else EML265). A value improvised while typing the ERD is the one that comes out as a restatement.",
+      reviewUntilClean: "A clean checker run starts the review rather than ending it: re-read the file against the plan, confirm none of the nine codes and a clean audit, read every help line as the person on the generated screen would, and after any fix re-run the checker and the audit from zero. The review ends when a full pass finds nothing to change, not when a cycle count runs out."
+    },
+    formLayout: {
+      description: "How a record's form is laid out: headed sections, each of rows of one or two fields. It is the third layer of the dictionary - a column says what is stored, a field says that it is on the screen, and a section says where and beside what. Declared by `%%section`, compiled to one sys_field_group per section (sys_field_group.columns = 2, description = the section's help) and to each field's sys_field_group_id, seq_no, is_same_line (the right-hand field of a pair) and column_span (2 for a row of one); the dictionary has no X or Y position. Both stacks draw it: the NestJS form as a two-column grid per group, the browser form the same way.",
+      directive: "%%section entity: <Entity>; name: <Label>; help: <text>; rows: <column>, <column> | <column> | ...; collapsed: true",
+      mandatory: "Every entity declares its sections, and every column but the primary key sits in exactly one row of one of them. A form is the screen people use all day; the model is the only place its layout is decided, and an entity without sections is generated as one flat, unheaded list in declared order - correct, and nothing anyone designed.",
+      rows: [
+        "Two columns per row is the norm. Pair columns a person fills or reads together: first_name beside last_name, start_date beside end_date, quantity beside unit_price, a reference beside the status it moves through.",
+        "A row of one spans the full width. Use it for text and memo columns (reference 14), for an address, and for a reference whose label is long - never to avoid deciding what pairs with what.",
+        "More than two columns in a row is an error (EML174): the form is a two-column grid, and a third column has nowhere to go."
+      ],
+      sections: [
+        "Name a section for what the person is doing in it - Identity, Contact, Terms, Delivery, Clinical findings - not for the kind of column it holds. `References`, `Dates` and `Numbers` are a schema, not a form.",
+        "Open with the section that identifies the record: its name or number and the one or two values someone checks first. The display value's columns belong there.",
+        "Keep a section to the fields that are read together - roughly two to six rows. An entity with eight columns has two or three sections, not one; an entity with three columns may have one.",
+        "Put what is rarely touched last, and mark it `collapsed: true`: internal notes, integration references, figures only an administrator reads.",
+        "A line item (`%%entity <Child> parent:`) has sections too: they are what its own form shows when a row is opened from the parent's tab."
+      ],
+      help: "`help:` on a section is compiled to sys_field_group.description and printed under the heading. Say what the section is for and what has to be true before it is complete - `What was agreed with the supplier: the price, the terms and the date it stops applying.` - not `Terms fields.`. It is part of the help contract (helpText) and held to it the same way: EML177 reports a section with none, or one that restates its name.",
+      unplaced: "A column of a sectioned entity that no row names is not lost: it is generated into a trailing collapsed `Other` section, and EML172 reports it. The fixer places it for you by appending rows of two to the entity's last section, which is a repair and not a design - move it to where it belongs.",
+      entitiesWithoutSections: "An entity with no %%section is generated exactly as it was before the directive existed: one tab, every field in declared order, no headings. It is legal, it is what an older model produces, and it is EML170.",
+      checkerCodes: {
+        EML170: "warning — an entity declares no %%section. Dictionary completeness.",
+        EML171: "error — a %%section without one of its required keys: entity, name or rows.",
+        EML172: "warning — columns of a sectioned entity placed in no row. Dictionary completeness. Auto-fixable: appended to the entity's last section, two per row.",
+        EML173: "error — a %%section names an entity the model does not declare.",
+        EML174: "error — a row with more than two columns. Auto-fixable: split into rows of two.",
+        EML175: "warning — a column placed in two rows. Auto-fixable: the later placement is removed.",
+        EML176: "error — a row names a column the entity does not declare, or its primary key, which no form shows.",
+        EML177: "warning — a %%section with no help:, or help that restates the section's name. Dictionary completeness.",
+        EML178: "warning — a row places the state field of an entity with a state machine. It is shown read-only in the form's header instead. Auto-fixable: removed from the row."
+      },
+      stateField: "The state field of an entity with a kind: state machine is not part of the form body: it is a read-only badge in the form's top header and always a list-grid column (workflowConstructs.stateForm.display). It is the one column a sectioned entity leaves out of every row, and EML170/EML172 do not count it."
     },
     masterDetail: {
       description: "A line item is an entity with no life away from its owner - an invoice line, an order line, a prescription item. The ERD cannot tell one from an ordinary reference, because InvoiceLine.invoice_id and Invoice.patient_id are both a foreign key with a relationship behind it. The modeller says which it is.",
@@ -535,12 +643,23 @@ var appwithai_language_default = {
       EML147: "%%entity ... parent: names an entity that is not declared, or the entity names itself.",
       EML148: "%%entity ... parent: is declared but the child has no foreign key back to the parent, so the detail tab has nothing to link on.",
       EML149: "info — an entity shaped like a line item that declares no parent:. Names the candidate parent and the column a tab would link on. Never an error: identifyingAChild's three questions are about the business, not the document.",
+      EML155: "info — a line item of a line item: parent: names an entity that is itself declared parent:. The dictionary has two levels, so the deeper entity is generated as a top-level one (own window and dashboard card, foreign key kept) rather than as a tab. Mirrors flattenNestedLineItems in the generator's parser; only a parent: that takes effect (declared parent, foreign key to it) counts.",
       EML150: "warning — an entity declared parent: is also named in a %%category. The category asks for a dashboard card the directive has taken away.",
       EML151: "warning — entity or column help that restates its own name instead of describing it. See helpText.mustBeDomainKnowledge.",
       EML152: "warning — an entity with no help text at all.",
       EML153: "warning — columns with no help text, reported once per entity.",
       EML154: "warning — a %%category with no `name:` key. category.parser.ts requires one and skips the line without it, so the whole grouping is silently lost and its entities fall into the default General category.",
-      EML500: "A `kind: state` workflow bound to an entity with no status/state/stage column at all - the machine has nothing to track."
+      EML500: "A `kind: state` workflow bound to an entity with no status/state/stage column at all - the machine has nothing to track.",
+      EML275: "error — a cross-entity UpdateEntity/DeleteEntity step whose targetField is not a column of the target entity. targetField is matched on the target table against the triggering record's id; a child reaching its parent writes targetSource: <fk column> instead.",
+      EML513: "warning — a `kind: state` machine ends the diagram at its first state (`draft --> [*]` beside `[*] --> draft`). Every `x --> [*]` state is Final and a Final record is locked, so every record of the entity is locked as soon as it is saved: it can be neither edited nor deleted and moves on only by a button. Remove the `--> [*]` line; if a record may be discarded from the start state, draw a move to a state that ends the diagram instead.",
+      EML514: "warning — a `CreateEntity` step inserts exactly the columns its `fields` map names, and nothing fills a required reference (an FK not marked OPTIONAL) it leaves out. The insert is refused with a NOT NULL violation, the process fails and, when a rule starts it, so does the save that triggered it. Add the column to `fields` (a column of the triggering record, or a variable an earlier step published with `as:`), or mark it OPTIONAL in the erDiagram.",
+      EML515: "warning — a column bound to a `%%enum` of words (`%%field E.c enum: X`) is declared integer, decimal, boolean or a date. The dictionary offers the enum's values as the column's dropdown, the database type refuses the first one chosen (400, \"a value was not valid for its column type\"), and no record of the entity can be created from its form. Declare the column string, or drop the binding if the column is a number.",
+      EML516: "warning — an entity is named like a page of the generated application (`Dashboard`, `Login`, `Admin`, `Api`, `Auth`, `Index`). Each entity's list page is written to a route named after it, so the entity's grid replaces that page: `Dashboard` replaces the home dashboard that lists every category, so the application has no way to its screens. Rename the entity and the columns that point at it.",
+      EML509: "error — a `kind: state` machine draws a state named `final` or `error`. The record lifecycle reserves both as stored values: Final is every state the diagram ends, and Error is where a record whose Draft workflows failed goes. Compared exactly, so a `FINAL` status is an ordinary state.",
+      EML511: "info — a move the state diagram draws that no %%rbac line names. It is open to anyone who may update the entity, and the administrator; reported once per machine, listing the moves, so the choice is a visible one.",
+      EML512: "warning — a move rule (`<Entity>StateProgress`) or move saga (`<Entity><State>Move`) left from before action buttons: the saga only writes the state field and clears `_at` columns, the rule only starts such sagas. A button makes the move now, so they would move the record a second time. Auto-fixable: the section is removed and the `<state>_at` help rewritten (language/move-facts.ts).",
+      EML508: "warning — a saga's UpdateEntity step writes a value into a state field that the entity's state machine does not draw.",
+      EML178: "warning — a %%section row places the state field. The state is shown read-only in the form's header and as a list column, never in the form body. Auto-fixable: removed from the row."
     },
     reportDesigns: {
       description: "Generated applications include a document report subsystem backed by the AnkaReport library. One default AnkaReport layout is seeded per entity into sys_report_designs at generation time. Administrators can customise any layout at Admin → Report Designs. Users get a Print button on a record's detail view (visible only when a design exists for that table), and can export the rendered report to PDF.",
@@ -798,25 +917,30 @@ var appwithai_language_default = {
       start: "[*] --> FirstState",
       end: "LastState --> [*]",
       transition: "StateA --> StateB : eventName",
-      mappingHint: "States are treated as a status enum for the bound entity; transitions define the allowed status changes.",
-      enforcement: "The edges are enforced, not merely documented. Every transition a diagram draws is compiled into sys_workflow_transitions, and the generated EntityAccessGuard refuses a write that moves a record to a state with no matching edge from the state it is in — answering 403 and leaving the record where it was. This holds for every caller, the master role included: an edge the diagram never drew is not a permission an administrator lacks, it is a move that does not exist, and allowing it would put the record in a state every rule and workflow downstream was written without. Who may cross an edge that does exist is the separate question %%rbac answers, from sys_transition_access, and that one the master role does bypass. Keep the two apart: enforcing topology only where a role rule happens to cover it leaves every unguarded edge open.",
-      readingTheEdges: "GET /api/workflows/transitions returns the stored edges, optionally narrowed by ?table= and ?from=. A screen offering a status change asks this rather than offering every state and letting the save be refused. A table with no state diagram has no rows and nothing is enforced for it."
+      mappingHint: "States are the values of the bound entity's lifecycle column, between Draft and Error; transitions are the moves its action buttons make.",
+      enforcement: "The edges are enforced, not merely documented. A record moves only along an edge the diagram draws — by an action button (POST /api/bus/<entity>/<id>/transition) or by a workflow's UpdateEntity step — and a move with no edge from the record's state is refused with 409 `INVALID_TRANSITION`. This holds for every caller, the master role included: an edge the diagram never drew is not a permission an administrator lacks, it is a move that does not exist.",
+      lifecycle: "Every record has a lifecycle (language/state-field.ts is the one statement of it). It is saved in Draft. With no state machine it goes to Final when its workflows succeed, or to Error with their message when they fail; its column is `doc_status` (draft | final | error). With a machine its column is the state field, holding Draft, the machine's states and Error: a save from Draft or Error runs the workflows and, if they succeed, moves the record to the machine's initial state (staying in Draft when the machine starts there — a state named draft under any spelling is the lifecycle's Draft). Every state the diagram ends (x --> [*]) is Final. A Final record is locked: an update or delete is refused with 409 `RECORD_FINAL`, and only the `reopen` move, by the administrator or a role `%%rbac role:x on Entity.reopen` names, takes it back to Draft. An Error record stays editable; saving it starts over from Draft. A workflow that fails on a button press, or on saving a record in an intermediate state, rolls the change back with 422 and its message, and the record keeps its status. `final` and `error` are reserved state names (EML509).",
+      moves: "An action button for each edge out of the record's state, labelled with the status it moves to (an edge into `closed_won` reads Closed won, whatever the edge is called); the edge's event stays the move's name for `%%rbac`, the API and the history. Pressing it saves the form in its current status, then runs the workflows bound to that status (`status: <state>` on a workflow) in a second transaction and moves the record only if they all succeed; a choice of several buttons opens a menu. A move is limited to roles with `%%rbac role:<role> on <Entity>.<event>` (or `.from->to` for an edge with no label); a move no line names is open to anyone who may update the entity (EML511, info). A move may name an assignee who holds the next status's role. Each move stamps the `<state>_at` column when the entity has one and is logged in sys_record_transitions.",
+      stateField: "The state field is the column the machine drives: `status`, else `state`, else `stage`, whichever the bound entity declares first in that order (language/state-field.ts is the one statement of it, read by the checker, the generator and both runtimes). An entity with none drives the managed `workflow_status` column and draws EML500.",
+      systemManaged: 'Nobody types a status into a form. The lifecycle column is written by the save pipeline, an action button, or a workflow moving along a drawn edge. The generated API strips a value that equals the stored one (so a whole-record save still works) and refuses one that differs with 403 and `details.code: "STATE_FIELD_SYSTEM_MANAGED"`, for every caller, the master role included — the button is the way to move it. Move rules and sagas written before buttons existed are EML512, and the fixer removes them.',
+      display: "Where an entity has a state field it is shown, and it is shown in two places only. On the record's form it is a read-only badge in the top header, beside the record's title - never an input, on create or on edit. In the list grid it is always a column, whatever else the grid shows; it is not grid noise and an administrator's grid-visibility toggle cannot hide it. It is therefore never placed in a %%section row (EML178), and its absence from every row is not a gap (EML170/EML172 do not count it).",
+      readingTheEdges: "GET /api/bus/<entity>/<id>/actions returns the moves the caller may make from the record's state (the buttons), and GET /api/workflows/transitions every stored edge, optionally narrowed by ?table= and ?from=."
     },
     workflowKinds: {
       hook: {
-        form: "%%workflow <name> entity: <Entity> kind: hook",
+        form: "%%workflow <name> entity: <Entity> kind: hook [status: <state>]",
         description: "A flowchart whose steps represent operations on a single entity. %%hook directives bind named handlers to the entity's CRUD lifecycle events. Fully parsed by the shipped hook-parser.",
         diagram: "flowchart",
         shipped: true
       },
       state: {
         form: "%%workflow <name> entity: <Entity> kind: state",
-        description: "A stateDiagram-v2 whose states map to a status enum for the bound entity. Transitions define the allowed status changes and are enforced as the entity's topology — see stateForm.enforcement. %%rbac directives naming a transition event add the role check on top of that; %%trigger directives declare external event sources. Fully parsed by the shipped hook-parser.",
+        description: "A stateDiagram-v2 whose states are the bound entity's lifecycle between Draft and Error. Each transition is an action button, limited to the roles a %%rbac line names, and the edges are enforced as the entity's topology — see stateForm.lifecycle, stateForm.moves and stateForm.enforcement. %%trigger directives declare external event sources. Fully parsed by the shipped hook-parser.",
         diagram: "stateDiagram-v2",
         shipped: true
       },
       saga: {
-        form: "%%workflow <name> entity: <Entity> kind: saga [trigger: automatic|rule] [operation: CREATE|UPDATE|DELETE|ALL]",
+        form: "%%workflow <name> entity: <Entity> kind: saga [trigger: automatic|rule] [operation: CREATE|UPDATE|DELETE|ALL] [status: <state>]",
         description: "A flowchart whose nodes are executable steps. Each node is bound to a step by a %%step directive naming the node id and its step type; the flowchart edges give the running order. Compiles to BPMN service tasks seeded into sys_workflow_definitions and run by the generated workflow executor. This is how a multi-entity, multi-step process — create a row here, update one there, delete a third, passing values between the steps — is expressed in the model rather than drawn by hand in the app.",
         diagram: "flowchart",
         shipped: true,
@@ -826,7 +950,8 @@ var appwithai_language_default = {
         },
         ordering: "Steps run in flowchart edge order, walking forward from every node with no incoming edge. A node with a %%step but no edges still runs, after the wired ones, in document order — the canvas implies a step runs even when the connection was left implicit.",
         example: "%%workflow CriticalDeviationEscalation entity: DeviationReport kind: saga trigger: rule operation: CREATE",
-        operation: "Which write runs the workflow. Defaults to CREATE. Only consulted for trigger: automatic — a rule-triggered workflow is resolved by name, so the rule decides."
+        operation: "Which write runs the workflow. Defaults to CREATE. Only consulted for trigger: automatic — a rule-triggered workflow is resolved by name, so the rule decides.",
+        status: "Bind the workflow to a move: `status: <state>` (a state of the entity's kind: state workflow) with trigger: automatic operation: UPDATE. A button press is two transactions — the first saves the form and leaves the status where it is, the second runs the workflows bound to the target state and moves the record only if every one succeeds. A failure rolls the second back: the saved values stay, the status does not move, and the reason is recorded. Checked by EML243 (the state must be drawn), EML244 (an update must start it) and EML245 (some arrow must lead into the state). An entity with no status machine has Draft and Final only; its update workflows already run on the way to Final, so it takes no status:."
       }
     },
     stepNodes: {
@@ -838,7 +963,7 @@ var appwithai_language_default = {
       types: [
         {
           name: "UpdateEntity",
-          purpose: "Write one column on the triggering record, or on rows of a related entity.",
+          purpose: "Write one column on the triggering record, or on rows of a related entity. `value: null` clears the column. It is the only writer of a state field: no person changes one.",
           required: ["field"],
           oneOf: [["source", "value"]],
           optional: ["entity", "targetField", "targetSource"],
@@ -1091,8 +1216,8 @@ var appwithai_language_default = {
         },
         {
           type: "UpdateEntity",
-          purpose: "Write a field, by default on the triggering record.",
-          properties: ["entity", "field", "value"],
+          purpose: "Write a field, by default on the triggering record. To write another entity, name it and say which row: `target: {{id}}` (a value an earlier step published) or `target: <fk_column>` (a column on that entity matched against the triggering record).",
+          properties: ["entity", "target", "field", "value"],
           example: `%%step s3 type: UpdateEntity
 %%step s3 field: status
 %%step s3 value: {{tier}}`
@@ -1242,12 +1367,15 @@ var appwithai_language_default = {
         form: "%%field <Entity>.<attr> <key>: <value>",
         status: "compiled",
         consumedBy: [
-          "packages/generator/src/parsers/mermaid.parser.ts (the `enum:` and `help:` keys; the other keys are reserved)"
+          "packages/generator/src/parsers/mermaid.parser.ts (the `enum:`, `help:`, `display:`, `readonly:` and `mandatory:` keys; the other keys are reserved)"
         ],
-        purpose: "Extended field metadata: enum reference and help text, both compiled; ui control, default value, min/max and format are reserved.",
+        purpose: "Extended field metadata: enum reference, help text and Compiere field logic (display:, readonly:, mandatory: - see applicationDictionary.fieldLogic), all compiled; ui control, default value, min/max and format are reserved.",
         examples: [
           "%%field Order.status enum: OrderStatus",
           "%%field Contact.account_id help: The company this person works for. Leave empty for a personal contact.",
+          "%%field Opportunity.loss_reason display: @stage@=closed_lost",
+          "%%field Opportunity.amount readonly: @stage@=closed_won | @stage@=closed_lost",
+          "%%field Contract.renewal_notice_days mandatory: @auto_renew@=Y",
           "%%field Product.price min: 0",
           "%%field User.email unique: true"
         ]
@@ -1271,6 +1399,22 @@ var appwithai_language_default = {
         examples: [
           "%%category name: Compound Registry; description: Structures and aliases; icon: FlaskConical; color: #6366f1; entities: Compound, CompoundAlias",
           "%%category name: People and Teams; default: true; entities: User, Team"
+        ]
+      },
+      {
+        keyword: "%%section",
+        form: "%%section entity: <Entity>; name: <Label>; help: <text>; rows: <column>, <column> | <column> | ...; collapsed: true",
+        status: "compiled",
+        consumedBy: [
+          "packages/generator/src/parsers/section.parser.ts -> entity.formSections",
+          "packages/generator/src/generators/dictionary.generator.ts -> sys_field_group, sys_field.sys_field_group_id / is_same_line / column_span",
+          "templates/common/seeds/sys-dictionary.ts.hbs (NestJS) and generators/wasm/model-bundle.ts (browser)"
+        ],
+        purpose: "Lay an entity's form out as headed sections of two-column rows. Each directive is one section of one entity: `name` is its heading, `help` the sentence under the heading, and `rows` its fields, rows separated by `|` and the one or two columns of a row by `,`. A row of two puts the columns side by side; a row of one spans the full width, which is where a text or memo column, or a reference worth its whole line, belongs. Sections render in declaration order and fields in row order. Repeating a section's `entity` and `name` continues it, so a long section can be written over several lines; `help` is read from the first. `collapsed: true` closes the section until it is opened. Every column of the entity but its primary key is placed in exactly one section - see applicationDictionary.formLayout. `entity`, `name` and `rows` are required. `help` may contain semicolons; no other value may.",
+        examples: [
+          "%%section entity: Order; name: Order; help: Who placed the order, when, and where it stands.; rows: order_number, order_date | customer_id, status",
+          "%%section entity: Order; name: Delivery; help: Where the goods go and how they travel there.; rows: shipping_address | carrier, tracking_number",
+          "%%section entity: Order; name: Notes; help: Anything the next person handling this order should know.; rows: notes; collapsed: true"
         ]
       },
       {
@@ -1312,26 +1456,25 @@ var appwithai_language_default = {
       },
       {
         keyword: "%%rbac",
-        form: "%%rbac <roleExpr> on <Entity>.<op>   where <op> is a CRUD operation (create|read|update|delete|*) or a transition event in <Entity>'s state machine",
+        form: "%%rbac <roleExpr> on <Entity>.<target>   where <target> is a CRUD operation (create|read|update|delete|*), a move of the entity's state machine (its event, or from->to for an edge with no label), or reopen.",
         status: "compiled",
         consumedBy: [
           "packages/generator/src/rbac/index.ts (compiles both forms)",
           "packages/generator/src/rbac/roles.ts (derives the roles, one seeded account each, and per-entity visibility)",
-          "seeded into sys_operation_access / sys_transition_access",
+          "seeded into sys_access_grant (kind op | move | reopen), read through the sys_user_capability view",
           "enforced by the generated EntityAccessGuard on /bus CRUD",
           "app-and-report-with-ai-tanstack: common/build/reporting-pack.ts -> one reporting role per declared role, scoped to the tables that role may read"
         ],
-        purpose: "Restrict a CRUD operation or a state transition to named roles. It restricts rather than grants: a target no directive mentions is open to any authenticated caller, so a model declaring no %%rbac generates what it always did. A target with one or more directives requires the union of the roles they name. A master role bypasses. That bypass is over access — who may do a thing — and not over the shape of the model: a state machine's topology is enforced for the master role too, because an edge the diagram never drew is a move that does not exist rather than a permission anyone is missing (see workflowConstructs.stateForm.enforcement). Role names are matched case-insensitively, because seeded roles are title-cased (Manager) and directives are written lower-case (role:manager) - an exact match would make such a rule unsatisfiable, locking out exactly the people it was written to admit. Spelled %%guard until that keyword was needed unambiguously for automation conditions.",
+        purpose: "Restrict a CRUD operation to named roles. It restricts rather than grants: a target no directive mentions is open to any authenticated caller, so a model declaring no %%rbac generates what it always did. A target with one or more directives requires the union of the roles they name. A master role bypasses. That bypass is over access — who may do a thing — and not over the shape of the model: a state machine's topology is enforced for the master role too, because an edge the diagram never drew is a move that does not exist rather than a permission anyone is missing (see workflowConstructs.stateForm.enforcement). Role names are matched case-insensitively, because seeded roles are title-cased (Manager) and directives are written lower-case (role:manager) - an exact match would make such a rule unsatisfiable, locking out exactly the people it was written to admit. Spelled %%guard until that keyword was needed unambiguously for automation conditions.",
         examples: [
           "%%rbac role:admin on Order.delete",
           "%%rbac role:sales|manager on Deal.update",
           "%%rbac role:admin on Customer.*",
-          "%%rbac role:sales_manager on Quote.approve",
           "%%rbac role:sales_rep|sales_manager|support_agent on Account.read"
         ],
         notes: {
           operations: "create | read | update | delete, plus * for all four. Aliases are accepted (insert/add, view/select/list, edit/write/modify, remove/destroy).",
-          transitions: "A name that is not a CRUD operation is resolved against the entity's stateDiagram-v2 transitions. There is no named-transition endpoint in a generated application - moving a record along an edge is a status update - so the rule is stored as the (from_state, to_state) pair it covers and the guard recognises the move by the states the write crosses. Both ends are kept because one event can sit on several edges and two events can reach the same state. This directive decides *who* may cross an edge; whether the edge exists at all is decided by the state diagram itself and enforced separately, so an edge no %%rbac names is open to any authenticated caller but an edge the diagram omits is refused to everyone.",
+          transitions: "A move is grantable: `%%rbac role:sales_manager on Opportunity.close_won` shows the Close won button only to sales managers (and the administrator). The target is the edge's event in one token (`close won`, `Close-Won` and `close_won` are one event), `from->to` for an edge with no label, or `reopen` for the move from a Final state back to Draft. A move no line names is open to anyone who may update the entity (EML511, info). Several lines naming one move merge, as `|` inside one line does. A user's access is the union of their roles: a role only adds access, there is no deny.",
           notSysAccess: "A restriction on any operation other than read deliberately does not write sys_access. That is a grant table feeding sys_refresh_dictionary_scope(), where the first row added narrows a window to one role; a restriction on deleting must not become a restriction on looking. read is the one exception, and it is the exception on purpose - see functionalRoles.",
           functionalRoles: "read is the operation that decides which functional role an entity belongs to, and the only one that changes what a role sees. An entity a role may not read is absent from that role's navigation entirely - no menu entry, no dashboard card, no lookup - because a menu full of entries that answer 403 is a worse application than a shorter one. A model is expected to name every entity on at least one `%%rbac ... .read` directive, so that every entity belongs to somebody. Declaring none leaves every entity visible to every signed-in caller, which is what every model did before this rule existed.",
           seededAccounts: "Every role a directive names is created, and one account is seeded holding it, beside the administrator who bypasses everything and a role-less User. An application whose only account is the administrator cannot demonstrate its own access control, because the administrator is exempt from all of it. Both stacks derive the same list from rbac/roles.ts, and both sign-in screens print it with the number of entities each role can see.",
@@ -1382,9 +1525,30 @@ var appwithai_language_default = {
           readOnly: "A report may only read, and this is refused three times: by the checker at authoring time (EML293), by the compiler before the query can reach a seed file or model.json, and by each runtime before it executes - because sys_report is an ordinary table and model.json an ordinary file, so neither reader trusts what it is handed. A single trailing semicolon is allowed; a second statement behind it is not. Anything that writes belongs in a rule or a hook.",
           foreignKeysAreUuid: "A foreign key and a primary key are both UUID, in both stacks, so a join is written plainly: ON c.account_id = p.id. Do not cast. `::text` was needed while the browser stack typed a foreign key as VARCHAR; it does not any more, and PostgreSQL has no implicit cast back, so a cast that is no longer needed is now the thing that breaks the query.",
           chartNeedsAxes: "`chart:` without both `x:` and `y:` is an error (EML294) rather than a silent fall back to a table: a chart that cannot say what it plots renders empty, which reads as no data rather than as a missing declaration.",
-          namesAreKeys: "The name is the pack key, so a duplicate silently replaces the earlier report. Declared twice is an error (EML292).",
+          namesAreKeys: "The name is the pack key, so a duplicate silently replaces the earlier report. Declared twice is an error (EML292). The title is what the platform upserts a query, report and chart by, so two reports with one title collapse into one row and the pack is refused: that is an error too (EML292).",
           againstWhichSchema: "The query runs against the *generated application's* database, so it names `bus_` tables. It is not checked against a live schema at author time - the checker has no database - but `check-reporting-pack.ts in the orchestrator` executes every query in the pack against a real generated schema in CI.",
-          whereItIsCompiled: "Compiled twice, by two readers, and neither replaces the other. Here, packages/generator/src/reports/index.ts puts each report into the generated application itself: a sys_report row served at /sys/reports and shown under Admin > Analysis in the NestJS stack, and a model.json entry served at /api/reports and shown under Reports in the browser application. Separately, businessappwithai/app-and-report-with-ai-tanstack compiles the same directive with common/build/reporting-pack.ts into a saved query, a report definition and, where chart: is set, a chart, seeded into the Enterprise Reporting platform ahead of the derived baseline. That platform is composed beside a deployed application by docker-compose; it is not in the browser application and not in the downloadable zip."
+          whereItIsCompiled: "Compiled twice, by two readers, and neither replaces the other. Here, packages/generator/src/reports/index.ts puts each report into the generated application itself: a sys_report row served at /sys/reports and shown under Admin > Analysis in the NestJS stack, and a model.json entry served at /api/reports and shown under Reports in the browser application. Separately, businessappwithai/app-and-report-with-ai-tanstack compiles the same directive with common/build/reporting-pack.ts into a saved query, a report definition and, where chart: is set, a chart, seeded into the Enterprise Reporting platform ahead of the derived baseline. The real platform runs beside a deployed application, under the orchestrator's docker-compose or as the report service of the deployable archive's own compose file, and the browser application previews the same pack; see generatorContract.reportingApplication."
+        }
+      },
+      {
+        keyword: "%%dashboard",
+        form: "%%dashboard <name> title: <Title> role: <role> reports: <report-name>, <report-name>, ... [help: <who opens it and what they decide>]",
+        status: "compiled",
+        consumedBy: [
+          "packages/generator/src/reports/index.ts -> compileDashboards -> reporting pack dashboards",
+          "language/cli/src/parser.ts -> model.dashboards",
+          "language/checker.ts (shape: EML297; per-role minimums: EML298, EML299)"
+        ],
+        purpose: "Group a role's own %%report directives into a named dashboard. The reporting pack derives one overview dashboard from structure; that cannot say which questions belong together for the person who asks them. A dashboard belongs to the declared %%rbac role named by role:, shows the %%report directives named by reports: in that order (a charted report as a chart tile, an uncharted one as a table tile), and is served by the reporting platform and its browser preview beside the overview.",
+        examples: [
+          "%%dashboard sales-manager-pipeline-review title: Pipeline review role: sales_manager reports: sales-manager-pipeline-by-stage, sales-manager-pipeline-by-owner, sales-manager-slipped-deals help: The Monday forecast meeting."
+        ],
+        notes: {
+          roleIsRequired: "role: must name a role some %%rbac line declares; a dashboard with no role, or an unknown one, is an error (EML297). A dashboard that no role owns is nobody's.",
+          reportsMustExist: "Every name in reports: must be a %%report in the model (EML297). A dashboard may list a report another role also runs, but it should list reports its own role can run: every table the report names must be on that role's read list, or the tile answers 403.",
+          namesAreKeys: "The name is the pack key; declared twice is an error (EML297). The title is what the platform upserts by, so two dashboards with one title would collapse into one row and the pack is refused: that is an error too (EML297).",
+          coverageMinimums: "Reporting is mandatory and covers the whole domain. Every declared %%rbac role needs at least 50 charted %%report directives it can run - one charted report is a report and a chart - and at least 10 dashboards of its own, each listing at least 3 reports so that ten one-report dashboards cannot stand in for ten. The checker warns below either minimum (EML298 for reports, EML299 for dashboards) and audit-model.mjs fails while a warning stands. A role is counted over the %%report directives whose every bus_ table it may read: %%rbac read (or *) lines decide, an entity with no read line is open to every role, and a role called administrator reads everything and, inheriting every other role's reports and dashboards, owes no minimum of its own.",
+          whereItIsCompiled: "Compiled once, by buildReportingPack, into one reporting dashboard per %%dashboard beside the derived overview. Both the real platform (seeded from the pack) and the browser application's preview (model.json) read that pack."
         }
       }
     ],
@@ -1408,16 +1572,115 @@ var appwithai_language_default = {
   },
   generatorContract: {
     description: "How each section feeds the generator pipeline.",
+    reportingApplication: {
+      description: "One model generates two applications. The second is the Enterprise Reporting platform (businessappwithai/enterprise_reporting_tanstack): its own server, database, users and sign-in, loaded with a reporting pack derived from the model. Nothing in the pack is written by hand. packages/generator/src/reporting/pack.ts (buildReportingPack) in app-with-ai-tanstack is the single derivation, and every surface that serves reports reads its output, so the surfaces cannot disagree about what reports a model has.",
+      derivation: "packages/generator/src/reporting/pack.ts -> buildReportingPack(parsedModel, { projectName, databaseName, ... }). Pure: no filesystem, no clock, no database.",
+      pack: {
+        dataSource: "The generated application's database, registered as a PostgreSQL data source.",
+        queries: "Saved SQL over the application's bus_ tables, each carrying the tables it reads.",
+        reports: "Report definitions over those queries.",
+        charts: "Chart definitions (bar, line, pie, area) over those queries.",
+        dashboards: "The overview dashboard - up to four authored charts first, then one tile for each of the six most central entities - plus one dashboard per %%dashboard, each carrying the role it is for.",
+        access: "One reporting role per declared %%rbac role, plus the administrator, each with the bus_ tables it may read."
+      },
+      derivedFrom: [
+        {
+          declares: "an entity",
+          yields: "a register: its display column, up to two enum columns and two numeric columns, newest first"
+        },
+        {
+          declares: "an %%enum-bound column",
+          yields: "a breakdown chart and report, pie at six values or fewer, bar above; at most two per entity, status/state first"
+        },
+        {
+          declares: "created_at",
+          yields: "volume per month over two years, as a line"
+        },
+        {
+          declares: "a kind: state workflow over a status or state column",
+          yields: "a lifecycle over the declared states, in the diagram's order, zeroes included"
+        },
+        {
+          declares: "integer and decimal columns",
+          yields: "measures: totals and averages, grouped by the entity's primary enum column"
+        },
+        {
+          declares: "a oneToMany relationship",
+          yields: "children per parent, ranked"
+        },
+        {
+          declares: "%%report",
+          yields: "the author's own query, report and (with chart:) chart, listed first and placed at the top of the dashboard; a derived item with the same name is dropped in its favour"
+        },
+        {
+          declares: "%%dashboard",
+          yields: "a dashboard of the named role's own reports, one tile per report in the order listed, beside the overview"
+        },
+        {
+          declares: "%%rbac ... .read",
+          yields: "the tables each reporting role may read"
+        },
+        {
+          declares: "%%entity help: / %%field help:",
+          yields: "the names and descriptions of every report, chart and query"
+        }
+      ],
+      surfaces: [
+        {
+          id: "orchestrator",
+          where: "businessappwithai/app-and-report-with-ai-tanstack: ./start.sh, common/build/reporting-pack.ts",
+          runs: "the real platform built from its own source, beside the deployed application, behind nginx at /report (the application at /app, both sets of accounts at /)"
+        },
+        {
+          id: "deployable-archive",
+          where: "the NestJS stack's reporting/ directory and the report and report-seeder services of its docker-compose.yml",
+          runs: "the real platform, cloned at REPORT_REF and seeded once from reporting/reporting-pack.json, on port 3100"
+        },
+        {
+          id: "browser-application",
+          where: "--standalone: model.json carries the pack; #/report in the running application",
+          runs: "a preview drawn in the platform's own layout and tokens, labelled as one on every screen; its Administration (users, roles, per-role table grants, data source, activity log) is real, and the screens that need the platform's servers say where the real ones are"
+        }
+      ],
+      signIn: "Two applications, two sign-ins, never merged. The application's account for a role is <role>@<app>.example.com and the reporting account is <role>@<app>.reports.example.com; the administrator is admin@admin.com on both sides, as two different accounts in two different user tables. Neither password works on the other side. A role in the application decides what a user may do to a record; a reporting role decides which tables their queries may read. Only read rules narrow a reporting role.",
+      verification: "The checker holds %%report to its shape (EML290-EML296), %%dashboard to its shape (EML297) and every declared role to the reporting minimums (EML298, EML299), and cannot see whether a column exists. common/scripts/check-reporting-pack.ts in app-and-report-with-ai-tanstack runs every derived and authored query against a schema the generator actually emitted."
+    },
+    generatedE2E: {
+      description: "Every generated application carries an end-to-end suite that is derived from the same model and runs on demand from its docker-compose.yml. Nothing in it is written by hand per application: the generator (packages/generator/src/generators/tests/bun-e2e.generator.ts) renders the tests/ project from the parsed model, and the reporting suites read the same reporting-pack.json the seeder loaded.",
+      command: "docker compose run --rm e2e",
+      browserCommand: "docker compose run --rm e2e-ui — the same suite's browser layer: Playwright and Chromium drive the front end, the rules and workflows editor, a record's action buttons and the reporting platform's dashboards.",
+      service: "An 'e2e' service behind the 'test' profile (so 'docker compose up' never starts it), built from tests/Dockerfile. It waits for the backend and the reporting platform to be healthy, the front end to have started and the report-seeder to have exited 0, then attaches over the compose network. Results are written to ./test-results. It is generated only when the tests/ project is.",
+      scripts: {
+        "test:attach": "every suite (the default)",
+        "test:crud": "the per-entity CRUD suites",
+        "test:rules": "the per-entity business-rule suites",
+        "test:workflows": "the workflow suites",
+        "test:status": "action buttons per role (suite 26)",
+        "test:reporting": "the reporting platform against the pack (suite 28)",
+        "test:together": "the application and the platform on one set of data (suite 29)",
+        "test:ui": "the browser layer (the e2e-ui service)"
+      },
+      derivedFrom: [
+        { declares: "an entity", yields: "CRUD, listing, filtering, sorting, pagination, optimistic locking and validation suites for it" },
+        { declares: "%%rule or %%action", yields: "per-entity rule suites: a refusing rule refuses, a transform transforms, a trigger-workflow starts its process" },
+        { declares: "%%workflow or %%step", yields: "workflow-run, multi-step and status-bound workflow suites (a failing ENTER:<state> workflow leaves the typed values saved and the status unmoved)" },
+        { declares: "a state diagram", yields: "every drawn edge walked, every undrawn one refused, an end state locked, and the action buttons each role is offered" },
+        { declares: "%%rbac", yields: "one sign-in per declared role, driven against every restricted operation and every move a role is given" },
+        { declares: "%%report and %%dashboard, and every derived report", yields: "the reporting platform held to the pack: every report, chart and dashboard present by name, every widget, every report and chart run, and each role let in exactly when its tables admit the query" }
+      ],
+      reportingTables: "In the pack, an empty 'tables' list means every table for the administrator only. For any other role it means %%rbac left that role no entity to read, and the platform correctly refuses it every report.",
+      needs: "A reporting pack (the reporting suites skip themselves loudly without one) and the tests/ project (--skip-tests omits both the project and the service)."
+    },
     pipeline: [
       "1. ERD section -> MermaidParser -> Entity[] + Relationship[] -> migrations, DTOs, services, controllers, forms, tables. The same pass reads %%index into entity.indexes and %%enum / %%field enum: into bound enums.",
       "2. %%category directives -> category.parser -> resolveCategories -> Application Dictionary groups on the generated dashboard. A model declaring none gets a single 'General' category holding every entity.",
       "3. Rules section -> flowchart-parser -> jdm-converter -> GoRules JDM graph -> seeded into sys_rule_definitions and evaluated by the rules engine.",
       "4. Rules section carrying %%action directives -> compileRules -> a GoRules decision table whose rows carry action/message/ruleId/workflowName outputs, instead of a node graph. This is how a model-declared rule reaches a model-declared saga: the rule's `when` expression decides, and its trigger-workflow action names the workflow.",
       "5. Workflow section, hook form -> compileHooks -> per-entity handler modules under src/modules/hooks/handlers plus a registry the bus service calls around every CRUD operation.",
-      "6. Workflow section, state form -> compileWorkflows -> BPMN seeded into sys_workflow_definitions; the trigger-workflow rules resolve it by name and the run puts a new record into the state machine's starting state. The same pass writes every edge the diagram draws into sys_workflow_transitions, which EntityAccessGuard reads to refuse a status write the model never allowed for, and which GET /api/workflows/transitions exposes so a screen can offer only the moves that exist.",
+      "6. Workflow section, state form -> compileWorkflows -> BPMN seeded into sys_workflow_definitions; the trigger-workflow rules resolve it by name and the run puts a new record into the state machine's starting state. The same pass writes every edge the diagram draws into sys_workflow_transitions, which EntityAccessGuard reads to find the entity's state field and refuse any status write a person makes (stateForm.systemManaged), and which GET /api/workflows/transitions exposes so a screen can say where a record can go next. Saga UpdateEntity steps write the state through the executor, never through /bus.",
       "7. Workflow section, saga form -> compileSagaWorkflows -> one bpmn:serviceTask per %%step, ordered by the flowchart edges, seeded into sys_workflow_definitions with source 'model'. A definition declared in the model is owned by the model: the generated Workflow Designer shows it read-only, and regeneration rewrites it. Definitions authored in the app carry source 'designer' and are never touched by regeneration.",
       "8. The whole document -> language/rag.ts -> retrieval chunks (one per entity, rule, workflow and spec section) -> the pgvector model_context index the assistant searches.",
-      "9. %%rbac directives -> compileRbac -> per-operation rules in sys_operation_access and per-transition rules in sys_transition_access, enforced by EntityAccessGuard on the generated /bus CRUD routes. Restrictive, not granting: a target no directive names stays open.",
+      "9. %%rbac directives -> compileRbac -> sys_access_grant rows (operations, moves along the state machine, reopen), read per user through the sys_user_capability view and enforced by EntityAccessGuard on the generated /bus routes and by the transition service on every button. Restrictive, not granting: a target no directive names stays open.",
       "10. ERD section -> nestjs-backend.generator -> one default AnkaReport layout per entity seeded into sys_report_designs. The layout renders every non-audit, non-PK field as a two-column (label | value) report. Administrators can customise layouts at Admin → Report Designs. Records get a Print button on their detail view if a design exists for their table.",
       "11. %%enum and %%workflow kind: state -> the generated test suite's harness/model.ts, which carries the declared values and edges into the suites as data. This is the one consumer that reads the model rather than the dictionary compiled from it, and the distinction is the point: a suite that asserts a running application against the dictionary the same generator wrote proves only that the application is self-consistent, and passes just as happily when a value or an edge was dropped on the way. Asserting against the model's own word is what makes a dropped %%enum value or a missing state-machine edge fail a test rather than ship. Read by suite 02c (references) and suite 06b (state machines)."
     ],
@@ -1456,7 +1719,7 @@ var appwithai_language_default = {
       help: "%%field <Entity>.<column> help: and %%entity <Name> help: (or description:). Both are compiled: the parser hangs the text on the attribute and the entity, the dictionary generator writes it to sys_column.description and sys_table.description, and the generated application shows it under the field and beside the table. It has a second consumer: packages/generator/src/manual/index.ts renders manual.html from the same parsed model, where this text is the entire 'what it is for' column — a field with no help prints a dash there. Write help on every entity and every column, and write domain knowledge rather than the name again: EML151, EML152 and EML153 report the three ways a model fails to. See applicationDictionary.helpText. Fully compiled.",
       validated: "%%rule and %%trigger, and the %%entity keys other than help:/description:. No compiler reads these yet, but language/checker.ts enforces their syntax and cross-references, so a malformed one fails validation instead of being silently dropped.",
       reserved: "The %%field keys other than enum: and help:. Renderer-safe and documented, with no reader. Writing one is legal and inert.",
-      access: "%%rbac, in both its CRUD and state-transition forms. Compiled to sys_operation_access / sys_transition_access and enforced by the generated EntityAccessGuard."
+      access: "%%rbac on CRUD operations. Compiled to sys_operation_access and enforced by the generated EntityAccessGuard. A state transition is not a grantable operation: the state field is system-managed."
     },
     validationRules: [
       "Every entity name must match ^[a-zA-Z][a-zA-Z0-9_]*$ and be unique within the document.",
@@ -1469,7 +1732,8 @@ var appwithai_language_default = {
       "A %%loop's loopId must be referenced by at least one %%step in: directive, and loops do not nest.",
       "At most one %%category in a document may declare default: true.",
       "A trigger-workflow action must name a workflow the document declares, or a workflow that already exists in the target application.",
-      "A %%rbac operation must be a CRUD operation (create/read/update/delete/*) or a transition event declared in the entity's state machine."
+      "A %%rbac target must be a CRUD operation (create/read/update/delete/*), a move the entity's state machine draws, or reopen (EML214).",
+      "A state machine draws no state named final or error (EML509), and the state field is never placed in a %%section row (EML178); a rule or saga that only moves a record is retired (EML512)."
     ],
     note: "Levels describe what the shipped generator does, not an aspiration. A directive's own `status` field in `directives.reserved` is authoritative for that directive; these levels group them. When a compiler is added for a reserved directive, its status and this list move together."
   },
@@ -1484,7 +1748,7 @@ var appwithai_language_default = {
       "EML001-EML099": "Document level: metadata, emptiness, section structure.",
       "EML100-EML119": "Entities and attributes.",
       "EML120-EML129": "Relationships.",
-      "EML130-EML199": "Directives attached to the ERD: %%enum, %%field, %%entity, %%index, %%category — including the line-item pair EML149 and EML150.",
+      "EML130-EML199": "Directives attached to the ERD: %%enum, %%field, %%entity, %%index, %%category, %%section — including the line-item pair EML149 and EML150, and the form-layout codes EML170-EML177.",
       "EML200-EML299": "Hooks, guards, triggers, workflows and rules as declared by directives.",
       "EML300-EML399": "Business-rule flowcharts.",
       "EML400-EML449": "Workflow sections: hook, state and saga.",
@@ -1496,9 +1760,14 @@ var appwithai_language_default = {
       EML112: "Duplicate attribute - deletes the later line, keeping the stronger constraints.",
       EML114: "Foreign key not ending in _id - appends the suffix.",
       EML117: "Entity has no primary key - prepends `string id PK`.",
+      EML172: "Columns placed in no %%section row - appends them to the entity's last section, two per row.",
+      EML174: "A %%section row with more than two columns - splits it into rows of two.",
+      EML175: "A column placed in two %%section rows - removes the later placement.",
+      EML178: "The state field placed in a %%section row - removes it from the row (a section left empty is removed).",
       EML287: "Rule condition names a camelCase identifier - rewrites it as the snake_case column.",
       EML421: "State workflow has no initial transition - inserts `[*] --> <firstState>`.",
-      EML422: "State workflow has no terminal state - appends `<lastState> --> [*]`."
+      EML422: "State workflow has no terminal state - appends `<lastState> --> [*]`.",
+      EML512: "A move rule or saga an action button replaces - removes the section and rewrites the stock help on its <state>_at columns."
     },
     note: "language/checker.ts AUTO_FIXABLE_CODES and the fixer's dispatch table must list the same codes; a code in one and not the other is either a fix that never runs or a promise the fixer cannot keep."
   }
@@ -1641,16 +1910,22 @@ function extractWorkflowSections(source) {
     const kind = match?.[3];
     const trigger = directive.match(/\btrigger:\s*(\S+)/)?.[1];
     const operation = directive.match(/\boperation:\s*(\S+)/)?.[1]?.toUpperCase();
+    const status = directive.match(/\bstatus:\s*(\S+)/)?.[1];
+    const resolvedKind = kind === "state" || kind === "saga" ? kind : "hook";
     return {
       name: match?.[1] ?? "workflow",
       entity: match?.[2] ?? "",
-      kind: kind === "state" || kind === "saga" ? kind : "hook",
+      kind: resolvedKind,
       trigger: trigger === "rule" ? "rule" : trigger === "automatic" ? "automatic" : undefined,
       operation: operation === "CREATE" || operation === "UPDATE" || operation === "DELETE" || operation === "ALL" ? operation : undefined,
+      status: status && resolvedKind !== "state" ? stateToken(status) : undefined,
       title,
       diagram: body
     };
   });
+}
+function stateToken(name) {
+  return name.trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 function extractSections(source, lead) {
   const lines = source.split(`
@@ -1909,149 +2184,37 @@ function snakeCase(str) {
   }
   return str.replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[-\s]+/g, "_").toLowerCase().replace(/_{2,}/g, "_").replace(/^_/, "");
 }
-// node_modules/.bun/zod@3.25.76/node_modules/zod/v3/external.js
-var exports_external = {};
-__export(exports_external, {
-  BRAND: () => BRAND,
-  DIRTY: () => DIRTY,
-  EMPTY_PATH: () => EMPTY_PATH,
-  INVALID: () => INVALID,
-  NEVER: () => NEVER,
-  OK: () => OK,
-  ParseStatus: () => ParseStatus,
-  Schema: () => ZodType,
-  ZodAny: () => ZodAny,
-  ZodArray: () => ZodArray,
-  ZodBigInt: () => ZodBigInt,
-  ZodBoolean: () => ZodBoolean,
-  ZodBranded: () => ZodBranded,
-  ZodCatch: () => ZodCatch,
-  ZodDate: () => ZodDate,
-  ZodDefault: () => ZodDefault,
-  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion,
-  ZodEffects: () => ZodEffects,
-  ZodEnum: () => ZodEnum,
-  ZodError: () => ZodError,
-  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind,
-  ZodFunction: () => ZodFunction,
-  ZodIntersection: () => ZodIntersection,
-  ZodIssueCode: () => ZodIssueCode,
-  ZodLazy: () => ZodLazy,
-  ZodLiteral: () => ZodLiteral,
-  ZodMap: () => ZodMap,
-  ZodNaN: () => ZodNaN,
-  ZodNativeEnum: () => ZodNativeEnum,
-  ZodNever: () => ZodNever,
-  ZodNull: () => ZodNull,
-  ZodNullable: () => ZodNullable,
-  ZodNumber: () => ZodNumber,
-  ZodObject: () => ZodObject,
-  ZodOptional: () => ZodOptional,
-  ZodParsedType: () => ZodParsedType,
-  ZodPipeline: () => ZodPipeline,
-  ZodPromise: () => ZodPromise,
-  ZodReadonly: () => ZodReadonly,
-  ZodRecord: () => ZodRecord,
-  ZodSchema: () => ZodType,
-  ZodSet: () => ZodSet,
-  ZodString: () => ZodString,
-  ZodSymbol: () => ZodSymbol,
-  ZodTransformer: () => ZodEffects,
-  ZodTuple: () => ZodTuple,
-  ZodType: () => ZodType,
-  ZodUndefined: () => ZodUndefined,
-  ZodUnion: () => ZodUnion,
-  ZodUnknown: () => ZodUnknown,
-  ZodVoid: () => ZodVoid,
-  addIssueToContext: () => addIssueToContext,
-  any: () => anyType,
-  array: () => arrayType,
-  bigint: () => bigIntType,
-  boolean: () => booleanType,
-  coerce: () => coerce,
-  custom: () => custom,
-  date: () => dateType,
-  datetimeRegex: () => datetimeRegex,
-  defaultErrorMap: () => en_default,
-  discriminatedUnion: () => discriminatedUnionType,
-  effect: () => effectsType,
-  enum: () => enumType,
-  function: () => functionType,
-  getErrorMap: () => getErrorMap,
-  getParsedType: () => getParsedType,
-  instanceof: () => instanceOfType,
-  intersection: () => intersectionType,
-  isAborted: () => isAborted,
-  isAsync: () => isAsync,
-  isDirty: () => isDirty,
-  isValid: () => isValid,
-  late: () => late,
-  lazy: () => lazyType,
-  literal: () => literalType,
-  makeIssue: () => makeIssue,
-  map: () => mapType,
-  nan: () => nanType,
-  nativeEnum: () => nativeEnumType,
-  never: () => neverType,
-  null: () => nullType,
-  nullable: () => nullableType,
-  number: () => numberType,
-  object: () => objectType,
-  objectUtil: () => objectUtil,
-  oboolean: () => oboolean,
-  onumber: () => onumber,
-  optional: () => optionalType,
-  ostring: () => ostring,
-  pipeline: () => pipelineType,
-  preprocess: () => preprocessType,
-  promise: () => promiseType,
-  quotelessJson: () => quotelessJson,
-  record: () => recordType,
-  set: () => setType,
-  setErrorMap: () => setErrorMap,
-  strictObject: () => strictObjectType,
-  string: () => stringType,
-  symbol: () => symbolType,
-  transformer: () => effectsType,
-  tuple: () => tupleType,
-  undefined: () => undefinedType,
-  union: () => unionType,
-  unknown: () => unknownType,
-  util: () => util,
-  void: () => voidType
-});
-
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/util.js
 var util;
-(function(util2) {
-  util2.assertEqual = (_) => {};
+(function(util) {
+  util.assertEqual = (_) => {};
   function assertIs(_arg) {}
-  util2.assertIs = assertIs;
+  util.assertIs = assertIs;
   function assertNever(_x) {
     throw new Error;
   }
-  util2.assertNever = assertNever;
-  util2.arrayToEnum = (items) => {
+  util.assertNever = assertNever;
+  util.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
       obj[item] = item;
     }
     return obj;
   };
-  util2.getValidEnumValues = (obj) => {
-    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+  util.getValidEnumValues = (obj) => {
+    const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
     const filtered = {};
     for (const k of validKeys) {
       filtered[k] = obj[k];
     }
-    return util2.objectValues(filtered);
+    return util.objectValues(filtered);
   };
-  util2.objectValues = (obj) => {
-    return util2.objectKeys(obj).map(function(e) {
+  util.objectValues = (obj) => {
+    return util.objectKeys(obj).map(function(e) {
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
     const keys = [];
     for (const key in object) {
       if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -2060,19 +2223,19 @@ var util;
     }
     return keys;
   };
-  util2.find = (arr, checker) => {
+  util.find = (arr, checker) => {
     for (const item of arr) {
       if (checker(item))
         return item;
     }
     return;
   };
-  util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+  util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
   function joinValues(array, separator = " | ") {
     return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util2.joinValues = joinValues;
-  util2.jsonStringifyReplacer = (_, value) => {
+  util.joinValues = joinValues;
+  util.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -2080,8 +2243,8 @@ var util;
   };
 })(util || (util = {}));
 var objectUtil;
-(function(objectUtil2) {
-  objectUtil2.mergeShapes = (first, second) => {
+(function(objectUtil) {
+  objectUtil.mergeShapes = (first, second) => {
     return {
       ...first,
       ...second
@@ -2171,11 +2334,6 @@ var ZodIssueCode = util.arrayToEnum([
   "not_multiple_of",
   "not_finite"
 ]);
-var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
-};
-
 class ZodError extends Error {
   get errors() {
     return this.issues;
@@ -2376,12 +2534,10 @@ var en_default = errorMap;
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
-function setErrorMap(map) {
-  overrideErrorMap = map;
-}
 function getErrorMap() {
   return overrideErrorMap;
 }
+
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
@@ -2408,7 +2564,6 @@ var makeIssue = (params) => {
     message: errorMessage
   };
 };
-var EMPTY_PATH = [];
 function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
   const issue = makeIssue({
@@ -2488,11 +2643,12 @@ var isAborted = (x) => x.status === "aborted";
 var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
+
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
-(function(errorUtil2) {
-  errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
+(function(errorUtil) {
+  errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+  errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/types.js
@@ -2537,12 +2693,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
-  if (errorMap2 && (invalid_type_error || required_error)) {
+  const { errorMap, invalid_type_error, required_error, description } = params;
+  if (errorMap && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap2)
-    return { errorMap: errorMap2, description };
+  if (errorMap)
+    return { errorMap, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -2929,11 +3085,11 @@ class ZodString extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.string) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -3487,11 +3643,11 @@ class ZodNumber extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.number) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -3913,17 +4069,17 @@ class ZodDate extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.date) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     if (Number.isNaN(input.data.getTime())) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_date
       });
       return INVALID;
@@ -4211,8 +4367,8 @@ class ZodArray extends ZodType {
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-      })).then((result2) => {
-        return ParseStatus.mergeArray(status, result2);
+      })).then((result) => {
+        return ParseStatus.mergeArray(status, result);
       });
     }
     const result = [...ctx.data].map((item, i) => {
@@ -4300,11 +4456,11 @@ class ZodObject extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.object) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -4608,7 +4764,7 @@ class ZodUnion extends ZodType {
         ctx.common.issues.push(...dirty.ctx.common.issues);
         return dirty.result;
       }
-      const unionErrors = issues.map((issues2) => new ZodError(issues2));
+      const unionErrors = issues.map((issues) => new ZodError(issues));
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
@@ -5048,9 +5204,9 @@ class ZodSet extends ZodType {
       }
     }
     const valueType = this._def.valueType;
-    function finalizeSet(elements2) {
+    function finalizeSet(elements) {
       const parsedSet = new Set;
-      for (const element of elements2) {
+      for (const element of elements) {
         if (element.status === "aborted")
           return INVALID;
         if (element.status === "dirty")
@@ -5061,7 +5217,7 @@ class ZodSet extends ZodType {
     }
     const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
     if (ctx.common.async) {
-      return Promise.all(elements).then((elements2) => finalizeSet(elements2));
+      return Promise.all(elements).then((elements) => finalizeSet(elements));
     } else {
       return finalizeSet(elements);
     }
@@ -5414,11 +5570,11 @@ class ZodEffects extends ZodType {
     if (effect.type === "preprocess") {
       const processed = effect.transform(ctx.data, checkCtx);
       if (ctx.common.async) {
-        return Promise.resolve(processed).then(async (processed2) => {
+        return Promise.resolve(processed).then(async (processed) => {
           if (status.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
-            data: processed2,
+            data: processed,
             path: ctx.path,
             parent: ctx
           });
@@ -5610,10 +5766,10 @@ class ZodCatch extends ZodType {
       }
     });
     if (isAsync(result)) {
-      return result.then((result2) => {
+      return result.then((result) => {
         return {
           status: "valid",
-          value: result2.status === "valid" ? result2.value : this._def.catchValue({
+          value: result.status === "valid" ? result.value : this._def.catchValue({
             get error() {
               return new ZodError(newCtx.common.issues);
             },
@@ -5762,78 +5918,48 @@ ZodReadonly.create = (type, params) => {
     ...processCreateParams(params)
   });
 };
-function cleanParams(params, data) {
-  const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
-  const p2 = typeof p === "string" ? { message: p } : p;
-  return p2;
-}
-function custom(check, _params = {}, fatal) {
-  if (check)
-    return ZodAny.create().superRefine((data, ctx) => {
-      const r = check(data);
-      if (r instanceof Promise) {
-        return r.then((r2) => {
-          if (!r2) {
-            const params = cleanParams(_params, data);
-            const _fatal = params.fatal ?? fatal ?? true;
-            ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-          }
-        });
-      }
-      if (!r) {
-        const params = cleanParams(_params, data);
-        const _fatal = params.fatal ?? fatal ?? true;
-        ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-      }
-      return;
-    });
-  return ZodAny.create();
-}
 var late = {
   object: ZodObject.lazycreate
 };
 var ZodFirstPartyTypeKind;
-(function(ZodFirstPartyTypeKind2) {
-  ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
+(function(ZodFirstPartyTypeKind) {
+  ZodFirstPartyTypeKind["ZodString"] = "ZodString";
+  ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
+  ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
+  ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
+  ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
+  ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
+  ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
+  ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
+  ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
+  ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
+  ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
+  ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
+  ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
+  ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
+  ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
+  ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
+  ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+  ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
+  ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
+  ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
+  ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
+  ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
+  ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
+  ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
+  ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
+  ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
+  ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
+  ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
+  ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
+  ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
+  ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
+  ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
+  ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
+  ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
+  ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
+  ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
-var instanceOfType = (cls, params = {
-  message: `Input not instance of ${cls.name}`
-}) => custom((data) => data instanceof cls, params);
 var stringType = ZodString.create;
 var numberType = ZodNumber.create;
 var nanType = ZodNaN.create;
@@ -5868,20 +5994,6 @@ var optionalType = ZodOptional.create;
 var nullableType = ZodNullable.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
-var ostring = () => stringType().optional();
-var onumber = () => numberType().optional();
-var oboolean = () => booleanType().optional();
-var coerce = {
-  string: (arg) => ZodString.create({ ...arg, coerce: true }),
-  number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
-  boolean: (arg) => ZodBoolean.create({
-    ...arg,
-    coerce: true
-  }),
-  bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
-  date: (arg) => ZodDate.create({ ...arg, coerce: true })
-};
-var NEVER = INVALID;
 // packages/core/src/types/sys-dictionary.types.ts
 var BUS_TABLE_PREFIX = "bus_";
 var AccessLevel = {
@@ -5920,197 +6032,195 @@ var ReferenceType = {
   EMAIL: 30,
   PHONE: 31
 };
-var SysTableSchema = exports_external.object({
-  sys_table_id: exports_external.string().uuid(),
-  table_name: exports_external.string().min(1).max(100),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  icon: exports_external.string().max(100).optional(),
-  access_level: exports_external.enum(["S", "C", "O", "CO", "A"]),
-  is_view: exports_external.boolean(),
-  is_document: exports_external.boolean(),
-  is_high_volume: exports_external.boolean(),
-  is_changelog: exports_external.boolean(),
-  replication_type: exports_external.string().optional(),
-  sys_window_id: exports_external.string().uuid().optional(),
-  po_window_id: exports_external.string().uuid().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysTableSchema = objectType({
+  sys_table_id: stringType().uuid(),
+  table_name: stringType().min(1).max(100),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  icon: stringType().max(100).optional(),
+  access_level: enumType(["S", "C", "O", "CO", "A"]),
+  is_view: booleanType(),
+  is_document: booleanType(),
+  is_high_volume: booleanType(),
+  is_changelog: booleanType(),
+  replication_type: stringType().optional(),
+  sys_window_id: stringType().uuid().optional(),
+  po_window_id: stringType().uuid().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysColumnSchema = exports_external.object({
-  sys_column_id: exports_external.string().uuid(),
-  sys_table_id: exports_external.string().uuid(),
-  column_name: exports_external.string().min(1).max(100),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  sys_reference_id: exports_external.number(),
-  sys_val_rule_id: exports_external.string().uuid().optional(),
-  field_length: exports_external.number().optional(),
-  default_value: exports_external.string().optional(),
-  value_min: exports_external.string().optional(),
-  value_max: exports_external.string().optional(),
-  is_key: exports_external.boolean(),
-  is_parent: exports_external.boolean(),
-  is_mandatory: exports_external.boolean(),
-  is_updateable: exports_external.boolean(),
-  is_identifier: exports_external.boolean(),
-  is_selection_column: exports_external.boolean(),
-  is_translated: exports_external.boolean(),
-  is_encrypted: exports_external.boolean(),
-  is_allow_logging: exports_external.boolean(),
-  is_allow_copy: exports_external.boolean(),
-  seq_no: exports_external.number(),
-  callout: exports_external.string().optional(),
-  read_only_logic: exports_external.string().optional(),
-  mandatory_logic: exports_external.string().optional(),
-  format_pattern: exports_external.string().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysColumnSchema = objectType({
+  sys_column_id: stringType().uuid(),
+  sys_table_id: stringType().uuid(),
+  column_name: stringType().min(1).max(100),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  sys_reference_id: numberType(),
+  sys_val_rule_id: stringType().uuid().optional(),
+  field_length: numberType().optional(),
+  default_value: stringType().optional(),
+  value_min: stringType().optional(),
+  value_max: stringType().optional(),
+  is_key: booleanType(),
+  is_parent: booleanType(),
+  is_mandatory: booleanType(),
+  is_updateable: booleanType(),
+  is_identifier: booleanType(),
+  is_selection_column: booleanType(),
+  is_translated: booleanType(),
+  is_encrypted: booleanType(),
+  is_allow_logging: booleanType(),
+  is_allow_copy: booleanType(),
+  seq_no: numberType(),
+  callout: stringType().optional(),
+  read_only_logic: stringType().optional(),
+  mandatory_logic: stringType().optional(),
+  format_pattern: stringType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysFieldSchema = exports_external.object({
-  sys_field_id: exports_external.string().uuid(),
-  sys_tab_id: exports_external.string().uuid(),
-  sys_column_id: exports_external.string().uuid(),
-  sys_field_group_id: exports_external.string().uuid().optional(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  help: exports_external.string().optional(),
-  seq_no: exports_external.number(),
-  seq_no_grid: exports_external.number(),
-  display_length: exports_external.number().optional(),
-  x_position: exports_external.number().optional(),
-  y_position: exports_external.number().optional(),
-  column_span: exports_external.number().optional(),
-  num_lines: exports_external.number().optional(),
-  is_displayed: exports_external.boolean(),
-  is_displayed_grid: exports_external.boolean(),
-  is_read_only: exports_external.boolean(),
-  is_encrypted: exports_external.boolean(),
-  is_same_line: exports_external.boolean(),
-  is_heading: exports_external.boolean(),
-  is_field_only: exports_external.boolean(),
-  display_logic: exports_external.string().optional(),
-  read_only_logic: exports_external.string().optional(),
-  mandatory_logic: exports_external.string().optional(),
-  obscure_type: exports_external.string().optional(),
-  included_tab_id: exports_external.string().uuid().optional(),
-  default_value: exports_external.string().optional(),
-  sort_no: exports_external.number().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysFieldSchema = objectType({
+  sys_field_id: stringType().uuid(),
+  sys_tab_id: stringType().uuid(),
+  sys_column_id: stringType().uuid(),
+  sys_field_group_id: stringType().uuid().optional(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  help: stringType().optional(),
+  seq_no: numberType(),
+  seq_no_grid: numberType(),
+  display_length: numberType().optional(),
+  column_span: numberType().optional(),
+  num_lines: numberType().optional(),
+  is_displayed: booleanType(),
+  is_displayed_grid: booleanType(),
+  is_read_only: booleanType(),
+  is_encrypted: booleanType(),
+  is_same_line: booleanType(),
+  is_heading: booleanType(),
+  is_field_only: booleanType(),
+  display_logic: stringType().optional(),
+  read_only_logic: stringType().optional(),
+  mandatory_logic: stringType().optional(),
+  obscure_type: stringType().optional(),
+  included_tab_id: stringType().uuid().optional(),
+  default_value: stringType().optional(),
+  sort_no: numberType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysWindowSchema = exports_external.object({
-  sys_window_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  help: exports_external.string().optional(),
-  window_type: exports_external.enum(["M", "T", "Q"]),
-  is_sales_transaction: exports_external.boolean(),
-  is_default: exports_external.boolean(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysWindowSchema = objectType({
+  sys_window_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  help: stringType().optional(),
+  window_type: enumType(["M", "T", "Q"]),
+  is_sales_transaction: booleanType(),
+  is_default: booleanType(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysTabSchema = exports_external.object({
-  sys_tab_id: exports_external.string().uuid(),
-  sys_window_id: exports_external.string().uuid(),
-  sys_table_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  help: exports_external.string().optional(),
-  tab_level: exports_external.number(),
-  seq_no: exports_external.number(),
-  is_single_row: exports_external.boolean(),
-  has_tree: exports_external.boolean(),
-  is_info_tab: exports_external.boolean(),
-  is_translation_tab: exports_external.boolean(),
-  is_read_only: exports_external.boolean(),
-  is_insert_record: exports_external.boolean(),
-  is_advanced_tab: exports_external.boolean(),
-  parent_column_id: exports_external.string().uuid().optional(),
-  link_column_id: exports_external.string().uuid().optional(),
-  order_by_clause: exports_external.string().optional(),
-  where_clause: exports_external.string().optional(),
-  display_logic: exports_external.string().optional(),
-  read_only_logic: exports_external.string().optional(),
-  commit_warning: exports_external.string().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysTabSchema = objectType({
+  sys_tab_id: stringType().uuid(),
+  sys_window_id: stringType().uuid(),
+  sys_table_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  help: stringType().optional(),
+  tab_level: numberType(),
+  seq_no: numberType(),
+  is_single_row: booleanType(),
+  has_tree: booleanType(),
+  is_info_tab: booleanType(),
+  is_translation_tab: booleanType(),
+  is_read_only: booleanType(),
+  is_insert_record: booleanType(),
+  is_advanced_tab: booleanType(),
+  parent_column_id: stringType().uuid().optional(),
+  link_column_id: stringType().uuid().optional(),
+  order_by_clause: stringType().optional(),
+  where_clause: stringType().optional(),
+  display_logic: stringType().optional(),
+  read_only_logic: stringType().optional(),
+  commit_warning: stringType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysUserSchema = exports_external.object({
-  sys_user_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  email: exports_external.string().email(),
-  password_hash: exports_external.string(),
-  description: exports_external.string().optional(),
-  is_system_user: exports_external.boolean(),
-  is_sales_rep: exports_external.boolean(),
-  login_date: exports_external.date().optional(),
-  login_failure_count: exports_external.number(),
-  is_locked: exports_external.boolean(),
-  is_account_verified: exports_external.boolean(),
-  notification_type: exports_external.string().optional(),
-  supervisor_id: exports_external.string().uuid().optional(),
-  default_sys_role_id: exports_external.string().uuid().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysUserSchema = objectType({
+  sys_user_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  email: stringType().email(),
+  password_hash: stringType(),
+  description: stringType().optional(),
+  is_system_user: booleanType(),
+  is_sales_rep: booleanType(),
+  login_date: dateType().optional(),
+  login_failure_count: numberType(),
+  is_locked: booleanType(),
+  is_account_verified: booleanType(),
+  notification_type: stringType().optional(),
+  supervisor_id: stringType().uuid().optional(),
+  default_sys_role_id: stringType().uuid().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysRoleSchema = exports_external.object({
-  sys_role_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  user_level: exports_external.string(),
-  is_master_role: exports_external.boolean(),
-  is_can_export: exports_external.boolean(),
-  is_can_report: exports_external.boolean(),
-  is_personal_lock: exports_external.boolean(),
-  is_personal_access: exports_external.boolean(),
-  max_query_records: exports_external.number(),
-  connection_profile: exports_external.string().optional(),
-  preference_type: exports_external.string().optional(),
-  is_show_accounting: exports_external.boolean(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysRoleSchema = objectType({
+  sys_role_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  user_level: stringType(),
+  is_master_role: booleanType(),
+  is_can_export: booleanType(),
+  is_can_report: booleanType(),
+  is_personal_lock: booleanType(),
+  is_personal_access: booleanType(),
+  max_query_records: numberType(),
+  connection_profile: stringType().optional(),
+  preference_type: stringType().optional(),
+  is_show_accounting: booleanType(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysReferenceSchema = exports_external.object({
-  sys_reference_id: exports_external.number(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  validation_type: exports_external.enum(["S", "L", "T", "R"]),
-  vformat: exports_external.string().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysReferenceSchema = objectType({
+  sys_reference_id: numberType(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  validation_type: enumType(["S", "L", "T", "R"]),
+  vformat: stringType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
 // packages/generator/src/parsers/mermaid.parser.ts
 var TYPE_MAP = getTypeMap();
@@ -6156,6 +6266,7 @@ class MermaidParser {
     const declaredEnums = new Map;
     const enumBindings = [];
     const fieldHelpText = [];
+    const fieldLogic = [];
     const entityHelpText = new Map;
     const entityIcons = new Map;
     const entityParents = new Map;
@@ -6179,6 +6290,9 @@ class MermaidParser {
         const fieldHelp = this.parseFieldHelpDirective(trimmed);
         if (fieldHelp)
           fieldHelpText.push(fieldHelp);
+        const logic = this.parseFieldLogicDirective(trimmed);
+        if (logic)
+          fieldLogic.push(logic);
         const entityHelp = this.parseEntityHelpDirective(trimmed);
         if (entityHelp)
           entityHelpText.set(entityHelp.entity, entityHelp.help);
@@ -6228,6 +6342,7 @@ class MermaidParser {
     }
     this.attachIndexes(entities, declaredIndexes);
     this.attachHelp(entities, fieldHelpText, entityHelpText);
+    this.attachFieldLogic(entities, fieldLogic);
     this.attachIcons(entities, entityIcons);
     this.attachParents(entities, entityParents);
     const enums = this.attachEnums(entities, declaredEnums, enumBindings);
@@ -6264,6 +6379,27 @@ class MermaidParser {
         continue;
       child.parentEntity = parent.name;
       child.parentLinkColumn = link.name;
+    }
+    this.flattenNestedLineItems(entities);
+  }
+  flattenNestedLineItems(entities) {
+    const byName = new Map(entities.map((entity) => [entity.name, entity]));
+    const depth = (entity) => {
+      let levels = 0;
+      const seen = new Set;
+      for (let current = entity.parentEntity ? byName.get(entity.parentEntity) : undefined;current && !seen.has(current.name); current = current.parentEntity ? byName.get(current.parentEntity) : undefined) {
+        seen.add(current.name);
+        levels++;
+      }
+      return levels;
+    };
+    const nested = entities.filter((entity) => entity.parentEntity).map((entity) => ({ entity, levels: depth(entity) })).sort((a, b) => a.levels - b.levels);
+    for (const { entity } of nested) {
+      const parent = entity.parentEntity ? byName.get(entity.parentEntity) : undefined;
+      if (!parent?.parentEntity)
+        continue;
+      entity.parentEntity = undefined;
+      entity.parentLinkColumn = undefined;
     }
   }
   parseIndexDirective(line) {
@@ -6306,6 +6442,26 @@ class MermaidParser {
       return null;
     const help = match[3].trim();
     return help ? { entity: match[1], column: match[2], help } : null;
+  }
+  parseFieldLogicDirective(line) {
+    const match = line.match(/^%%field\s+([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s+(display|readonly|mandatory)\s*:\s*(.+)$/);
+    if (!match?.[1] || !match[2] || !match[3] || !match[4])
+      return null;
+    const logic = match[4].trim();
+    return logic ? { entity: match[1], column: match[2], kind: match[3], logic } : null;
+  }
+  attachFieldLogic(entities, logic) {
+    for (const { entity: name, column, kind, logic: expression } of logic) {
+      const attribute = entities.find((candidate) => candidate.name === name)?.attributes.find((candidate) => candidate.name === column);
+      if (!attribute)
+        continue;
+      if (kind === "display")
+        attribute.displayLogic = expression;
+      else if (kind === "readonly")
+        attribute.readOnlyLogic = expression;
+      else
+        attribute.mandatoryLogic = expression;
+    }
   }
   parseEntityHelpDirective(line) {
     const match = line.match(/^%%entity\s+([A-Za-z_]\w*)\s+(?:help|description)\s*:\s*(.+)$/);
@@ -6453,6 +6609,221 @@ class MermaidParser {
   }
 }
 
+// language/sections.ts
+var KEYS = new Set(["entity", "name", "help", "rows", "collapsed"]);
+var REQUIRED = ["entity", "name", "rows"];
+var DIRECTIVE2 = /^\s*%%section\b\s*(.*)$/i;
+function parseKeys(body) {
+  const keys = new Map;
+  let last;
+  for (const segment of body.split(";")) {
+    const match = segment.match(/^\s*([A-Za-z]+)\s*:(.*)$/);
+    const key = match?.[1]?.toLowerCase();
+    if (match && key && KEYS.has(key)) {
+      keys.set(key, (match[2] ?? "").trim());
+      last = key;
+    } else if (last && segment.trim()) {
+      keys.set(last, `${keys.get(last) ?? ""}; ${segment.trim()}`.trim());
+    }
+  }
+  return keys;
+}
+function parseRows(text) {
+  return text.split("|").map((row) => row.split(",").map((column) => column.trim()).filter(Boolean)).filter((row) => row.length > 0);
+}
+function formatRows(rows) {
+  return rows.map((row) => row.join(", ")).join(" | ");
+}
+function parseSectionDirectives(source) {
+  const found = [];
+  const lines = source.replace(/\r\n/g, `
+`).split(`
+`);
+  lines.forEach((text, index) => {
+    const match = text.match(DIRECTIVE2);
+    if (!match)
+      return;
+    const keys = parseKeys(match[1] ?? "");
+    const rowsText = keys.get("rows");
+    found.push({
+      line: index + 1,
+      entity: keys.get("entity") || undefined,
+      name: keys.get("name") || undefined,
+      help: keys.get("help") || undefined,
+      collapsed: /^(true|yes)$/i.test(keys.get("collapsed") ?? ""),
+      rows: rowsText === undefined ? undefined : parseRows(rowsText),
+      missing: REQUIRED.filter((key) => !keys.get(key))
+    });
+  });
+  return found;
+}
+function sectionsByEntity(directives) {
+  const byEntity = new Map;
+  for (const directive of directives) {
+    if (directive.missing.length > 0 || !directive.entity || !directive.name)
+      continue;
+    const sections = byEntity.get(directive.entity) ?? [];
+    const existing = sections.find((section) => section.name.toLowerCase() === directive.name?.toLowerCase());
+    if (existing) {
+      existing.rows.push(...directive.rows ?? []);
+      existing.lines.push(directive.line);
+      if (!existing.help && directive.help)
+        existing.help = directive.help;
+      existing.collapsed = existing.collapsed || directive.collapsed;
+    } else {
+      sections.push({
+        name: directive.name,
+        help: directive.help,
+        collapsed: directive.collapsed,
+        rows: [...directive.rows ?? []],
+        lines: [directive.line]
+      });
+    }
+    byEntity.set(directive.entity, sections);
+  }
+  return byEntity;
+}
+function placeFields(sections, declared) {
+  const placed = new Map;
+  let order = 0;
+  sections.forEach((section, sectionIndex) => {
+    let rowNo = 0;
+    for (const raw of section.rows) {
+      const row = raw.filter((column) => (!declared || declared.has(column)) && !placed.has(column));
+      if (row.length === 0)
+        continue;
+      rowNo++;
+      const pair = row.slice(0, 2);
+      pair.forEach((column, position) => {
+        placed.set(column, {
+          section: sectionIndex,
+          row: rowNo,
+          column: position === 0 ? 1 : 2,
+          sameLine: position === 1,
+          span: pair.length === 1 ? 2 : 1,
+          order: ++order
+        });
+      });
+      for (const column of row.slice(2)) {
+        rowNo++;
+        placed.set(column, {
+          section: sectionIndex,
+          row: rowNo,
+          column: 1,
+          sameLine: false,
+          span: 2,
+          order: ++order
+        });
+      }
+    }
+  });
+  return placed;
+}
+var UNPLACED_SECTION = "Other";
+
+// packages/generator/src/parsers/section.parser.ts
+function attachFormSections(source, entities) {
+  const byEntity = sectionsByEntity(parseSectionDirectives(source));
+  for (const entity of entities) {
+    const sections = byEntity.get(entity.name);
+    if (!sections || sections.length === 0)
+      continue;
+    entity.formSections = sections.map((section) => ({
+      name: section.name,
+      help: section.help,
+      collapsed: section.collapsed,
+      rows: section.rows.map((row) => [...row])
+    }));
+  }
+}
+function formLayoutFor(entity) {
+  const sections = entity.formSections;
+  if (!sections || sections.length === 0)
+    return;
+  const columns = entity.attributes.map((attribute) => attribute.name).filter((name) => name !== entity.primaryKey);
+  const placements = placeFields(sections.map((section) => ({ ...section, lines: [] })), new Set(columns));
+  const groups = sections.map((section, index) => ({
+    name: section.name,
+    description: section.help,
+    collapsed: section.collapsed,
+    seqNo: (index + 1) * 10,
+    columns: 2
+  }));
+  const fields = new Map;
+  let order = 0;
+  const ordered = [...placements.entries()].sort((a, b) => a[1].order - b[1].order);
+  for (const [column, placement] of ordered) {
+    order = placement.order;
+    fields.set(column, {
+      group: groups[placement.section]?.name ?? UNPLACED_SECTION,
+      seqNo: placement.order * 10,
+      sameLine: placement.sameLine,
+      columnSpan: placement.span
+    });
+  }
+  const unplaced = columns.filter((column) => !fields.has(column));
+  if (unplaced.length > 0) {
+    let name = UNPLACED_SECTION;
+    while (groups.some((group) => group.name.toLowerCase() === name.toLowerCase()))
+      name += " fields";
+    groups.push({
+      name,
+      description: "Fields the model did not place in a section.",
+      collapsed: true,
+      seqNo: (groups.length + 1) * 10,
+      columns: 2
+    });
+    unplaced.forEach((column, index) => {
+      const right = index % 2 === 1;
+      const alone = !right && index === unplaced.length - 1;
+      fields.set(column, {
+        group: name,
+        seqNo: ++order * 10,
+        sameLine: right,
+        columnSpan: alone ? 2 : 1
+      });
+    });
+  }
+  return { groups, fields };
+}
+
+// language/state-field.ts
+var STATE_FIELD_CANDIDATES = ["status", "state", "stage"];
+function stateFieldOf(columns) {
+  const names = new Set(columns);
+  return STATE_FIELD_CANDIDATES.find((candidate) => names.has(candidate));
+}
+var LIFECYCLE_DRAFT = "draft";
+var LIFECYCLE_FINAL = "final";
+var LIFECYCLE_ERROR = "error";
+var DOC_STATUS_COLUMN = "doc_status";
+var REOPEN_EVENT = "reopen";
+var RESERVED_STATE_NAMES = [LIFECYCLE_FINAL, LIFECYCLE_ERROR];
+function draftValueFor(machine) {
+  const own = machine?.states.find((state) => state.name.toLowerCase() === LIFECYCLE_DRAFT);
+  return own?.name ?? LIFECYCLE_DRAFT;
+}
+function lifecycleValuesFor(machine) {
+  if (!machine)
+    return [LIFECYCLE_DRAFT, LIFECYCLE_FINAL, LIFECYCLE_ERROR];
+  const values = [draftValueFor(machine)];
+  for (const state of machine.states) {
+    if (!values.includes(state.name))
+      values.push(state.name);
+  }
+  if (!values.includes(LIFECYCLE_ERROR))
+    values.push(LIFECYCLE_ERROR);
+  return values;
+}
+function normalizeEvent(event) {
+  return event.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+function moveLabel(_event, to) {
+  const words = to.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const text = words === words.toUpperCase() ? words.toLowerCase() : words;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 // packages/generator/src/rbac/index.ts
 var RBAC_OPERATIONS = ["create", "read", "update", "delete"];
 var OPERATION_ALIASES = {
@@ -6474,7 +6845,7 @@ var OPERATION_ALIASES = {
   remove: "delete",
   destroy: "delete"
 };
-var DIRECTIVE2 = /^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*]\w*)\s*$/;
+var DIRECTIVE3 = /^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/;
 function parseRoleExpression(expression) {
   const roles = [];
   for (const part of expression.split("|")) {
@@ -6492,17 +6863,28 @@ function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = ()
   const known = new Set(knownEntities);
   const operations = new Map;
   const transitions = new Map;
-  const edgesFor = (entity, event) => {
+  const edgesFor = (entity, target) => {
     const found = [];
+    const arrow = /^([A-Za-z_]\w*)->([A-Za-z_]\w*)$/.exec(target);
     for (const machine of stateMachines) {
       if (machine.entity !== entity)
         continue;
+      const draft = machine.transitions.flatMap((edge) => [edge.from, edge.to]).find((state) => state.toLowerCase() === LIFECYCLE_DRAFT) ?? LIFECYCLE_DRAFT;
       for (const edge of machine.transitions) {
-        if (!edge.trigger)
-          continue;
-        const normalized = edge.trigger.trim().toLowerCase().replace(/[\s-]+/g, "_");
-        if (normalized === event.toLowerCase())
+        if (arrow) {
+          if (edge.from === arrow[1] && edge.to === arrow[2])
+            found.push({ from: edge.from, to: edge.to });
+        } else if (edge.trigger && normalizeEvent(edge.trigger) === normalizeEvent(target)) {
           found.push({ from: edge.from, to: edge.to });
+        }
+      }
+      const finals = machine.terminal ?? [];
+      if (arrow && found.length === 0 && finals.includes(arrow[1]) && arrow[2] === draft) {
+        found.push({ from: arrow[1], to: draft });
+      }
+      if (!arrow && found.length === 0 && normalizeEvent(target) === REOPEN_EVENT) {
+        for (const from of finals)
+          found.push({ from, to: draft });
       }
     }
     return found;
@@ -6512,7 +6894,7 @@ function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = ()
     const line = rawLine.trim();
     if (!line.startsWith("%%rbac"))
       continue;
-    const match = line.match(DIRECTIVE2);
+    const match = line.match(DIRECTIVE3);
     if (!match) {
       onWarn(`Skipping malformed %%rbac directive: ${line}`);
       continue;
@@ -6531,29 +6913,30 @@ function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = ()
     if (resolved) {
       const ops = resolved === "*" ? [...RBAC_OPERATIONS] : [resolved];
       for (const operation of ops) {
-        const key2 = `${entity}:${operation}`;
-        const existing2 = operations.get(key2);
-        if (existing2) {
+        const key = `${entity}:${operation}`;
+        const existing = operations.get(key);
+        if (existing) {
           for (const role of roles)
-            existing2.roles.add(role);
+            existing.roles.add(role);
         } else {
-          operations.set(key2, { entity, operation, roles: new Set(roles) });
+          operations.set(key, { entity, operation, roles: new Set(roles) });
         }
       }
       continue;
     }
     const edges = edgesFor(entity, rawTarget);
     if (edges.length === 0) {
-      onWarn(`%%rbac on ${entity}.${rawTarget} names neither a CRUD operation ` + `(${RBAC_OPERATIONS.join(", ")}, *) nor a transition in ${entity}'s state machine — skipped.`);
+      onWarn(`%%rbac on ${entity}.${rawTarget} names neither a CRUD operation ` + `(${RBAC_OPERATIONS.join(", ")}, *), a move in ${entity}'s state machine, nor ` + `${REOPEN_EVENT} — skipped.`);
       continue;
     }
-    const key = `${entity}:${rawTarget.toLowerCase()}`;
+    const transition = rawTarget.includes("->") ? rawTarget : normalizeEvent(rawTarget);
+    const key = `${entity}:${transition}`;
     const existing = transitions.get(key);
     if (existing) {
       for (const role of roles)
         existing.roles.add(role);
     } else {
-      transitions.set(key, { entity, transition: rawTarget, edges, roles: new Set(roles) });
+      transitions.set(key, { entity, transition, edges, roles: new Set(roles) });
     }
   }
   return {
@@ -6576,7 +6959,7 @@ function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = ()
 // packages/generator/src/reports/index.ts
 var REPORT_CHART_TYPES = ["bar", "line", "pie", "area"];
 var CHART_TYPE_SET = new Set(REPORT_CHART_TYPES);
-var KEYS = ["title", "entity", "chart", "x", "y", "help"];
+var KEYS2 = ["title", "entity", "chart", "x", "y", "help"];
 var READ_ONLY = /^\s*(?:with|select)\b/i;
 function hasStatementBreak(sql) {
   const body = sql.replace(/;\s*$/, "");
@@ -6615,7 +6998,7 @@ function parseReportDirective(line) {
   const name = nameMatch[1];
   const keys = head.slice(nameMatch[0].length);
   const read = (key) => {
-    const stop = KEYS.join("|");
+    const stop = KEYS2.join("|");
     const found = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:${stop}):|$)`, "is"));
     return found?.[1]?.trim() || undefined;
   };
@@ -6665,6 +7048,74 @@ function compileReports(source, entityNames, warn = () => {}) {
       parsed.entity = undefined;
     }
     byName.set(parsed.name, parsed);
+  }
+  return [...byName.values()];
+}
+var DASHBOARD_KEYS = ["title", "role", "reports", "help"];
+function scanKeys(text, keys) {
+  const marks = [...text.matchAll(new RegExp(`(?:^|\\s)(${keys.join("|")}):`, "g"))];
+  const out = {};
+  marks.forEach((mark, i) => {
+    const key = mark[1];
+    if (key in out)
+      return;
+    const from = (mark.index ?? 0) + mark[0].length;
+    const to = marks[i + 1]?.index ?? text.length;
+    const value = text.slice(from, to).trim();
+    if (value)
+      out[key] = value;
+  });
+  return out;
+}
+function parseDashboardDirective(line) {
+  const directive = line.trim().match(/^%%+dashboard(\s.*)$/is);
+  const rest = directive?.[1]?.trim();
+  if (!rest)
+    return { error: "not a %%dashboard directive" };
+  const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+  if (!nameMatch?.[1])
+    return { error: "has no name" };
+  const name = nameMatch[1];
+  const keys = rest.slice(nameMatch[0].length);
+  const read = (key) => scanKeys(keys, DASHBOARD_KEYS)[key];
+  const reports = (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+  if (reports.length === 0)
+    return { error: "names no reports" };
+  return {
+    name,
+    title: read("title") ?? name.replace(/[_-]+/g, " "),
+    role: read("role"),
+    reports,
+    help: read("help")
+  };
+}
+function compileDashboards(source, reportNames, warn = () => {}) {
+  const known = new Set(reportNames);
+  const byName = new Map;
+  for (const line of source.split(`
+`)) {
+    if (!/^\s*%%+dashboard\b/i.test(line))
+      continue;
+    const parsed = parseDashboardDirective(line);
+    if ("error" in parsed) {
+      warn(`%%dashboard ${parsed.error} — skipped: ${line.trim().slice(0, 120)}`);
+      continue;
+    }
+    if (byName.has(parsed.name)) {
+      warn(`%%dashboard "${parsed.name}" is declared more than once — keeping the first`);
+      continue;
+    }
+    const shown = parsed.reports.filter((name) => known.has(name));
+    for (const name of parsed.reports) {
+      if (!known.has(name)) {
+        warn(`%%dashboard "${parsed.name}" lists "${name}", which is not a %%report — left off`);
+      }
+    }
+    if (shown.length === 0) {
+      warn(`%%dashboard "${parsed.name}" shows no declared report — skipped`);
+      continue;
+    }
+    byName.set(parsed.name, { ...parsed, reports: shown });
   }
   return [...byName.values()];
 }
@@ -6829,6 +7280,140 @@ function parseDecisionTableDirective(flowchart) {
     return null;
   }
 }
+var JDM_GRAPH_DIRECTIVE = "%%jdm-graph ";
+var GRAPH_NODE_TYPES = new Set([
+  "inputNode",
+  "outputNode",
+  "decisionTableNode",
+  "expressionNode",
+  "functionNode",
+  "switchNode"
+]);
+var FORBIDDEN_FUNCTION_SOURCE = /\b(?:import|require|fetch|eval|process|globalThis)\b/;
+function parseJdmGraphDirective(flowchart) {
+  const line = (flowchart ?? "").split(`
+`).map((l) => l.trim()).find((l) => l.startsWith(JDM_GRAPH_DIRECTIVE));
+  if (!line)
+    return null;
+  try {
+    const parsed = JSON.parse(line.slice(JDM_GRAPH_DIRECTIVE.length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function validateJdmGraph(graph) {
+  const problems = [];
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const ids = new Set;
+  if (!nodes.length)
+    return ["the graph has no nodes"];
+  for (const node of nodes) {
+    const label = String(node.name ?? node.id);
+    ids.add(String(node.id));
+    if (typeof node.type !== "string" || !GRAPH_NODE_TYPES.has(node.type)) {
+      problems.push(`node "${label}" has an unsupported type "${String(node.type)}"`);
+      continue;
+    }
+    if (node.type === "inputNode" || node.type === "outputNode")
+      continue;
+    if (node.content === undefined || node.content === null) {
+      problems.push(`${node.type} "${label}" has no content, so the engine would reject it`);
+    }
+    if (node.type === "functionNode") {
+      const content = node.content;
+      const source = typeof content === "string" ? content : typeof content?.source === "string" ? content.source : "";
+      if (!/\bhandler\b/.test(source)) {
+        problems.push(`functionNode "${label}" defines no handler; write export const handler = async (input) => ({ ... })`);
+      }
+      if (FORBIDDEN_FUNCTION_SOURCE.test(source)) {
+        problems.push(`functionNode "${label}" uses import, require, fetch, eval, process or globalThis, which the sandbox does not allow`);
+      }
+    }
+  }
+  if (!nodes.some((n) => n.type === "inputNode"))
+    problems.push("the graph has no input node");
+  if (!nodes.some((n) => n.type === "outputNode"))
+    problems.push("the graph has no output node");
+  for (const edge of edges) {
+    if (!ids.has(String(edge.sourceId)) || !ids.has(String(edge.targetId))) {
+      problems.push(`edge "${String(edge.id)}" joins a node that is not in the graph`);
+    }
+  }
+  return problems;
+}
+function normalizeGraphActions(graph) {
+  const rewrite = (cell) => typeof cell === "string" ? cell.replace(/(["'])validation-error\1/g, "$1prevent$1") : cell;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      const content = node.content;
+      if (node.type === "functionNode" && typeof content === "string") {
+        return { ...node, content: { source: content } };
+      }
+      const table = content;
+      if (node.type !== "decisionTableNode" || !Array.isArray(table?.rules)) {
+        return node;
+      }
+      const inputs = (table.inputs ?? []).filter((col) => (col.field ?? "").trim() !== "");
+      const outputs = (table.outputs ?? []).map((col) => ({
+        ...col,
+        field: col.field || col.name || col.id
+      }));
+      const inputIds = new Set(inputs.map((column) => column.id));
+      const outputIds = new Set(outputs.map((column) => column.id));
+      return {
+        ...node,
+        content: withTransformData({
+          ...table,
+          inputs,
+          outputs,
+          rules: table.rules.map((row) => Object.fromEntries(Object.entries(row).map(([key, cell]) => [
+            key,
+            inputIds.has(key) ? emptyMeansBlank(rewrite(cell)) : outputIds.has(key) ? zenCell(rewrite(cell)) : rewrite(cell)
+          ])))
+        })
+      };
+    })
+  };
+}
+function emptyMeansBlank(cell) {
+  if (typeof cell !== "string")
+    return cell;
+  const text = cell.trim();
+  if (text === "null")
+    return 'null, ""';
+  if (text === "!= null")
+    return '!= null and != ""';
+  return cell;
+}
+function literalText(cell) {
+  const match = String(cell ?? "").trim().match(/^(?:'(.*)'|"(.*)")$/s);
+  return match ? match[1] ?? match[2] ?? "" : null;
+}
+function withTransformData(content) {
+  const outputs = content.outputs ?? [];
+  const fieldColumn = outputs.find((column) => column.field === "field");
+  const valueColumn = outputs.find((column) => column.field === "value");
+  const actionColumn = outputs.find((column) => column.field === "action");
+  if (!fieldColumn || !valueColumn || !actionColumn || outputs.some((column) => column.field === "transformData")) {
+    return content;
+  }
+  const dataColumn = { id: "transformData-auto", name: "Transform Data", field: "transformData" };
+  return {
+    ...content,
+    outputs: [...outputs, dataColumn],
+    rules: (content.rules ?? []).map((row) => {
+      const target = literalText(row[fieldColumn.id])?.trim();
+      const isTransform = literalText(row[actionColumn.id])?.trim() === "transform";
+      if (!isTransform || !target)
+        return { ...row, [dataColumn.id]: row[dataColumn.id] ?? "" };
+      const value = literalText(row[valueColumn.id]) ?? String(row[valueColumn.id] ?? "");
+      return { ...row, [dataColumn.id]: zenLiteral(JSON.stringify({ [target]: value })) };
+    })
+  };
+}
 function isBareLiteral(value) {
   return value === "true" || value === "false" || value === "null" || value !== "" && !Number.isNaN(Number(value));
 }
@@ -6849,12 +7434,12 @@ function zenInputCell(raw) {
     return "";
   const match = value.match(/^(>=|<=|!=|=|>|<)\s*(.*)$/);
   if (!match)
-    return zenCell(value);
+    return emptyMeansBlank(zenCell(value));
   const [, operator, operand] = match;
   const cell = zenCell(operand);
   if (!cell)
     return "";
-  return operator === "=" ? cell : `${operator} ${cell}`;
+  return emptyMeansBlank(operator === "=" ? cell : `${operator} ${cell}`);
 }
 function buildEditorDecisionTable(ruleName, table) {
   const inputs = (table.inputs ?? []).filter((column) => (column.field ?? "").trim() !== "");
@@ -6875,7 +7460,7 @@ function buildEditorDecisionTable(ruleName, table) {
         id: tableId,
         name: ruleName,
         type: "decisionTableNode",
-        content: {
+        content: withTransformData({
           hitPolicy: table.hitPolicy === "collect" ? "collect" : "first",
           inputs: inputs.map((column) => ({
             id: column.id,
@@ -6888,7 +7473,7 @@ function buildEditorDecisionTable(ruleName, table) {
             field: column.field ?? ""
           })),
           rules: rows
-        }
+        })
       },
       { id: "output", name: "Output", type: "outputNode" }
     ],
@@ -6970,6 +7555,24 @@ function compileRules(sections, onWarn = () => {}) {
     }
     try {
       const editorTable = parseDecisionTableDirective(section.flowchart);
+      const editorGraph = parseJdmGraphDirective(section.flowchart);
+      if (editorGraph) {
+        const problems = validateJdmGraph(editorGraph);
+        if (problems.length) {
+          onWarn(`Rule "${section.name}" has a graph that cannot run: ${problems.join("; ")}.`);
+          continue;
+        }
+        compiled.push({
+          name: section.name,
+          entity: section.entity,
+          tableName: toTableName(section.entity),
+          event: section.event,
+          operation: eventToOperation(section.event),
+          priority: section.priority ?? 100,
+          jdmContent: JSON.stringify(normalizeGraphActions(editorGraph))
+        });
+        continue;
+      }
       const ast = parseMermaidFlowchart(section.flowchart);
       if (!editorTable && !ast.nodes.size) {
         onWarn(`Rule "${section.name}" has no nodes; skipping.`);
@@ -7208,32 +7811,32 @@ function compileSagas(sections, knownEntities = [], onWarn = () => {}) {
         continue;
       const autoType = line.match(AUTO_TYPE_DIRECTIVE);
       if (autoType?.[1] && autoType[2]) {
-        const [, nodeId2 = "", typeName2 = "", rest2 = ""] = autoType;
-        if (!STEP_TYPES.includes(typeName2)) {
-          onWarn(`Workflow "${section.name}": unknown step type "${typeName2}" on node ${nodeId2} — skipped.`);
+        const [, nodeId = "", typeName = "", rest = ""] = autoType;
+        if (!STEP_TYPES.includes(typeName)) {
+          onWarn(`Workflow "${section.name}": unknown step type "${typeName}" on node ${nodeId} — skipped.`);
           continue;
         }
-        const existing = declared.get(nodeId2);
-        declared.set(nodeId2, {
-          nodeId: nodeId2,
-          type: typeName2,
-          label: labels.get(nodeId2) ?? nodeId2,
-          props: { ...existing?.props, ...parseStepProps(rest2) }
+        const existing = declared.get(nodeId);
+        declared.set(nodeId, {
+          nodeId,
+          type: typeName,
+          label: labels.get(nodeId) ?? nodeId,
+          props: { ...existing?.props, ...parseStepProps(rest) }
         });
-        autoNodes.add(nodeId2);
+        autoNodes.add(nodeId);
         continue;
       }
       const autoProp = line.match(AUTO_PROP_DIRECTIVE);
       if (autoProp?.[1] && autoProp[2] && autoProp[2] !== "type") {
-        const [, nodeId2 = "", key = "", value = ""] = autoProp;
-        const existing = declared.get(nodeId2);
-        declared.set(nodeId2, {
-          nodeId: nodeId2,
+        const [, nodeId = "", key = "", value = ""] = autoProp;
+        const existing = declared.get(nodeId);
+        declared.set(nodeId, {
+          nodeId,
           type: existing?.type ?? "Formula",
-          label: labels.get(nodeId2) ?? nodeId2,
+          label: labels.get(nodeId) ?? nodeId,
           props: { ...existing?.props, [key]: value.trim() }
         });
-        autoNodes.add(nodeId2);
+        autoNodes.add(nodeId);
         continue;
       }
       const match = line.match(STEP_DIRECTIVE);
@@ -7295,11 +7898,21 @@ function compileSagas(sections, knownEntities = [], onWarn = () => {}) {
       name: section.name,
       entity: section.entity,
       trigger: section.trigger === "rule" ? "rule" : "automatic",
-      operation: section.operation ?? "CREATE",
+      operation: sagaOperation(section, onWarn),
       steps: orderSteps(section.diagram ?? "", declared)
     });
   }
   return compiled;
+}
+function sagaOperation(section, onWarn) {
+  if (section.status) {
+    if (section.trigger === "rule") {
+      onWarn(`Workflow "${section.name}": status is ignored on a rule-triggered saga.`);
+    } else {
+      return `ENTER:${section.status.trim().toUpperCase().replace(/[\s-]+/g, "_")}`;
+    }
+  }
+  return section.operation ?? "CREATE";
 }
 
 // packages/generator/src/workflows/index.ts
@@ -7352,13 +7965,21 @@ function compileWorkflows(source, knownEntities = [], onWarn = () => {}) {
     if (!initial) {
       onWarn(`Workflow "${section.name}" has no starting state — records will not be stamped.`);
     }
+    for (const reserved of RESERVED_STATE_NAMES) {
+      if (states.has(reserved)) {
+        onWarn(`Workflow "${section.name}" draws a state named "${reserved}", which the record ` + `lifecycle reserves (checker EML509).`);
+      }
+    }
+    if (terminal.length === 0) {
+      onWarn(`Workflow "${section.name}" ends nowhere: no state reaches [*], so no record of ` + `${section.entity} can become Final (checker EML422).`);
+    }
+    const machine = { states: [...states.values()], initial, terminal };
     compiled.push({
       name: section.name,
       entity: section.entity,
-      states: [...states.values()],
+      ...machine,
       transitions,
-      initial,
-      terminal
+      lifecycleValues: lifecycleValuesFor(machine)
     });
   }
   return compiled;
@@ -7379,6 +8000,7 @@ function parseModel(sources) {
   }
   const joined = list.join(`
 `);
+  attachFormSections(joined, entities);
   const categories = resolveCategories(joined, entities.map((entity) => entity.name));
   const warn = (message) => console.warn(`  ⚠️  ${message}`);
   const rules = compileRules(extractRuleSections(joined), warn);
@@ -7387,6 +8009,7 @@ function parseModel(sources) {
   const sagas = compileSagaWorkflows(joined, entities.map((entity) => entity.name), warn);
   const rbac = compileRbac(joined, entities.map((entity) => entity.name), workflows, warn);
   const reports = compileReports(joined, entities.map((entity) => entity.name), warn);
+  const dashboards = compileDashboards(joined, reports.map((report) => report.name), warn);
   return {
     entities,
     relationships,
@@ -7397,7 +8020,8 @@ function parseModel(sources) {
     workflows,
     sagas,
     rbac,
-    reports
+    reports,
+    dashboards
   };
 }
 
@@ -7418,6 +8042,7 @@ function emptyModel() {
     indexes: [],
     rules: [],
     reports: [],
+    dashboards: [],
     workflows: [],
     hooks: [],
     guards: [],
@@ -7637,6 +8262,40 @@ function parseDirective(line, n, model) {
       });
       return;
     }
+    case "dashboard": {
+      const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+      if (!nameMatch) {
+        model.diagnostics.push({
+          severity: "error",
+          code: "EML297",
+          message: `%%dashboard has no name: "${line}"`,
+          line: n
+        });
+        return;
+      }
+      const [name] = caps(nameMatch, 1);
+      const keys = rest.slice(nameMatch[0].length);
+      const marks = [...keys.matchAll(/(?:^|\s)(title|role|reports|help):/g)];
+      const values = {};
+      marks.forEach((mark, i) => {
+        const key = mark[1];
+        if (key in values)
+          return;
+        const from = (mark.index ?? 0) + mark[0].length;
+        const value = keys.slice(from, marks[i + 1]?.index ?? keys.length).trim();
+        if (value)
+          values[key] = value;
+      });
+      const read = (key) => values[key];
+      model.dashboards.push({
+        name,
+        title: read("title") ?? name.replace(/[_-]+/g, " "),
+        role: read("role"),
+        reports: (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean),
+        help: read("help")
+      });
+      return;
+    }
     case "enum": {
       const m = rest.match(/^(\w+)\s*:\s*(.+)$/);
       if (m) {
@@ -7712,18 +8371,18 @@ function parseHookFields(paramsRaw) {
 }
 function applyEntityMeta(model, name, key, value) {
   const ensure = () => {
-    let e2 = model.entities.find((x) => x.name === name);
-    if (!e2) {
-      e2 = {
+    let e = model.entities.find((x) => x.name === name);
+    if (!e) {
+      e = {
         name,
         tableName: toSnakeCase(name),
         attributes: [],
         primaryKey: "id",
         timestamps: true
       };
-      model.entities.push(e2);
+      model.entities.push(e);
     }
-    return e2;
+    return e;
   };
   const e = ensure();
   if (key === "audited")
@@ -7898,7 +8557,7 @@ function parseFlowGraph(lines) {
   const edges = [];
   const nodeToken = "([A-Za-z_]\\w*)(\\(\\[[^\\]]*\\]\\)|\\(\\([^)]*\\)\\)|\\{[^}]*\\}|\\[[^\\]]*\\]|\\([^)]*\\))?";
   const edgeRe = new RegExp(`^${nodeToken}\\s*(?:-->|---|-\\.->|==>)\\s*(?:\\|([^|]*)\\|)?\\s*${nodeToken}`);
-  const ensureNode2 = (id, suffix) => {
+  const ensureNode = (id, suffix) => {
     const existing = nodesById.get(id);
     if (existing) {
       if (suffix && existing.label === id) {
@@ -7914,14 +8573,14 @@ function parseFlowGraph(lines) {
     const em = line.match(edgeRe);
     if (em) {
       const [srcId, srcSuffix, edgeLabel, tgtId, tgtSuffix] = caps(em, 5);
-      ensureNode2(srcId, srcSuffix);
-      ensureNode2(tgtId, tgtSuffix);
+      ensureNode(srcId, srcSuffix);
+      ensureNode(tgtId, tgtSuffix);
       edges.push({ source: srcId, target: tgtId, label: edgeLabel?.trim() || undefined });
       continue;
     }
     const nm = line.match(new RegExp(`^${nodeToken}\\s*$`));
     if (nm?.[1] && nm[2])
-      ensureNode2(nm[1], nm[2]);
+      ensureNode(nm[1], nm[2]);
   }
   const sources = new Set(edges.map((e) => e.source));
   const targets = new Set(edges.map((e) => e.target));
@@ -8036,6 +8695,301 @@ function applyFieldEnumRefs(model) {
 
 // language/checker.ts
 init_language();
+
+// language/field-logic.ts
+var OPERATOR_ALIASES = {
+  "=": "=",
+  "==": "=",
+  "!": "!",
+  "!=": "!",
+  "^": "!",
+  "<>": "!",
+  ">": ">",
+  "<": "<",
+  ">=": ">=",
+  "<=": "<="
+};
+var OPERATOR_TOKENS = ["!=", "<>", ">=", "<=", "==", "=", "!", "^", ">", "<"];
+var VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function splitConditions(source) {
+  const parts = [];
+  const joins = [];
+  let current = "";
+  let quote = null;
+  let inVariable = false;
+  for (const ch of source) {
+    if (quote) {
+      current += ch;
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "@")
+      inVariable = !inVariable;
+    if (!inVariable && (ch === "&" || ch === "|")) {
+      parts.push(current);
+      joins.push(ch);
+      current = "";
+      continue;
+    }
+    if (!inVariable && (ch === "(" || ch === ")")) {
+      return "Parentheses are not supported: conditions are evaluated left to right.";
+    }
+    current += ch;
+  }
+  if (quote)
+    return "A quoted value is not closed.";
+  if (inVariable)
+    return "A variable is not closed: write it as @column@.";
+  parts.push(current);
+  return { parts, joins };
+}
+function parseOperand(raw) {
+  const text = raw.trim();
+  if (text === "")
+    return { kind: "literal", value: "" };
+  if (text.startsWith("@")) {
+    if (!text.endsWith("@") || text.length < 3)
+      return `"${text}" is not a variable: write @column@.`;
+    const name = text.slice(1, -1).trim();
+    if (!VARIABLE_NAME.test(name))
+      return `"${text}" is not a column name.`;
+    return { kind: "variable", name };
+  }
+  const first = text[0];
+  if (first === "'" || first === '"') {
+    if (text.length < 2 || text[text.length - 1] !== first)
+      return `${text} is not closed.`;
+    return { kind: "literal", value: text.slice(1, -1) };
+  }
+  if (text.includes("@"))
+    return `"${text}" mixes a variable into a value.`;
+  return { kind: "literal", value: text };
+}
+function splitComparison(text) {
+  let quote = null;
+  let inVariable = false;
+  for (let i = 0;i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === "@") {
+      inVariable = !inVariable;
+      continue;
+    }
+    if (inVariable)
+      continue;
+    for (const token of OPERATOR_TOKENS) {
+      if (text.startsWith(token, i)) {
+        return [text.slice(0, i), token, text.slice(i + token.length)];
+      }
+    }
+  }
+  return null;
+}
+function parseLogic(source) {
+  const text = (source ?? "").trim();
+  if (!text)
+    return { ok: false, error: "The expression is empty." };
+  const split = splitConditions(text);
+  if (typeof split === "string")
+    return { ok: false, error: split };
+  const conditions = [];
+  const variables = [];
+  for (const part of split.parts) {
+    const trimmed = part.trim();
+    if (!trimmed)
+      return { ok: false, error: "A condition is missing beside & or |." };
+    const comparison = splitComparison(trimmed);
+    if (!comparison) {
+      return {
+        ok: false,
+        error: `"${trimmed}" has no comparison: write @column@=value, @column@!value, > or <.`
+      };
+    }
+    const [leftRaw, token, rightRaw] = comparison;
+    const left = parseOperand(leftRaw);
+    if (typeof left === "string")
+      return { ok: false, error: left };
+    const right = parseOperand(rightRaw);
+    if (typeof right === "string")
+      return { ok: false, error: right };
+    if (left.kind !== "variable" && right.kind !== "variable") {
+      return { ok: false, error: `"${trimmed}" compares two constants: one side must be @column@.` };
+    }
+    for (const operand of [left, right]) {
+      if (operand.kind === "variable" && !variables.includes(operand.name)) {
+        variables.push(operand.name);
+      }
+    }
+    conditions.push({ left, operator: OPERATOR_ALIASES[token], right });
+  }
+  return { ok: true, logic: { conditions, joins: split.joins, variables } };
+}
+
+// language/move-facts.ts
+var SAGA = /^%%workflow\s+(\w+)\s+entity:\s*(\w+)\s+kind:\s*saga\b.*\btrigger:\s*rule\b/;
+var RULE = /^%%rule\s+(\w+)\s+on\s+(\w+)\b/;
+var STEP = /^%%step\s+\w+\s+(\w+)\b(.*)$/;
+var ACTION = /^%%action\s+\w+\s+trigger-workflow\b.*\bworkflow:\s*(\w+)\s*$/;
+var SECTION_START = /^(?:%%(?:meta\s+name:|workflow\b|rule\b|field\b|section\b|rbac\b|report\b|entity\b|enum\b|category\b|index\b|hook\b|jdm-graph\b)|%% -{2,}|erDiagram\b|stateDiagram(?:-v2)?\b)/;
+var FIELD_HELP = /^(\s*%%field\s+\w+\.\w+_at\s+help:\s*)When the move to (.+?) was recorded on this (.+?)\. Recording it moves .+?: the workflows set the status, which nobody changes by hand\.\s*$/;
+var SECTION_HELP = /help: The times that move this (.+?) along its lifecycle\. Recording one is how its status changes; the status itself is shown in the header\./;
+var HEADER = [
+  "%% ---- The state field is system-managed: each move is a rule and a saga ----",
+  "%% Nobody changes a state by hand. Recording the time a move depends on starts",
+  "%% the saga that sets the state; generated by the state-rule migration."
+];
+var HEADER_NOW = [
+  "%% ---- When each status was reached: stamped by the application ----",
+  "%% A record moves by an action button, along an edge its state diagram draws,",
+  "%% and the application writes the <state>_at time when it does."
+];
+function propsOf(rest) {
+  const props = {};
+  for (const m of rest.matchAll(/(\w+):\s*(\S+)/g))
+    props[m[1]] = m[2];
+  return props;
+}
+function blockEnd(lines, index) {
+  let end = index + 1;
+  while (end < lines.length && !SECTION_START.test(lines[end].trim()))
+    end++;
+  return end;
+}
+function blockStart(lines, index) {
+  let start = index;
+  while (start > 0 && /^%%meta\s+(?:name|kind):/.test(lines[start - 1].trim()))
+    start--;
+  return start;
+}
+function findRetiredMoves(source, stateFieldOf) {
+  const lines = source.split(`
+`);
+  const sections = [];
+  const retiredSagas = new Set;
+  for (let i = 0;i < lines.length; i++) {
+    const trimmedLine = lines[i].trim();
+    const saga = SAGA.exec(trimmedLine);
+    if (!saga)
+      continue;
+    if (/\bstatus:\s*\S/.test(trimmedLine))
+      continue;
+    const [, name = "", entity = ""] = saga;
+    const field = stateFieldOf(entity);
+    if (!field)
+      continue;
+    const end = blockEnd(lines, i);
+    let writesState = 0;
+    let other = false;
+    for (let j = i + 1;j < end; j++) {
+      const step = STEP.exec(lines[j].trim());
+      if (!step)
+        continue;
+      const [, type = "", rest = ""] = step;
+      const props = propsOf(rest);
+      const ownEntity = !props.entity || props.entity === entity;
+      if (type === "UpdateEntity" && ownEntity && props.field === field && props.value) {
+        writesState++;
+      } else if (type === "UpdateEntity" && ownEntity && /_at$/.test(props.field ?? "") && props.value === "null") {} else {
+        other = true;
+      }
+    }
+    if (writesState === 1 && !other) {
+      retiredSagas.add(name);
+      sections.push({ kind: "saga", name, entity, line: i + 1, start: blockStart(lines, i), end });
+    }
+  }
+  for (let i = 0;i < lines.length; i++) {
+    const rule = RULE.exec(lines[i].trim());
+    if (!rule)
+      continue;
+    const [, name = "", entity = ""] = rule;
+    const end = blockEnd(lines, i);
+    let actions = 0;
+    let other = false;
+    for (let j = i + 1;j < end; j++) {
+      const text = lines[j].trim();
+      if (!text.startsWith("%%action"))
+        continue;
+      actions++;
+      const action = ACTION.exec(text);
+      if (!action || !retiredSagas.has(action[1]))
+        other = true;
+    }
+    if (actions > 0 && !other) {
+      sections.push({ kind: "rule", name, entity, line: i + 1, start: blockStart(lines, i), end });
+    } else if (actions > 0) {
+      for (let j = i + 1;j < end; j++) {
+        const action = ACTION.exec(lines[j].trim());
+        if (!action || !retiredSagas.has(action[1]))
+          continue;
+        const actionName = /^%%action\s+(\w+)/.exec(lines[j].trim())?.[1] ?? action[1];
+        sections.push({ kind: "action", name: actionName, entity, line: j + 1, start: j, end: j + 1 });
+      }
+    }
+  }
+  const rewrites = [];
+  lines.forEach((text, index) => {
+    const field = FIELD_HELP.exec(text);
+    if (field) {
+      const [, head = "", state = "", noun = ""] = field;
+      rewrites.push({
+        line: index + 1,
+        replacement: `${head}When this ${noun} moved to ${state}. Stamped by the application when the move is made; nobody types it.`
+      });
+      return;
+    }
+    const section = SECTION_HELP.exec(text);
+    if (section) {
+      rewrites.push({
+        line: index + 1,
+        replacement: text.replace(SECTION_HELP, `help: When this ${section[1]} reached each status, stamped by the application as the record moves; the status itself is shown in the header.`)
+      });
+      return;
+    }
+    const header = HEADER.indexOf(text.trim());
+    if (header >= 0) {
+      rewrites.push({
+        line: index + 1,
+        replacement: text.replace(HEADER[header], HEADER_NOW[header])
+      });
+    }
+  });
+  sections.sort((a, b) => a.start - b.start);
+  return { sections, rewrites };
+}
+function sectionSpan(lines, index) {
+  const text = lines[index]?.trim() ?? "";
+  if (ACTION.test(text))
+    return { start: index, end: index + 1 };
+  if (!SAGA.test(text) && !RULE.test(text))
+    return;
+  return { start: blockStart(lines, index), end: blockEnd(lines, index) };
+}
+function rewriteStockHelp(lines) {
+  const { rewrites } = findRetiredMoves(lines.join(`
+`), () => {
+    return;
+  });
+  for (const rewrite of rewrites)
+    lines[rewrite.line - 1] = rewrite.replacement;
+  return rewrites.length;
+}
+
+// language/checker.ts
 var useColor = typeof process !== "undefined" && !process.env?.NO_COLOR && Boolean(process.stdout?.isTTY) && !hasFlag("--no-color");
 function hasFlag(name) {
   return typeof process !== "undefined" && (process.argv?.includes(name) ?? false);
@@ -8045,6 +8999,10 @@ class SourceIndex {
   lines;
   constructor(source) {
     this.lines = source.split(`
+`);
+  }
+  text() {
+    return this.lines.join(`
 `);
   }
   findLine(pattern, startLine = 1) {
@@ -8124,6 +9082,7 @@ function sagaPropsFromAutomation2(type, props) {
   }
   return out;
 }
+var RESERVED_PAGE_NAMES = new Set(["admin", "api", "auth", "dashboard", "index", "login"]);
 var PERSON_ROLE_COLUMN_NAMES = new Set([
   "assigned_to",
   "author_id",
@@ -8144,10 +9103,14 @@ function escapeRe(literal) {
 function isForeignKeyColumnName(columnName) {
   return columnName.endsWith("_id") || columnName.endsWith("_by");
 }
+var REPORTS_PER_ROLE = 50;
+var DASHBOARDS_PER_ROLE = 10;
+var DASHBOARD_MIN_REPORTS = 3;
 
 class CheckEngine {
   model;
   issues = [];
+  sagaWrites = new Set;
   src;
   def = loadLanguageDefinition();
   validHookTypes;
@@ -8163,7 +9126,18 @@ class CheckEngine {
     "description",
     "parent"
   ]);
-  validFieldKeys = new Set(["enum", "ui", "default", "min", "max", "help", "format"]);
+  validFieldKeys = new Set([
+    "enum",
+    "ui",
+    "default",
+    "min",
+    "max",
+    "help",
+    "format",
+    "display",
+    "readonly",
+    "mandatory"
+  ]);
   validMetaKeys = new Set(["name", "kind", "version", "entity", "stack", "description"]);
   validWorkflowKinds = new Set(["hook", "state", "saga"]);
   validTriggerSources = /^(cron:|webhook:|message:)/;
@@ -8207,6 +9181,7 @@ class CheckEngine {
     this.checkCategoryDirectives();
     this.checkLineItems();
     this.checkHelpText();
+    this.checkSectionDirectives();
     this.checkHooks();
     this.checkAutomationTriggers();
     this.checkGuards();
@@ -8216,14 +9191,16 @@ class CheckEngine {
     this.checkStepDirectives();
     this.checkActionDirectives();
     this.checkReportDirectives();
+    this.checkDashboardDirectives();
+    this.checkReportingCoverage();
     this.checkRuleDirectives();
     this.checkRules();
     this.checkWorkflows();
     this.checkCrossDocument();
-    const errors2 = this.issues.filter((i) => i.severity === "error").length;
+    const errors = this.issues.filter((i) => i.severity === "error").length;
     const warnings = this.issues.filter((i) => i.severity === "warning").length;
     const infos = this.issues.filter((i) => i.severity === "info").length;
-    return { issues: this.issues, errors: errors2, warnings, infos, ok: errors2 === 0 };
+    return { issues: this.issues, errors, warnings, infos, ok: errors === 0 };
   }
   entityToFkName(entityName) {
     const snake = entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase().replace(/^bus_/, "");
@@ -8311,6 +9288,12 @@ class CheckEngine {
         this.warn("EML102", `Entity "${entity.name}" has no attributes.`, {
           line: entityLine,
           hint: "The generator will auto-add  string id PK  if no id is present."
+        });
+      }
+      if (RESERVED_PAGE_NAMES.has(entity.name.toLowerCase())) {
+        this.warn("EML516", `Entity "${entity.name}" is named like a page of the generated application (/${entity.name.toLowerCase()}), and its list page would replace that page.`, {
+          line: entityLine,
+          hint: `Rename it (for example Institution${entity.name}) and the columns that point at it (institution_${entity.name.toLowerCase()}_id). The reserved names are ${[...RESERVED_PAGE_NAMES].join(", ")}.`
         });
       }
       this.checkAttributes(entity, entityLine);
@@ -8514,6 +9497,55 @@ class CheckEngine {
       }
     }
   }
+  checkFieldLogic(entityName, attrName, key, expression, lineNo) {
+    const parsed = parseLogic(expression);
+    if (!parsed.ok) {
+      this.error("EML156", `%%field ${entityName}.${attrName} ${key}: does not parse — ${parsed.error}`, {
+        line: lineNo,
+        hint: "Write Compiere logic: @column@=value, @column@!value (not equal), >, <, >=, <=, joined by & and | and read left to right. A Yes/No column is Y or N; an empty value is ''.",
+        context: expression
+      });
+      return;
+    }
+    const entity = this.model.entities.find((candidate) => candidate.name === entityName);
+    if (!entity)
+      return;
+    const columns = new Set(entity.attributes.map((attribute) => attribute.name));
+    for (const variable of parsed.logic.variables) {
+      if (!columns.has(variable)) {
+        this.error("EML157", `%%field ${entityName}.${attrName} ${key}: reads @${variable}@, which ${entityName} does not declare.`, {
+          line: lineNo,
+          hint: `Field logic reads the record being edited, so it can name only ${entityName}'s own columns: ${[...columns].join(", ")}.`
+        });
+      }
+    }
+    if (key === "display" && parsed.logic.variables.includes(attrName)) {
+      this.warn("EML158", `%%field ${entityName}.${attrName} display: depends on its own value.`, {
+        line: lineNo,
+        hint: "A field hidden by its own value can never be shown again from the form, because nobody can see it to change it. Make it depend on another column."
+      });
+    }
+  }
+  checkFieldLogicTargets(entityAttrMap) {
+    const stateFields = this.stateFields();
+    for (const { lineNo, text } of this.src.findAll(/^\s*%%field\b/)) {
+      const m = text.trim().match(/^%%field\s+(\w+)\.(\w+)\s+(display|readonly|mandatory)\s*:/);
+      if (!m)
+        continue;
+      const [entityName, attrName, key] = caps(m, 3);
+      if (!entityAttrMap.get(entityName)?.has(attrName))
+        continue;
+      const entity = this.model.entities.find((candidate) => candidate.name === entityName);
+      const isKey = entity?.primaryKey === attrName;
+      const isState = stateFields.get(entityName) === attrName;
+      if (!isKey && !isState)
+        continue;
+      this.warn("EML159", `%%field ${entityName}.${attrName} ${key}: is on ${isKey ? "the primary key" : "the state field"}, which is never an input.`, {
+        line: lineNo,
+        hint: isKey ? "The key is on no form. Put the logic on the column a person fills in." : "The state field is system-managed: shown read-only in the record header and written only by workflows. Logic may read it (@" + attrName + "@=…) on other fields, but cannot be placed on it."
+      });
+    }
+  }
   checkFieldDirectives() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
     const enumNames = new Set(this.model.enums.map((e) => e.name));
@@ -8521,7 +9553,7 @@ class CheckEngine {
     for (const e of this.model.entities) {
       entityAttrMap.set(e.name, new Set(e.attributes.map((a) => a.name)));
     }
-    const fieldLines = this.src.findAll(/^%%field\b/);
+    const fieldLines = this.src.findAll(/^\s*%%field\b/);
     for (const { lineNo, text } of fieldLines) {
       const m = text.trim().match(/^%%field\s+(\w+)\.(\w+)\s+([A-Za-z_]\w*)\s*:\s*(.+)$/);
       if (!m) {
@@ -8559,13 +9591,29 @@ class CheckEngine {
           hint: `Add  %%enum ${value.trim()}: value1, value2  before the erDiagram block.`
         });
       }
+      if (key === "enum" && enumNames.has(value.trim())) {
+        const entity = this.model.entities.find((e) => e.name === entityName);
+        const attr = entity?.attributes.find((a) => a.name === attrName);
+        const declared = this.model.enums.find((e) => e.name === value.trim());
+        const wordsOnly = declared?.values.some((v) => !/^-?\d+(\.\d+)?$/.test(v.trim()));
+        if (attr && wordsOnly && !["string", "text", "uuid"].includes(String(attr.type).toLowerCase())) {
+          this.warn("EML515", `Column "${entityName}.${attrName}" is ${attr.rawType} but is bound to enum "${value.trim()}", whose values are words — choosing one is refused (400).`, {
+            line: lineNo,
+            hint: `Declare the column as string, or bind an enum of numbers. If ${attrName} is a ranking, keep it string and let the enum order it.`
+          });
+        }
+      }
       if ((key === "min" || key === "max") && Number.isNaN(Number(value.trim()))) {
         this.warn("EML145", `%%field "${entityName}.${attrName}" has non-numeric ${key}: "${value.trim()}".`, {
           line: lineNo,
           hint: `${key}: should be a number, e.g.  ${key}: 0`
         });
       }
+      if (key === "display" || key === "readonly" || key === "mandatory") {
+        this.checkFieldLogic(entityName, attrName, key, value.trim(), lineNo);
+      }
     }
+    this.checkFieldLogicTargets(entityAttrMap);
     const boundFields = new Set(this.src.findAll(/^\s*%%field\s+\w+\.\w+\s+enum\s*:/).map(({ text }) => {
       const m = text.trim().match(/^%%field\s+(\w+)\.(\w+)/);
       return m ? `${m[1]}.${m[2]}` : "";
@@ -8724,6 +9772,36 @@ class CheckEngine {
         hint: `A category lists what the dashboard shows, and a child has no card — it is reached by opening a ${parent}. Remove "${child}" from the entities: list.`
       });
     }
+    const effective = new Map;
+    for (const [child, parent] of parents) {
+      const entity = declared.get(child);
+      if (!entity || parent === child || !declared.has(parent))
+        continue;
+      if (this.linkColumnTo(entity, parent))
+        effective.set(child, parent);
+    }
+    const depth = (name) => {
+      let levels = 0;
+      const seen = new Set;
+      for (let current = effective.get(name);current !== undefined && !seen.has(current); current = effective.get(current)) {
+        seen.add(current);
+        levels++;
+      }
+      return levels;
+    };
+    const children = new Map(effective);
+    for (const child of [...effective.keys()].sort((a, b) => depth(a) - depth(b))) {
+      const parent = effective.get(child);
+      const grandparent = children.get(parent);
+      if (!grandparent)
+        continue;
+      children.delete(child);
+      const link = this.linkColumnTo(declared.get(child), parent);
+      this.info("EML155", `"${child}" is a line item of "${parent}", which is itself a line item of "${grandparent}", so "${child}" is generated as a top-level entity.`, {
+        line: this.src.findLine(new RegExp(`^\\s*%%entity\\s+${child}\\s+parent\\s*:`)),
+        hint: `A line item's tab sits one level inside a top-level entity's window; there is no third level. ` + `"${child}" keeps its foreign key ${link?.name} but gets a window and a dashboard card of its own, and the ${parent} page does not list it. ` + `If that is what you want, remove the \`parent:\` directive and the note goes; ` + `to list it under "${grandparent}" instead, give it a foreign key to "${grandparent}" and declare \`parent: ${grandparent}\`.`
+      });
+    }
     const LINE_ITEM_NOUNS = /(Line|LineItem|Item|Detail|Entry|Row)s?$/;
     for (const entity of this.model.entities) {
       if (parents.has(entity.name))
@@ -8784,7 +9862,7 @@ class CheckEngine {
   }
   checkHelpText() {
     const entityHelp = new Map;
-    const fieldHelp2 = new Map;
+    const fieldHelp = new Map;
     for (const { lineNo, text } of this.src.findAll(/^\s*%%entity\b/)) {
       const m = text.trim().match(/^%%entity\s+(\w+)\s+(?:help|description)\s*:\s*(.+)$/);
       if (m?.[1] && m[2])
@@ -8793,7 +9871,7 @@ class CheckEngine {
     for (const { lineNo, text } of this.src.findAll(/^\s*%%field\b/)) {
       const m = text.trim().match(/^%%field\s+([\w.]+)\s+help\s*:\s*(.+)$/);
       if (m?.[1] && m[2])
-        fieldHelp2.set(m[1], { text: m[2], line: lineNo });
+        fieldHelp.set(m[1], { text: m[2], line: lineNo });
     }
     for (const entity of this.model.entities) {
       const entityLine = this.src.findLine(new RegExp(`^\\s*${entity.name}\\s*\\{`));
@@ -8812,7 +9890,7 @@ class CheckEngine {
           });
         }
       }
-      const undocumented = entity.attributes.filter((attribute) => !MANAGED_COLUMN_NAMES.has(attribute.name.toLowerCase())).filter((attribute) => !attribute.isPrimaryKey).filter((attribute) => !fieldHelp2.has(`${entity.name}.${attribute.name}`)).map((attribute) => attribute.name);
+      const undocumented = entity.attributes.filter((attribute) => !MANAGED_COLUMN_NAMES.has(attribute.name.toLowerCase())).filter((attribute) => !attribute.isPrimaryKey).filter((attribute) => !fieldHelp.has(`${entity.name}.${attribute.name}`)).map((attribute) => attribute.name);
       if (undocumented.length > 0) {
         const shown = undocumented.slice(0, 6).join(", ");
         const rest = undocumented.length > 6 ? `, and ${undocumented.length - 6} more` : "";
@@ -8822,7 +9900,7 @@ class CheckEngine {
         });
       }
       for (const attribute of entity.attributes) {
-        const field = fieldHelp2.get(`${entity.name}.${attribute.name}`);
+        const field = fieldHelp.get(`${entity.name}.${attribute.name}`);
         if (!field)
           continue;
         const why = this.restatedHelp(`${entity.name}.${attribute.name}`, field.text);
@@ -8832,6 +9910,115 @@ class CheckEngine {
             hint: `"${field.text.trim().slice(0, 60)}" repeats the column name. Say why the value matters, what is expected in it, and what happens downstream — a reference column should say what the reference is *for*, not that it is one.`
           });
         }
+      }
+    }
+  }
+  restatedSectionHelp(name, text) {
+    const own = this.nameAsWords(name);
+    const body = text.trim().replace(/\.+$/, "").trim().toLowerCase().replace(/^(the|all)\s+/, "").replace(/\s+(fields?|information|info|details|data|section|columns?)$/, "").trim();
+    return body === own || body === "";
+  }
+  checkSectionDirectives() {
+    const directives = parseSectionDirectives(this.src.text());
+    const declared = new Map(this.model.entities.map((entity) => [entity.name, entity]));
+    for (const directive of directives) {
+      if (directive.missing.length > 0) {
+        this.error("EML171", `%%section is missing ${directive.missing.map((key) => `\`${key}:\``).join(", ")}.`, {
+          line: directive.line,
+          hint: "Syntax: %%section entity: <Entity>; name: <Label>; help: <what this section is for>; rows: <column>, <column> | <column>. Rows are separated by `|`, the one or two columns of a row by `,`."
+        });
+        continue;
+      }
+      if (directive.entity && !declared.has(directive.entity)) {
+        this.error("EML173", `%%section names entity "${directive.entity}", which is not declared.`, {
+          line: directive.line,
+          hint: "Use the entity's name exactly as the erDiagram declares it — it is case-sensitive, like every other directive's."
+        });
+      }
+    }
+    const byEntity = sectionsByEntity(directives);
+    const stateFieldsByEntity = this.stateFields();
+    for (const entity of this.model.entities) {
+      const entityLine = this.src.findLine(new RegExp(`^\\s*${entity.name}\\s*\\{`));
+      const sections = byEntity.get(entity.name);
+      const stateField = stateFieldsByEntity.get(entity.name);
+      const columns = entity.attributes.filter((attribute) => !attribute.isPrimaryKey && attribute.name !== stateField);
+      if (!sections || sections.length === 0) {
+        if (columns.length === 0)
+          continue;
+        this.warn("EML170", `Entity "${entity.name}" declares no %%section, so its form is one flat list.`, {
+          line: entityLine,
+          hint: `Add \`%%section entity: ${entity.name}; name: <Label>; help: …; rows: <a>, <b> | <c>\` lines placing every column but the key — two per row, a row of one for text that needs the width. The sections are the form a person uses all day, and the model is the only place they are decided.`
+        });
+        continue;
+      }
+      const known = new Set(entity.attributes.map((attribute) => attribute.name));
+      const key = entity.attributes.find((attribute) => attribute.isPrimaryKey)?.name;
+      const placed = new Set;
+      for (const section of sections) {
+        if (!section.help) {
+          this.warn("EML177", `%%section "${entity.name}.${section.name}" has no help:.`, {
+            line: section.lines[0],
+            hint: "Add `help: …` — what this part of the form is for, and what has to be true before it is complete. It is printed under the section's heading."
+          });
+        } else if (this.restatedSectionHelp(section.name, section.help)) {
+          this.warn("EML177", `%%section "${entity.name}.${section.name}" help: restates its name.`, {
+            line: section.lines[0],
+            hint: `"${section.help.trim().slice(0, 60)}" repeats the heading. Say what the person filling it in is doing there.`
+          });
+        }
+      }
+      for (const directive of directives) {
+        if (directive.entity !== entity.name || !directive.rows)
+          continue;
+        for (const row of directive.rows) {
+          if (row.length > 2) {
+            this.error("EML174", `%%section row "${row.join(", ")}" of ${entity.name} has ${row.length} columns; a row holds one or two.`, {
+              line: directive.line,
+              hint: "The form is a two-column grid. Split the row with `|` — pair what is filled in together, and give a long column a row of its own."
+            });
+          }
+          for (const column of row) {
+            if (column === key) {
+              this.error("EML176", `%%section places "${entity.name}.${column}", the primary key.`, {
+                line: directive.line,
+                hint: "The key is a generated uuid that no form shows. Leave it out of every row."
+              });
+              continue;
+            }
+            if (!known.has(column)) {
+              const near = [...known].find((name) => name.toLowerCase() === column.toLowerCase().replace(/\s+/g, "_"));
+              this.error("EML176", `%%section places "${entity.name}.${column}", which ${entity.name} does not declare.`, {
+                line: directive.line,
+                hint: near ? `Did you mean \`${near}\`? Rows name columns exactly as the erDiagram declares them.` : `Rows name columns of ${entity.name} exactly as the erDiagram declares them: ${[...known].filter((name) => name !== key).join(", ")}.`
+              });
+              continue;
+            }
+            if (column === stateField) {
+              this.warn("EML178", `%%section places "${entity.name}.${column}", the state field, in the form body.`, {
+                line: directive.line,
+                hint: `Remove ${column} from the row. The state is shown read-only in the header of ${entity.name}'s form and as a column of its list, and only background workflows change it — a field in the body would offer a change nobody may make.`
+              });
+              continue;
+            }
+            if (placed.has(column)) {
+              this.warn("EML175", `"${entity.name}.${column}" is placed in two %%section rows.`, {
+                line: directive.line,
+                hint: "A field appears once on a form. The first placement is used; remove this one."
+              });
+              continue;
+            }
+            placed.add(column);
+          }
+        }
+      }
+      const unplaced = columns.map((attribute) => attribute.name).filter((name) => !placed.has(name));
+      if (unplaced.length > 0) {
+        const last = sections[sections.length - 1];
+        this.warn("EML172", `${entity.name} leaves ${unplaced.length} column${unplaced.length === 1 ? "" : "s"} out of every %%section: ${unplaced.join(", ")}.`, {
+          line: last?.lines[last.lines.length - 1],
+          hint: `Place ${unplaced.join(", ")} in the row ${unplaced.length === 1 ? "it belongs" : "they belong"} to. Unplaced columns are generated into a collapsed "${UNPLACED_SECTION}" section at the end of the form, which nobody designed.`
+        });
       }
     }
   }
@@ -8884,6 +10071,21 @@ class CheckEngine {
       }
     }
   }
+  stateFields() {
+    const fields = new Map;
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity)
+        continue;
+      const entity = this.model.entities.find((candidate) => candidate.name === wf.entity);
+      const field = entity && stateFieldOf(entity.attributes.map((attribute) => attribute.name));
+      if (field)
+        fields.set(wf.entity, field);
+    }
+    return fields;
+  }
+  finalStates(entity) {
+    return this.model.workflows.filter((wf) => wf.entity === entity && wf.kind === "state").flatMap((wf) => wf.transitions.filter((t) => t.to === "[*]").map((t) => t.from));
+  }
   checkRbac() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
     const crudOps = new Set([
@@ -8905,20 +10107,22 @@ class CheckEngine {
       "all",
       "any"
     ]);
-    const eventsFor = (entity) => {
-      const events = new Set;
+    const movesOf = (entity) => {
+      const moves = [];
       for (const wf of this.model.workflows) {
         if (wf.entity !== entity || wf.kind !== "state")
           continue;
         for (const t of wf.transitions) {
-          if (t.event)
-            events.add(t.event.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+          if (t.from === "[*]" || t.to === "[*]")
+            continue;
+          moves.push({ workflow: wf.name, from: t.from, to: t.to, event: t.event });
         }
       }
-      return events;
+      return moves;
     };
+    const guarded = new Set;
     for (const { lineNo, text } of this.src.findAll(/^\s*%%rbac\b/)) {
-      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*]\w*)\s*$/);
+      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/);
       if (!m) {
         this.error("EML210", `Invalid %%rbac syntax: "${text.trim()}"`, {
           line: lineNo,
@@ -8952,18 +10156,44 @@ class CheckEngine {
       const lower = target.toLowerCase();
       if (crudOps.has(lower))
         continue;
-      const events = eventsFor(entity);
-      if (events.has(lower))
+      const moves = movesOf(entity);
+      const arrow = /^(\w+)->(\w+)$/.exec(target);
+      const named = arrow ? moves.filter((move) => move.from === arrow[1] && move.to === arrow[2]) : moves.filter((move) => move.event && normalizeEvent(move.event) === normalizeEvent(target));
+      if (named.length > 0) {
+        for (const move of named)
+          guarded.add(`${entity}:${move.from}->${move.to}`);
         continue;
-      this.error("EML214", `%%rbac on ${entity}.${target} names neither a CRUD operation nor a transition of ${entity}.`, {
+      }
+      const finals = this.finalStates(entity);
+      if (arrow && finals.includes(arrow[1]) && arrow[2].toLowerCase() === LIFECYCLE_DRAFT)
+        continue;
+      if (!arrow && normalizeEvent(target) === REOPEN_EVENT && finals.length > 0)
+        continue;
+      const offered = [
+        ...new Set(moves.map((move) => move.event ? normalizeEvent(move.event) : `${move.from}->${move.to}`))
+      ];
+      this.error("EML214", `%%rbac on ${entity}.${target} names neither a CRUD operation nor a move of ${entity}.`, {
         line: lineNo,
-        hint: events.size ? `Use one of create, read, update, delete, * — or a transition of ${entity}: ${[...events].join(", ")}.` : `Use one of create, read, update, delete, * — ${entity} declares no state machine to take a transition from.`
+        hint: offered.length ? `Use one of create, read, update, delete, * — or a move of ${entity}: ${offered.join(", ")}, ${REOPEN_EVENT}.` : `Use one of create, read, update, delete, * — ${entity} declares no state machine to move along.`
+      });
+    }
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity || !entityNames.has(wf.entity))
+        continue;
+      const open = movesOf(wf.entity).filter((move) => move.workflow === wf.name && !guarded.has(`${wf.entity}:${move.from}->${move.to}`));
+      if (open.length === 0)
+        continue;
+      const names = open.map((move) => move.event ? normalizeEvent(move.event) : `${move.from}->${move.to}`);
+      this.info("EML511", `${open.length} move${open.length === 1 ? "" : "s"} of "${wf.name}" ${open.length === 1 ? "is" : "are"} open to anyone who may update ${wf.entity}: ${[...new Set(names)].join(", ")}.`, {
+        line: this.src.findLine(new RegExp(`^%%workflow\\s+${wf.name}\\b`)),
+        hint: `To limit a button to the roles that own it, add  %%rbac role:<role> on ${wf.entity}.<move>  — the move is its event, or from->to for an edge with no label.`
       });
     }
   }
   checkReportDirectives() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
     const seen = new Map;
+    const byTitle = new Map;
     for (const report of this.model.reports) {
       const lineNo = this.src.findLine(new RegExp(`%%report\\s+${report.name}\\b`));
       const previous = seen.get(report.name);
@@ -8974,6 +10204,16 @@ class CheckEngine {
         });
       }
       seen.set(report.name, lineNo ?? 0);
+      const titleKey = report.title.trim().toLowerCase();
+      const sameTitle = byTitle.get(titleKey);
+      if (sameTitle !== undefined && sameTitle !== report.name) {
+        this.error("EML292", `%%report "${report.name}" has the same title as "${sameTitle}" ("${report.title}").`, {
+          line: lineNo,
+          hint: "The reporting platform keeps one report per title, so these would collapse into one. Retitle one of them."
+        });
+      } else if (sameTitle === undefined) {
+        byTitle.set(titleKey, report.name);
+      }
       if (!/^\s*(select|with)\b/i.test(report.sql)) {
         this.error("EML293", `%%report "${report.name}" does not begin with SELECT or WITH.`, {
           line: lineNo,
@@ -8990,6 +10230,134 @@ class CheckEngine {
         this.warn("EML295", `%%report "${report.name}" names entity "${report.entity}", which this model does not declare.`, {
           line: lineNo,
           hint: "entity: is used to group the report with its entity. Correct the name, or drop the key if the report spans several."
+        });
+      }
+    }
+  }
+  static roleKey(role) {
+    return role.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  }
+  static tableOf(entity) {
+    const isUpper = (ch) => ch !== undefined && ch >= "A" && ch <= "Z";
+    const isLower = (ch) => ch !== undefined && ch >= "a" && ch <= "z";
+    const isDigit = (ch) => ch !== undefined && ch >= "0" && ch <= "9";
+    let out = "";
+    for (let i = 0;i < entity.length; i++) {
+      const ch = entity[i];
+      const prev = entity[i - 1];
+      const next = entity[i + 1];
+      if (isUpper(ch) && i > 0 && (isLower(prev) || isDigit(prev) || isUpper(prev) && isLower(next))) {
+        out += "_";
+      }
+      out += ch;
+    }
+    return "bus_" + out.replace(/[\s-]+/g, "_").toLowerCase();
+  }
+  rbacReaders() {
+    const roles = new Map;
+    const readers = new Map;
+    for (const { text } of this.src.findAll(/^\s*%%rbac\b/)) {
+      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/);
+      if (!m)
+        continue;
+      const [roleExpr, entity, target] = caps(m, 3);
+      const named = roleExpr.split("|").map((part) => part.trim().replace(/^role:/i, "").trim()).filter(Boolean);
+      for (const role of named)
+        roles.set(CheckEngine.roleKey(role), role);
+      if (["read", "*", "all", "any"].includes(target.toLowerCase())) {
+        const set = readers.get(entity) ?? new Set;
+        for (const role of named)
+          set.add(CheckEngine.roleKey(role));
+        readers.set(entity, set);
+      }
+    }
+    return { roles, readers };
+  }
+  checkDashboardDirectives() {
+    const { roles } = this.rbacReaders();
+    const reportNames = new Set(this.model.reports.map((r) => r.name));
+    const seen = new Set;
+    const byTitle = new Map;
+    for (const dashboard of this.model.dashboards) {
+      const lineNo = this.src.findLine(new RegExp(`%%dashboard\\s+${dashboard.name}\\b`));
+      const at = lineNo === undefined ? {} : { line: lineNo };
+      if (seen.has(dashboard.name)) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" is declared more than once.`, {
+          ...at,
+          hint: "Dashboard names are keys, as report names are. Give the second one its own name."
+        });
+      }
+      seen.add(dashboard.name);
+      const titleKey = dashboard.title.trim().toLowerCase();
+      const sameTitle = byTitle.get(titleKey);
+      if (sameTitle !== undefined && sameTitle !== dashboard.name) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" has the same title as "${sameTitle}" ("${dashboard.title}").`, {
+          ...at,
+          hint: "The reporting platform keeps one dashboard per title, so these would collapse into one. Retitle one of them."
+        });
+      } else if (sameTitle === undefined) {
+        byTitle.set(titleKey, dashboard.name);
+      }
+      if (dashboard.reports.length === 0) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" names no reports.`, {
+          ...at,
+          hint: "Add reports: <report-name>, <report-name>, … — the %%report directives it shows."
+        });
+      }
+      for (const name of dashboard.reports) {
+        if (!reportNames.has(name)) {
+          this.error("EML297", `%%dashboard "${dashboard.name}" lists "${name}", which is not a %%report.`, {
+            ...at,
+            hint: "Correct the name, or declare the %%report before listing it."
+          });
+        }
+      }
+      if (!dashboard.role) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" names no role.`, {
+          ...at,
+          hint: "Add role: <role> — a role declared by a %%rbac line. A dashboard belongs to the role that opens it."
+        });
+      } else if (roles.size > 0 && !roles.has(CheckEngine.roleKey(dashboard.role))) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" is for role "${dashboard.role}", which no %%rbac line names.`, {
+          ...at,
+          hint: `Declared roles: ${[...roles.values()].join(", ")}.`
+        });
+      }
+    }
+  }
+  checkReportingCoverage() {
+    const { roles, readers } = this.rbacReaders();
+    if (roles.size === 0)
+      return;
+    const entityOfTable = new Map;
+    for (const e of this.model.entities)
+      entityOfTable.set(CheckEngine.tableOf(e.name), e.name);
+    const canRun = (roleKey, sql) => {
+      if (roleKey === "administrator")
+        return true;
+      for (const table of sql.toLowerCase().match(/\bbus_[a-z0-9_]+/g) ?? []) {
+        const entity = entityOfTable.get(table);
+        if (!entity)
+          continue;
+        const allowed = readers.get(entity);
+        if (allowed && allowed.size > 0 && !allowed.has(roleKey))
+          return false;
+      }
+      return true;
+    };
+    for (const [roleKey, role] of roles) {
+      if (roleKey === "administrator")
+        continue;
+      const charted = this.model.reports.filter((r) => r.chart && canRun(roleKey, r.sql)).length;
+      if (charted < REPORTS_PER_ROLE) {
+        this.warn("EML298", `Role "${role}" can run ${charted} charted %%report directives; the minimum is ${REPORTS_PER_ROLE} reports and ${REPORTS_PER_ROLE} charts per role.`, {
+          hint: `Write ${REPORTS_PER_ROLE - charted} more %%report … chart: … lines over tables ${role} may read — distinct business questions across the whole domain, not variants of one query (reporting section 7.2).`
+        });
+      }
+      const dashboards = this.model.dashboards.filter((d) => d.role && CheckEngine.roleKey(d.role) === roleKey && d.reports.length >= DASHBOARD_MIN_REPORTS).length;
+      if (dashboards < DASHBOARDS_PER_ROLE) {
+        this.warn("EML299", `Role "${role}" has ${dashboards} dashboards of at least ${DASHBOARD_MIN_REPORTS} reports; the minimum is ${DASHBOARDS_PER_ROLE} per role.`, {
+          hint: `Add ${DASHBOARDS_PER_ROLE - dashboards} more %%dashboard <name> title: <T> role: ${role} reports: <report>, <report>, <report> lines — one per job ${role} does (reporting section 7.2).`
         });
       }
     }
@@ -9110,6 +10478,41 @@ class CheckEngine {
           hint: `Declare "${entityName}" in the erDiagram section.`
         });
       }
+      this.checkWorkflowStatus(text.trim(), lineNo, name, entityName, kind);
+    }
+  }
+  checkWorkflowStatus(text, lineNo, name, entityName, kind) {
+    const raw = text.match(/\bstatus:\s*(\S+)/)?.[1];
+    if (raw === undefined)
+      return;
+    const status = stateToken(raw);
+    const machines = this.model.workflows.filter((wf) => wf.entity === entityName && wf.kind === "state");
+    const edges = machines.flatMap((wf) => wf.transitions);
+    const states = new Set(edges.flatMap((t) => [t.from, t.to]).filter((state) => state !== "[*]"));
+    const known = [...states].map((state) => [stateToken(state), state]);
+    if (machines.length === 0 || !known.some(([token]) => token === status)) {
+      this.error("EML243", machines.length === 0 ? `%%workflow "${name}" is bound to status "${raw}", but ${entityName} has no status machine.` : `%%workflow "${name}" is bound to status "${raw}", which ${entityName}'s status machine does not draw.`, {
+        line: lineNo,
+        hint: machines.length === 0 ? `An entity with no status machine has Draft and Final only, and its workflows already run on the way to Final. Remove "status:", or draw a kind: state workflow for ${entityName}.` : `States drawn: ${known.map(([, state]) => state).join(", ")}.`,
+        context: text
+      });
+      return;
+    }
+    const updateStarted = kind === "hook" ? this.model.workflows.filter((wf) => wf.name === name && wf.kind === "hook").every((wf) => wf.hooks.every((hook) => /update/i.test(hook.type))) : kind === "saga" && /\boperation:\s*UPDATE\b/i.test(text) && !/\btrigger:\s*rule\b/.test(text);
+    if (!updateStarted) {
+      this.error("EML244", `%%workflow "${name}" is bound to status "${raw}" but is not started by an update.`, {
+        line: lineNo,
+        hint: kind === "saga" ? "A status-bound saga needs  trigger: automatic operation: UPDATE  — a move is an update." : "A status-bound hook workflow may carry beforeUpdate and afterUpdate hooks only.",
+        context: text
+      });
+    }
+    const entered = edges.some((t) => t.from !== "[*]" && stateToken(t.to) === status);
+    if (!entered) {
+      this.warn("EML245", `%%workflow "${name}" is bound to status "${raw}", which no button moves a record into.`, {
+        line: lineNo,
+        hint: `Only an arrow  <state> --> ${raw}  makes a move; the first state is entered by creating the record.`,
+        context: text
+      });
     }
   }
   checkActionDirectives() {
@@ -9141,9 +10544,9 @@ class CheckEngine {
           hint: 'Add a condition, e.g. when: severity == "critical". Use when: true to say "always" on purpose.'
         });
       }
-      const missing2 = contract.required.filter((key) => !has(key));
-      if (missing2.length > 0) {
-        this.error("EML283", `%%action "${name}" (${typeName}) is missing: ${missing2.join(", ")}.`, {
+      const missing = contract.required.filter((key) => !has(key));
+      if (missing.length > 0) {
+        this.error("EML283", `%%action "${name}" (${typeName}) is missing: ${missing.join(", ")}.`, {
           line: lineNo,
           hint: `${typeName} requires ${contract.required.join(", ")}.`
         });
@@ -9181,11 +10584,14 @@ class CheckEngine {
       }
     }
     const triggered = new Set(this.src.findAll(/^\s*%%action\b/).map(({ text }) => text.match(/\bworkflow:\s*(\S+)/)?.[1]).filter((name) => !!name));
+    const drawnRules = this.src.findAll(/^\s*%%(?:jdm-graph|decision-table)\s/).map(({ text }) => text);
     for (const { lineNo, text } of this.src.findAll(/^%%workflow\b/)) {
       const m = text.match(/^%%workflow\s+(\w+)[^\n]*kind:\s*saga/);
       if (!m || !/\btrigger:\s*rule\b/.test(text))
         continue;
       if (triggered.has(m[1]))
+        continue;
+      if (drawnRules.some((line) => new RegExp(`\\b${m[1]}\\b`).test(line)))
         continue;
       this.warn("EML286", `Saga "${m[1]}" is rule-triggered but no %%action names it.`, {
         line: lineNo,
@@ -9230,24 +10636,28 @@ class CheckEngine {
           });
         }
         const has = (key) => (props[key] ?? "").trim().length > 0;
-        const missing2 = [];
+        if (typeName === "UpdateEntity" && has("field") && has("value")) {
+          const target = (props.entity ?? section.entity).trim();
+          this.sagaWrites.add(`${target}.${props.field.trim()}=${props.value.trim()}`);
+        }
+        const missing = [];
         for (const key of contract.required ?? []) {
           if (!has(key))
-            missing2.push(key);
+            missing.push(key);
         }
         for (const group of contract.oneOf ?? []) {
           if (!group.some((key) => has(key)))
-            missing2.push(`one of ${group.join(" / ")}`);
+            missing.push(`one of ${group.join(" / ")}`);
         }
         if (typeName === "Formula" && has("operation")) {
           const extra = contract.perOperation?.[props.operation.trim()]?.required ?? [];
           for (const key of extra) {
             if (!has(key))
-              missing2.push(key);
+              missing.push(key);
           }
         }
-        if (missing2.length > 0) {
-          this.error("EML262", `%%step ${nodeId} (${typeName}) is missing: ${missing2.join(", ")}.`, {
+        if (missing.length > 0) {
+          this.error("EML262", `%%step ${nodeId} (${typeName}) is missing: ${missing.join(", ")}.`, {
             line: lineNo,
             hint: `${typeName} requires ${(contract.required ?? []).join(", ") || "no fixed properties"}. See spec/03-workflows.md.`
           });
@@ -9294,6 +10704,31 @@ class CheckEngine {
             });
           }
         }
+        if (typeName === "CreateEntity" && has("fields") && entityProp) {
+          let named;
+          try {
+            const parsed = JSON.parse(props.fields);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              named = new Set(Object.keys(parsed).map((key) => key.trim()));
+            }
+          } catch {
+            named = undefined;
+          }
+          const wanted = entityProp.toLowerCase().replace(/^bus_/, "");
+          const target = this.model.entities.find((entity) => {
+            const snake = entity.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase();
+            return entity.name.toLowerCase() === wanted || snake === wanted;
+          });
+          if (named && target) {
+            const missing = target.attributes.filter((attribute) => attribute.required && attribute.isForeignKey && !attribute.isPrimaryKey && !named.has(attribute.name)).map((attribute) => attribute.name);
+            if (missing.length > 0) {
+              this.warn("EML514", `%%step ${nodeId} (CreateEntity ${target.name}) leaves required reference${missing.length > 1 ? "s" : ""} ${missing.join(", ")} unset, so the insert is refused.`, {
+                line: lineNo,
+                hint: `Add ${missing.map((name) => `"${name}"`).join(", ")} to fields (a column of the triggering record, or a variable an earlier CreateEntity published with as:), or mark the column OPTIONAL in the erDiagram.`
+              });
+            }
+          }
+        }
         if (typeName === "Decision" && has("decisionTable")) {
           try {
             const table = JSON.parse(props.decisionTable);
@@ -9334,6 +10769,18 @@ class CheckEngine {
             hint: "Set targetSource to a context key holding the row id, or targetField to a foreign key column. The executor refuses this rather than guessing a row."
           });
         }
+        if ((typeName === "UpdateEntity" || typeName === "DeleteEntity") && entityProp && !has("targetSource") && has("targetField") && props.targetField.trim() !== "id") {
+          const wanted = entityProp.toLowerCase().replace(/^bus_/, "");
+          const target = this.model.entities.find((candidate) => candidate.name.toLowerCase() === wanted || candidate.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() === wanted);
+          const column = props.targetField.trim();
+          if (target && !target.attributes.some((attribute) => attribute.name === column)) {
+            const ownColumn = trigger?.attributes.some((attribute) => attribute.name === column);
+            this.error("EML275", `%%step ${nodeId} (${typeName}) matches ${target.name}.${column}, which ${target.name} does not declare.`, {
+              line: lineNo,
+              hint: ownColumn ? `${column} is a column of the record that started the workflow. To reach the ${target.name} it names, write  targetSource: ${column}  (and drop targetField, which defaults to id).` : `targetField is a column of ${target.name} matched against the triggering record's id — a foreign key on ${target.name} pointing back at it. To reach a ${target.name} the triggering record names, use targetSource with that column.`
+            });
+          }
+        }
         const reference = props.targetSource?.trim();
         if (reference && !published.has(reference)) {
           this.warn("EML264", `%%step ${nodeId} reads "${reference}", which no earlier step publishes.`, {
@@ -9355,7 +10802,7 @@ class CheckEngine {
     }
   }
   sagaStepLines = new Set;
-  stepEntries(steps2) {
+  stepEntries(steps) {
     const order = [];
     const auto = new Map;
     const entryFor = (nodeId, lineNo, text) => {
@@ -9374,22 +10821,22 @@ class CheckEngine {
       order.push(created);
       return created;
     };
-    for (const { lineNo, text } of steps2) {
+    for (const { lineNo, text } of steps) {
       const line = text.trim();
       const typeLine = line.match(AUTO_TYPE_DIRECTIVE2);
       if (typeLine) {
-        const [, nodeId2 = "", typeName2 = "", rest2 = ""] = typeLine;
-        const entry = entryFor(nodeId2, lineNo, text);
-        entry.typeName = typeName2;
+        const [, nodeId = "", typeName = "", rest = ""] = typeLine;
+        const entry = entryFor(nodeId, lineNo, text);
+        entry.typeName = typeName;
         entry.lineNo = lineNo;
         entry.text = text;
-        Object.assign(entry.props, this.parseStepProps(rest2));
+        Object.assign(entry.props, this.parseStepProps(rest));
         continue;
       }
       const propLine = line.match(AUTO_PROP_DIRECTIVE2);
       if (propLine && propLine[2] !== "type") {
-        const [, nodeId2 = "", key = "", value = ""] = propLine;
-        entryFor(nodeId2, lineNo, text).props[key] = value.trim();
+        const [, nodeId = "", key = "", value = ""] = propLine;
+        entryFor(nodeId, lineNo, text).props[key] = value.trim();
         continue;
       }
       const match = line.match(/^%%step\s+([A-Za-z_]\w*)\s+([A-Za-z]\w*)\s*(.*)$/);
@@ -9803,6 +11250,63 @@ class CheckEngine {
         }
       }
     }
+    const stateFields = this.stateFields();
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity)
+        continue;
+      for (const state of new Set([...wf.states, ...wf.transitions.flatMap((t) => [t.from, t.to])])) {
+        if (!RESERVED_STATE_NAMES.includes(state))
+          continue;
+        this.error("EML509", `State workflow "${wf.name}" draws a state named "${state}", which the record lifecycle reserves.`, {
+          line: this.src.findLine(new RegExp(`^\\s*(?:\\w+\\s*-->\\s*)?${state}\\b`)),
+          hint: `Rename it (e.g. ${state === "final" ? "completed" : "failed"}). Every state that ends the diagram (x --> [*]) is already Final, and Error is where a record whose workflows failed goes.`
+        });
+      }
+    }
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity)
+        continue;
+      const initial = new Set(wf.transitions.filter((t) => t.from === "[*]").map((t) => t.to));
+      for (const state of initial) {
+        if (!wf.transitions.some((t) => t.from === state && t.to === "[*]"))
+          continue;
+        this.warn("EML513", `State workflow "${wf.name}" ends the diagram at its first state "${state}" (${state} --> [*]): every ${wf.entity} is Final and locked as soon as it is saved.`, {
+          line: this.src.findLine(new RegExp(`^\\s*${state}\\s*-->\\s*\\[\\*\\]`)),
+          hint: `Remove  ${state} --> [*] . A start state a record may leave is not an end state; if a record can be discarded from it, say so with a move to a state that ends the diagram (e.g. ${state} --> discarded).`
+        });
+      }
+    }
+    for (const section of findRetiredMoves(this.src.text(), (entity) => stateFields.get(entity)).sections) {
+      this.warn("EML512", section.kind === "saga" ? `Saga "${section.name}" only moves ${section.entity} to a state; an action button makes that move now.` : section.kind === "action" ? `Action "${section.name}" only starts a move saga for ${section.entity}; an action button makes that move now.` : `Rule "${section.name}" only starts move sagas for ${section.entity}; an action button makes those moves now.`, {
+        line: section.line,
+        hint: "Remove it — the fixer does. The <state>_at columns stay: the application stamps them when the record reaches the state."
+      });
+    }
+    for (const write of this.sagaWrites) {
+      const match = write.match(/^(\w+)\.(\w+)=(.+)$/);
+      if (!match)
+        continue;
+      const [, entity = "", field = "", value = ""] = match;
+      if (stateFields.get(entity) !== field)
+        continue;
+      const drawn = new Set;
+      for (const wf of this.model.workflows) {
+        if (wf.kind !== "state" || wf.entity !== entity)
+          continue;
+        for (const state of wf.states)
+          drawn.add(state);
+        for (const t of wf.transitions) {
+          drawn.add(t.from);
+          drawn.add(t.to);
+        }
+      }
+      if (!drawn.has(value)) {
+        this.warn("EML508", `A saga writes ${entity}.${field} = ${value}, a state ${entity}'s state machine does not draw.`, {
+          line: this.src.findLine(new RegExp(`UpdateEntity\\b.*\\bfield:\\s*${field}\\b.*\\bvalue:\\s*${value}\\b`)),
+          hint: `Draw ${value} in ${entity}'s stateDiagram-v2 with an edge into it, or write one of its states.`
+        });
+      }
+    }
     for (const entity of this.model.entities) {
       for (const attr of entity.attributes) {
         if (attr.enumRef && !enumNames.has(attr.enumRef)) {
@@ -9883,7 +11387,12 @@ var AUTO_FIXABLE_CODES = new Set([
   "EML114",
   "EML112",
   "EML103",
-  "EML287"
+  "EML287",
+  "EML172",
+  "EML174",
+  "EML175",
+  "EML178",
+  "EML512"
 ]);
 if (false) {}
 
@@ -9929,10 +11438,142 @@ function applyFix(lines, issue) {
       return fixMissingTerminalTransition(lines, issue, base);
     case "EML287":
       return fixCamelCaseRuleCondition(lines, issue, base);
+    case "EML172":
+      return fixUnplacedColumns(lines, issue, base);
+    case "EML174":
+      return fixWideRow(lines, issue, base);
+    case "EML175":
+      return fixDoublePlacement(lines, issue, base);
+    case "EML178":
+      return fixPlacedStateField(lines, issue, base);
+    case "EML512":
+      return fixRetiredMove(lines, issue, base);
     default:
       base.description = `No auto-fix strategy for ${issue.code}.`;
       return base;
   }
+}
+function rowsSpan(text) {
+  if (!/^\s*%%section\b/i.test(text))
+    return;
+  const open = text.match(/(^|;)\s*rows\s*:/i);
+  if (open?.index === undefined)
+    return;
+  const start = open.index + open[0].length;
+  const rest = text.slice(start);
+  const close = rest.match(/;\s*(entity|name|help|collapsed)\s*:/i);
+  return { start, end: close?.index === undefined ? text.length : start + close.index };
+}
+function rewriteRows(lines, issue, base, change, description) {
+  const index = (issue.line ?? 0) - 1;
+  const before = lines[index];
+  const span = before === undefined ? undefined : rowsSpan(before);
+  if (before === undefined || !span) {
+    base.description = `Line ${issue.line ?? "?"} is not a %%section with rows:; left alone.`;
+    return base;
+  }
+  const rows = change(parseRows(before.slice(span.start, span.end)));
+  if (!rows) {
+    base.description = `Nothing to change on line ${issue.line}.`;
+    return base;
+  }
+  const after = `${before.slice(0, span.start)} ${formatRows(rows)}${before.slice(span.end)}`;
+  lines[index] = after;
+  base.applied = true;
+  base.description = description;
+  base.changes = [{ lineNo: index + 1, before, after, action: "replace" }];
+  return base;
+}
+function fixUnplacedColumns(lines, issue, base) {
+  const match = issue.message.match(/^(\w+) leaves \d+ columns? out of every %%section: (.+)\.$/);
+  if (!match?.[2]) {
+    base.description = "Could not read the unplaced columns from the issue message.";
+    return base;
+  }
+  const columns = match[2].split(",").map((column) => column.trim()).filter(Boolean);
+  const added = [];
+  for (let i = 0;i < columns.length; i += 2)
+    added.push(columns.slice(i, i + 2));
+  return rewriteRows(lines, issue, base, (rows) => [...rows, ...added], `Placed ${columns.join(", ")} in ${match[1]}'s last section, two per row — move them to where they belong.`);
+}
+function fixWideRow(lines, issue, base) {
+  return rewriteRows(lines, issue, base, (rows) => {
+    if (!rows.some((row) => row.length > 2))
+      return;
+    return rows.flatMap((row) => {
+      const pairs = [];
+      for (let i = 0;i < row.length; i += 2)
+        pairs.push(row.slice(i, i + 2));
+      return pairs;
+    });
+  }, "Split a row of more than two columns into rows of two.");
+}
+function fixDoublePlacement(lines, issue, base) {
+  const match = issue.message.match(/^"\w+\.(\w+)" is placed in two %%section rows\.$/);
+  const column = match?.[1];
+  if (!column) {
+    base.description = "Could not read the column from the issue message.";
+    return base;
+  }
+  return rewriteRows(lines, issue, base, (rows) => {
+    let rowIndex = -1;
+    let colIndex = -1;
+    rows.forEach((row, r) => row.forEach((name, c) => {
+      if (name === column) {
+        rowIndex = r;
+        colIndex = c;
+      }
+    }));
+    if (rowIndex < 0)
+      return;
+    const next = rows.map((row) => [...row]);
+    next[rowIndex]?.splice(colIndex, 1);
+    return next.filter((row) => row.length > 0);
+  }, `Removed the second placement of "${column}".`);
+}
+function fixPlacedStateField(lines, issue, base) {
+  const match = issue.message.match(/^%%section places "\w+\.(\w+)", the state field/);
+  const column = match?.[1];
+  if (!column) {
+    base.description = "Could not read the state field from the issue message.";
+    return base;
+  }
+  const index = (issue.line ?? 0) - 1;
+  const before = lines[index];
+  const span = before === undefined ? undefined : rowsSpan(before);
+  if (before === undefined || !span) {
+    base.description = `Line ${issue.line ?? "?"} is not a %%section with rows:; left alone.`;
+    return base;
+  }
+  const rows = parseRows(before.slice(span.start, span.end)).map((row) => row.filter((name) => name !== column)).filter((row) => row.length > 0);
+  if (rows.length === 0) {
+    lines.splice(index, 1);
+    base.applied = true;
+    base.description = `Removed the section that placed only "${column}"; the state is shown in the form's header.`;
+    base.changes = [{ lineNo: index + 1, before, after: "", action: "delete" }];
+    return base;
+  }
+  return rewriteRows(lines, issue, base, () => rows, `Removed "${column}" from the section; the state is shown read-only in the form's header.`);
+}
+function fixRetiredMove(lines, issue, base) {
+  const index = (issue.line ?? 0) - 1;
+  const span = sectionSpan(lines, index);
+  if (!span) {
+    base.description = `Line ${issue.line ?? "?"} is not a move rule or saga; left alone.`;
+    return base;
+  }
+  const name = lines[index].trim().split(/\s+/)[1];
+  const removed = lines.splice(span.start, span.end - span.start);
+  const rewritten = rewriteStockHelp(lines);
+  base.applied = true;
+  base.description = `Removed ${name} (${removed.length} lines); an action button makes this move now.` + (rewritten ? ` Rewrote ${rewritten} help line${rewritten === 1 ? "" : "s"} on the <state>_at columns.` : "");
+  base.changes = removed.map((before, offset) => ({
+    lineNo: span.start + offset + 1,
+    before,
+    after: "",
+    action: "delete"
+  }));
+  return base;
 }
 function fixMissingMetaName(lines, _issue, base) {
   let name = "EML Model";
@@ -10314,8 +11955,8 @@ class ModelCheckError extends Error {
   issues;
   review;
   constructor(review) {
-    const errors2 = review.counts.errors;
-    super(`This model has ${errors2} error${errors2 === 1 ? "" : "s"}.`);
+    const errors = review.counts.errors;
+    super(`This model has ${errors} error${errors === 1 ? "" : "s"}.`);
     this.name = "ModelCheckError";
     this.issues = review.issues;
     this.review = review;
@@ -10501,6 +12142,9 @@ CREATE TABLE IF NOT EXISTS sys_field_group (
   sys_field_group_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sys_tab_id UUID REFERENCES sys_tab(sys_tab_id),
   name VARCHAR(100) NOT NULL,
+  description TEXT,
+  columns INTEGER DEFAULT 1,
+  is_collapsed_by_default BOOLEAN DEFAULT false,
   seq_no INTEGER DEFAULT 0,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -10530,11 +12174,33 @@ CREATE TABLE IF NOT EXISTS sys_field (
   display_logic TEXT,
   is_key BOOLEAN DEFAULT false,
   is_parent BOOLEAN DEFAULT false,
+  is_same_line BOOLEAN DEFAULT false,
+  column_span INTEGER,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(sys_tab_id, sys_column_id)
 );
+
+-- \`%%section\` layout. In the CREATE above for a new database, and added here
+-- for one a tab wrote before sections existed: the schema is re-run on every
+-- boot and only ever adds.
+ALTER TABLE sys_field_group ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE sys_field_group ADD COLUMN IF NOT EXISTS columns INTEGER DEFAULT 1;
+ALTER TABLE sys_field_group ADD COLUMN IF NOT EXISTS is_collapsed_by_default BOOLEAN DEFAULT false;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS is_same_line BOOLEAN DEFAULT false;
+-- X and Y Position are gone from the dictionary: a form is laid out by Sequence,
+-- Same Line and Column Span alone. A database written before that loses them here.
+ALTER TABLE sys_field DROP COLUMN IF EXISTS x_position;
+ALTER TABLE sys_field DROP COLUMN IF EXISTS y_position;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS column_span INTEGER;
+-- Field logic: Compiere's Display, Read Only and Mandatory Logic. Display is the
+-- field's alone; read-only and mandatory are the column's, repeated on the field.
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS display_logic TEXT;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS read_only_logic TEXT;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS mandatory_logic TEXT;
+ALTER TABLE sys_column ADD COLUMN IF NOT EXISTS read_only_logic TEXT;
+ALTER TABLE sys_column ADD COLUMN IF NOT EXISTS mandatory_logic TEXT;
 
 CREATE TABLE IF NOT EXISTS sys_category (
   sys_category_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -10647,6 +12313,38 @@ CREATE TABLE IF NOT EXISTS sys_transition_access (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- The \`%%report\` questions this application answers about itself.
+--
+-- These were served from \`model.json\` in memory until now, which made them the
+-- one part of the application that could be read and never changed: no table,
+-- so no create, update or delete. The NestJS stack has had \`sys_report\` since
+-- migration 018 and this is the same shape deliberately, down to the column
+-- names, so one model produces two applications that agree about what a report
+-- is.
+--
+-- \`sql_text\` rather than \`sql\`: the column holds a statement and \`sql\` is a
+-- reserved word in enough dialects that naming it that invites a quoting bug.
+-- Every read of it still goes through \`assertReadOnly\` at run time — the table
+-- is ordinary and an administrator can now write to it, so the runtime trusts
+-- what it is handed exactly as much as it did before, which is not at all.
+CREATE TABLE IF NOT EXISTS sys_report (
+  sys_report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(120) NOT NULL UNIQUE,
+  title VARCHAR(255) NOT NULL,
+  entity_name VARCHAR(100),
+  table_name VARCHAR(100),
+  chart VARCHAR(20),
+  x_axis VARCHAR(100),
+  y_axis VARCHAR(100),
+  help TEXT,
+  sql_text TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_report_table ON sys_report(table_name, sort_order);
 CREATE INDEX IF NOT EXISTS idx_sys_column_table ON sys_column(sys_table_id);
 CREATE INDEX IF NOT EXISTS idx_sys_field_tab ON sys_field(sys_tab_id);
 CREATE INDEX IF NOT EXISTS idx_sys_session_token ON sys_session(token);
@@ -10717,6 +12415,25 @@ CREATE TABLE IF NOT EXISTS rpt_session (
 
 CREATE INDEX IF NOT EXISTS idx_rpt_session_token ON rpt_session(token);
 CREATE INDEX IF NOT EXISTS idx_rpt_user_email ON rpt_user(email);
+
+-- What happened in the reporting application: sign-ins, report and chart runs
+-- (allowed or refused), and every administrator change to its users, roles and
+-- table grants. It is what the reporting side's System Logs screen reads, and
+-- the only record of who ran what — a refusal is logged as well as a run,
+-- because a role's access is only visible in what it was denied.
+CREATE TABLE IF NOT EXISTS rpt_activity_log (
+  rpt_activity_log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  occurred_at TIMESTAMPTZ DEFAULT NOW(),
+  rpt_user_id UUID,
+  email VARCHAR(255),
+  action VARCHAR(50) NOT NULL,
+  target VARCHAR(255),
+  outcome VARCHAR(20) NOT NULL,
+  detail TEXT,
+  duration_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_rpt_activity_log_at ON rpt_activity_log(occurred_at DESC);
 `,
   "boot.js": `/**
  * Starting the application.
@@ -11079,19 +12796,25 @@ async function boot(message) {
 }
 
 /**
- * Resolve PGlite: vendored copy, then the URL the page supplied, then the CDN.
+ * Where PGlite lives when it is not in \`vendor/pglite/\`: a URL the generator
+ * wrote in from \`--pglite-url\` (or the hosting page's own copy), or nothing.
+ */
+const PGLITE_URL = "";
+
+/**
+ * Resolve PGlite: the vendored copy, then the URL written in above, then the one
+ * the page supplied. Never a CDN.
  *
- * An application generated with \`--vendor-pglite\` carries its own copy and
- * never touches the network; one generated without it needs somewhere to get
- * ~10MB of WebAssembly, and saying so in the log beats failing silently on a
- * plane.
+ * \`appwithai-wasm generate\` vendors PGlite by default, and \`serve.mjs\` serves
+ * \`vendor/pglite/\` from the installed \`@electric-sql/pglite\` when it was not.
+ * Postgres is the application's database, so it is shipped with the
+ * application rather than fetched from a third party at the moment someone
+ * opens it — behind a firewall, offline, or on the day that host is down.
  */
 async function loadPGlite(base, supplied) {
-  const candidates = [
-    new URL("vendor/pglite/index.js", base).href,
-    supplied,
-    "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.5/dist/index.js",
-  ].filter(Boolean);
+  const candidates = [new URL("vendor/pglite/index.js", base).href, PGLITE_URL, supplied].filter(
+    Boolean
+  );
 
   const failures = [];
   for (const candidate of candidates) {
@@ -11116,7 +12839,12 @@ async function loadPGlite(base, supplied) {
       failures.push(\`\${candidate}: \${error.message}\`);
     }
   }
-  throw new Error(\`Could not load PGlite.\\n\${failures.join("\\n")}\`);
+  throw new Error(
+    "Could not load PostgreSQL (PGlite). This application does not carry its own copy.\\n" +
+      "Generate it with \`appwithai-wasm generate\` (which copies PGlite into vendor/pglite), " +
+      "or start it with \`npm install && npm start\`, which serves the installed package.\\n" +
+      failures.join("\\n")
+  );
 }
 
 async function respond(port, message) {
@@ -11445,17 +13173,34 @@ main().catch((error) => {
  *
  * This serves files. The application server is \`host/node-host.mjs\`, or the
  * browser itself.
+ *
+ * \`vendor/pglite/\` is served from the installed \`@electric-sql/pglite\` when the
+ * application was not generated with its own copy — an application downloaded
+ * from the in-browser generator, say, which cannot carry 17MB of WebAssembly in
+ * a shell script. \`npm install\` puts it there. Postgres is never fetched from a
+ * CDN.
  */
 
 import { createServer } from "node:http";
 import { existsSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const portIndex = process.argv.indexOf("--port");
 const PORT = Number(portIndex >= 0 ? process.argv[portIndex + 1] : process.env.PORT || 4000);
+
+/** The installed PGlite's \`dist/\`, or null when it is not installed. */
+function installedPglite() {
+  try {
+    return dirname(createRequire(join(ROOT, "package.json")).resolve("@electric-sql/pglite"));
+  } catch {
+    return null;
+  }
+}
+const PGLITE_DIST = installedPglite();
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -11485,6 +13230,11 @@ createServer(async (request, response) => {
       return;
     }
     if (existsSync(target) && statSync(target).isDirectory()) target = join(target, "index.html");
+    if (!existsSync(target) && PGLITE_DIST && relative.startsWith("vendor/pglite/")) {
+      const installed = normalize(join(PGLITE_DIST, relative.slice("vendor/pglite/".length)));
+      // Inside the package's dist/, the same as the ROOT check above.
+      if (installed.startsWith(PGLITE_DIST + sep)) target = installed;
+    }
     if (!existsSync(target)) {
       response.writeHead(404).end("Not found");
       return;
@@ -11539,6 +13289,7 @@ import { modelRoutes } from "./modules/model.routes.js";
 import { reportsRoutes } from "./modules/reports.routes.js";
 import { reportAuthRoutes } from "./modules/report-auth.routes.js";
 import { reportingRoutes } from "./modules/reporting.routes.js";
+import { reportAdminRoutes } from "./modules/report-admin.routes.js";
 
 const MIME = {
   html: "text/html; charset=utf-8",
@@ -11609,6 +13360,8 @@ export async function createServer(options) {
    */
   api.mount("/report-auth", reportAuthRoutes(model));
   api.mount("/reporting", reportingRoutes(model));
+  // Its administration: users, roles, table grants, the data source, the log.
+  api.mount("/report-admin", reportAdminRoutes(model));
 
   // \`/workflow-definitions\` is what the dictionary screens ask for; keeping the
   // alias here rather than duplicating handlers means one implementation.
@@ -11704,7 +13457,7 @@ export async function createServer(options) {
       if (asset) return asset;
       return errorResponse(notFound(\`Nothing at \${pathname}\`));
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, request.method);
     }
   }
 
@@ -11889,7 +13642,7 @@ export async function destroySession(db, token) {
  * would be a different application from the one the model described.
  *
  * The PGlite class is injected rather than imported: the Node host resolves it
- * from node_modules and the browser host from a vendored (or CDN) ES module,
+ * from node_modules and the browser host from a vendored ES module (never a CDN),
  * and this file has to be the same file in both.
  */
 
@@ -11919,6 +13672,22 @@ export class Database {
     return result.rows || [];
   }
 
+  /**
+   * Run one statement and name its NUMERIC columns.
+   *
+   * Postgres returns NUMERIC (and DECIMAL, which money compiles to) as a string
+   * so no digit is lost, and a string is indistinguishable from a text column
+   * holding digits — so a screen that wants to format a number has to be told
+   * which columns are numbers. OID 1700 is NUMERIC.
+   */
+  async queryWithNumeric(sql, params = []) {
+    const result = await this.pg.query(sql, params);
+    const numeric = (result.fields || [])
+      .filter((field) => field.dataTypeID === 1700)
+      .map((field) => field.name);
+    return { rows: result.rows || [], numeric };
+  }
+
   async one(sql, params = []) {
     const rows = await this.query(sql, params);
     return rows[0] || null;
@@ -11935,6 +13704,45 @@ export class Database {
   async exec(sql) {
     if (!sql || !sql.trim()) return;
     await this.pg.exec(sql);
+  }
+
+  /**
+   * Run \`work\` in one transaction, handing it a Database bound to it.
+   *
+   * Not for atomicity alone. On the browser's \`idb://\` store PGlite writes its
+   * files back to IndexedDB after every statement made outside a transaction,
+   * so a seed of a thousand statements is a thousand flushes — measured at over
+   * three minutes against about two seconds in memory. Inside a transaction the
+   * flush happens once, at the end.
+   */
+  async transaction(work) {
+    if (this.inTransaction || typeof this.pg.transaction !== "function") return work(this);
+    return this.pg.transaction(async (tx) => {
+      const bound = new Database(tx);
+      bound.inTransaction = true;
+      return work(bound);
+    });
+  }
+
+  /**
+   * Run \`work\`, and if it throws undo only what it did.
+   *
+   * A statement that fails inside a transaction aborts the whole transaction, so
+   * a caller that tolerates a failure — a sample row that breaks a constraint —
+   * needs a savepoint around it. Outside a transaction there is nothing to
+   * abort and \`work\` runs as it is.
+   */
+  async attempt(work) {
+    if (!this.inTransaction) return work();
+    await this.pg.exec("SAVEPOINT attempt");
+    try {
+      const result = await work();
+      await this.pg.exec("RELEASE SAVEPOINT attempt");
+      return result;
+    } catch (error) {
+      await this.pg.exec("ROLLBACK TO SAVEPOINT attempt");
+      throw error;
+    }
   }
 
   async close() {
@@ -12475,6 +14283,273 @@ export function test(source, scope = {}) {
 
 export { FUNCTIONS };
 `,
+  "server/lib/field-logic.js": `/**
+ * Field logic — Compiere's Display Logic, Read Only Logic and Mandatory Logic,
+ * for the browser application.
+ *
+ * The JavaScript twin of language/field-logic.ts, which is the one reading of
+ * the syntax (\`@column@=value\`, \`!\` for not equal, \`>\`, \`<\`, \`>=\`, \`<=\`, joined
+ * by \`&\` and \`|\` and read left to right). This runtime is plain JavaScript with
+ * no build step, so it carries its own copy; \`browser-runtime-field-logic.test.ts\`
+ * runs the same cases through both and fails if they disagree. Change the
+ * TypeScript first, then this.
+ *
+ * Imported by the server (bus.routes.js enforces mandatory and read-only logic
+ * on every write) and by the form (ui/views/entity-form.js shows, locks and
+ * requires fields as the record is edited) — one copy for both sides of the
+ * Service Worker.
+ */
+
+const OPERATOR_ALIASES = {
+  "=": "=",
+  "==": "=",
+  "!": "!",
+  "!=": "!",
+  "^": "!",
+  "<>": "!",
+  ">": ">",
+  "<": "<",
+  ">=": ">=",
+  "<=": "<="
+};
+const OPERATOR_TOKENS = ["!=", "<>", ">=", "<=", "==", "=", "!", "^", ">", "<"];
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function splitConditions(source) {
+  const parts = [];
+  const joins = [];
+  let current = "";
+  let quote = null;
+  let inVariable = false;
+  for (const ch of source) {
+    if (quote) {
+      current += ch;
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "@")
+      inVariable = !inVariable;
+    if (!inVariable && (ch === "&" || ch === "|")) {
+      parts.push(current);
+      joins.push(ch);
+      current = "";
+      continue;
+    }
+    if (!inVariable && (ch === "(" || ch === ")")) {
+      return "Parentheses are not supported: conditions are evaluated left to right.";
+    }
+    current += ch;
+  }
+  if (quote)
+    return "A quoted value is not closed.";
+  if (inVariable)
+    return "A variable is not closed: write it as @column@.";
+  parts.push(current);
+  return { parts, joins };
+}
+function parseOperand(raw) {
+  const text = raw.trim();
+  if (text === "")
+    return { kind: "literal", value: "" };
+  if (text.startsWith("@")) {
+    if (!text.endsWith("@") || text.length < 3)
+      return \`"\${text}" is not a variable: write @column@.\`;
+    const name = text.slice(1, -1).trim();
+    if (!VARIABLE_NAME.test(name))
+      return \`"\${text}" is not a column name.\`;
+    return { kind: "variable", name };
+  }
+  const first = text[0];
+  if (first === "'" || first === '"') {
+    if (text.length < 2 || text[text.length - 1] !== first)
+      return \`\${text} is not closed.\`;
+    return { kind: "literal", value: text.slice(1, -1) };
+  }
+  if (text.includes("@"))
+    return \`"\${text}" mixes a variable into a value.\`;
+  return { kind: "literal", value: text };
+}
+function splitComparison(text) {
+  let quote = null;
+  let inVariable = false;
+  for (let i = 0;i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === "@") {
+      inVariable = !inVariable;
+      continue;
+    }
+    if (inVariable)
+      continue;
+    for (const token of OPERATOR_TOKENS) {
+      if (text.startsWith(token, i)) {
+        return [text.slice(0, i), token, text.slice(i + token.length)];
+      }
+    }
+  }
+  return null;
+}
+export function parseLogic(source) {
+  const text = (source ?? "").trim();
+  if (!text)
+    return { ok: false, error: "The expression is empty." };
+  const split = splitConditions(text);
+  if (typeof split === "string")
+    return { ok: false, error: split };
+  const conditions = [];
+  const variables = [];
+  for (const part of split.parts) {
+    const trimmed = part.trim();
+    if (!trimmed)
+      return { ok: false, error: "A condition is missing beside & or |." };
+    const comparison = splitComparison(trimmed);
+    if (!comparison) {
+      return {
+        ok: false,
+        error: \`"\${trimmed}" has no comparison: write @column@=value, @column@!value, > or <.\`
+      };
+    }
+    const [leftRaw, token, rightRaw] = comparison;
+    const left = parseOperand(leftRaw);
+    if (typeof left === "string")
+      return { ok: false, error: left };
+    const right = parseOperand(rightRaw);
+    if (typeof right === "string")
+      return { ok: false, error: right };
+    if (left.kind !== "variable" && right.kind !== "variable") {
+      return { ok: false, error: \`"\${trimmed}" compares two constants: one side must be @column@.\` };
+    }
+    for (const operand of [left, right]) {
+      if (operand.kind === "variable" && !variables.includes(operand.name)) {
+        variables.push(operand.name);
+      }
+    }
+    conditions.push({ left, operator: OPERATOR_ALIASES[token], right });
+  }
+  return { ok: true, logic: { conditions, joins: split.joins, variables } };
+}
+export function contextValue(value) {
+  if (value === null || value === undefined)
+    return "";
+  if (value === true)
+    return "Y";
+  if (value === false)
+    return "N";
+  if (value instanceof Date)
+    return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+  if (typeof value === "object")
+    return JSON.stringify(value);
+  return String(value);
+}
+function asNumber(text) {
+  if (text.trim() === "")
+    return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+function compare(left, operator, right) {
+  const l = asNumber(left);
+  const r = asNumber(right);
+  const numeric = l !== null && r !== null;
+  switch (operator) {
+    case "=":
+      return numeric ? l === r : left === right;
+    case "!":
+      return numeric ? l !== r : left !== right;
+    case ">":
+      return numeric ? l > r : left > right;
+    case "<":
+      return numeric ? l < r : left < right;
+    case ">=":
+      return numeric ? l >= r : left >= right;
+    case "<=":
+      return numeric ? l <= r : left <= right;
+  }
+}
+function resolve(operand, record) {
+  return operand.kind === "variable" ? contextValue(record[operand.name]) : operand.value;
+}
+export function evaluateLogic(source, record, fallback = false) {
+  if (!source || !source.trim())
+    return fallback;
+  const parsed = parseLogic(source);
+  if (!parsed.ok)
+    return false;
+  const { conditions, joins } = parsed.logic;
+  let result = false;
+  conditions.forEach((condition, index) => {
+    const value = compare(resolve(condition.left, record), condition.operator, resolve(condition.right, record));
+    if (index === 0)
+      result = value;
+    else
+      result = joins[index - 1] === "&" ? result && value : result || value;
+  });
+  return result;
+}
+export function logicVariables(source) {
+  if (!source || !source.trim())
+    return [];
+  const parsed = parseLogic(source);
+  return parsed.ok ? parsed.logic.variables : [];
+}
+export function fieldLogicState(field, record) {
+  const displayed = field.is_displayed !== false && evaluateLogic(field.display_logic, record, true);
+  const readOnly = field.is_read_only === true || evaluateLogic(field.read_only_logic, record);
+  const mandatory = displayed && (field.is_mandatory === true || evaluateLogic(field.mandatory_logic, record));
+  return { displayed, readOnly, mandatory };
+}
+function isBlank(value) {
+  return value === null || value === undefined || String(value).trim() === "";
+}
+export function sameValue(a, b) {
+  if (isBlank(a) && isBlank(b))
+    return true;
+  const left = contextValue(a);
+  const right = contextValue(b);
+  if (left === right)
+    return true;
+  const l = asNumber(left);
+  const r = asNumber(right);
+  if (l !== null && r !== null)
+    return l === r;
+  if (/^\\d{4}-\\d{2}-\\d{2}/.test(left) && /^\\d{4}-\\d{2}-\\d{2}/.test(right)) {
+    const lt = Date.parse(left);
+    const rt = Date.parse(right);
+    if (!Number.isNaN(lt) && !Number.isNaN(rt))
+      return lt === rt;
+  }
+  return false;
+}
+export function logicViolations(fields, record, changes, stored) {
+  const errors = [];
+  for (const field of fields) {
+    const label = field.name || field.column_name;
+    if (field.mandatory_logic && field.mandatory_logic.trim()) {
+      const displayed = field.is_displayed !== false && evaluateLogic(field.display_logic, record, true);
+      if (displayed && evaluateLogic(field.mandatory_logic, record) && isBlank(record[field.column_name])) {
+        errors.push(\`\${label} is required when \${field.mandatory_logic.trim()}\`);
+      }
+    }
+    if (stored && field.read_only_logic && field.read_only_logic.trim() && Object.prototype.hasOwnProperty.call(changes, field.column_name) && !sameValue(changes[field.column_name], stored[field.column_name]) && evaluateLogic(field.read_only_logic, stored)) {
+      errors.push(\`\${label} is read-only when \${field.read_only_logic.trim()}\`);
+    }
+  }
+  return errors;
+}
+`,
   "server/lib/guards.js": `/**
  * Access control — what \`%%rbac\` compiled to, enforced.
  *
@@ -12567,33 +14642,6 @@ export async function checkOperationAccess(db, user, tableName, operation) {
   if (!holdsRole(user, rows.map((row) => row.role_name))) {
     throw forbidden(
       \`Your roles do not permit \${operation} on \${tableName} (requires \${[...new Set(rows.map((r) => r.role_name))].join(" or ")})\`
-    );
-  }
-}
-
-/**
- * Transition access, matched on the states a write crosses.
- *
- * A transition has no endpoint of its own — moving a record along an edge is an
- * ordinary status update — so the compiler stored the \`(from_state, to_state)\`
- * pair and the check happens where the update knows both ends. Both are kept
- * because one event can sit on several edges.
- */
-export async function checkTransitionAccess(db, user, tableName, before, after, statusColumn) {
-  if (!statusColumn) return;
-  const from = before ? before[statusColumn] : null;
-  const to = after ? after[statusColumn] : null;
-  if (!to || from === to) return;
-
-  const rows = await db.query(
-    \`SELECT role_name, transition FROM sys_transition_access
-      WHERE table_name = $1 AND from_state = $2 AND to_state = $3 AND is_active = true\`,
-    [tableName, String(from ?? ""), String(to)]
-  );
-  if (!rows.length) return;
-  if (!holdsRole(user, rows.map((row) => row.role_name))) {
-    throw forbidden(
-      \`Your roles do not permit the "\${rows[0].transition}" transition (\${from} to \${to})\`
     );
   }
 }
@@ -12781,7 +14829,60 @@ export function text(body, init = {}) {
  * in the user's own browser against the user's own data, so hiding the message
  * would only make the app harder to debug without protecting anyone.
  */
-export function errorResponse(error) {
+/** \`Key (account_number)=(ACC-1) already exists.\` → \`account number\` */
+function columnsFromDetail(detail) {
+  const named = /^Key \\(([^)]+)\\)=/.exec(detail ?? "");
+  return named ? named[1].split(/\\s*,\\s*/).map((column) => column.replace(/_/g, " ")).join(" and ") : null;
+}
+
+/**
+ * A database constraint violation, as the status it deserves.
+ *
+ * PGlite raises these as plain errors carrying Postgres's SQLSTATE, so without
+ * this every one was a 500 quoting the raw message: a duplicate account number
+ * told the caller the server had broken, and a malformed id leaked
+ * \`invalid input syntax for type uuid\`. The NestJS stack maps the same codes in
+ * its exception filter (http-exception.filter.ts.hbs), and this follows it so
+ * the two stacks answer a conflicting write the same way. Values are never
+ * echoed back — only column names — since the conflicting value can be someone
+ * else's data.
+ */
+function databaseError(error, method) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (!/^(23|22)/.test(code)) return null;
+  const columns = columnsFromDetail(error.detail);
+  const where = columns ? \` (\${columns})\` : "";
+  switch (code) {
+    case "23505":
+      return new HttpError(409, \`A record with the same value\${where} already exists.\`);
+    case "23503":
+      return method === "DELETE"
+        ? new HttpError(409, "This record is still referenced by other records.")
+        : new HttpError(400, \`A referenced record\${where} does not exist.\`);
+    case "23502": {
+      const field = error.column ? \` (\${String(error.column).replace(/_/g, " ")})\` : where;
+      return new HttpError(400, \`A required field\${field} was missing.\`);
+    }
+    case "23514":
+      return new HttpError(400, \`A value\${where} failed a database constraint.\`);
+    case "23P01":
+      return new HttpError(409, \`A record with an overlapping value\${where} already exists.\`);
+    case "22001":
+      return new HttpError(400, "A value was too long for its column.");
+    case "22P02":
+    case "22007":
+    case "22008":
+      return new HttpError(400, "A value was not valid for its column type.");
+    default:
+      return null;
+  }
+}
+
+export function errorResponse(error, method) {
+  if (!(error instanceof HttpError)) {
+    const mapped = databaseError(error, method);
+    if (mapped) error = mapped;
+  }
   const status = error instanceof HttpError ? error.status : 500;
   const body = {
     statusCode: status,
@@ -12991,6 +15092,100 @@ export async function labelsForRows(db, entity, rows) {
   return labels;
 }
 `,
+  "server/lib/lifecycle.js": `/**
+ * A record's lifecycle — Draft, its status flow, Final — and its moves.
+ *
+ * The JS twin of the NestJS stack's \`common/lifecycle.ts\`, read from the same
+ * data: \`model.lifecycle\` is the \`lifecycleTable\` that module is written from,
+ * so one model gives both stacks the same moves and the same lock.
+ *
+ * A record moves only when someone presses one of its moves: an edge its state
+ * diagram drew, or Reopen from the end of its flow back to Draft. Every end
+ * state is Final, and Final is locked. A record with no flow is never locked.
+ *
+ * Who may press a move is the model's \`%%rbac\` (\`model.rbac.transitions\`): a
+ * move it names belongs to those roles; one it does not is open to whoever may
+ * update the record; Reopen it does not name is the administrator's alone.
+ */
+
+import { holdsRole } from "./guards.js";
+
+export const LIFECYCLE_ERROR = "error";
+export const REOPEN_EVENT = "reopen";
+
+/** The lifecycle of a table, or null. */
+export function lifecycleOf(model, tableName) {
+  return model?.lifecycle?.[tableName] ?? null;
+}
+
+/** "draft" | "active" | "final" | "error". */
+export function phaseOf(lifecycle, value) {
+  const text = value == null ? "" : String(value);
+  if (text === LIFECYCLE_ERROR) return "error";
+  if (lifecycle.terminal.includes(text)) return "final";
+  if (text === "" || text === lifecycle.draft) return "draft";
+  return lifecycle.hasMachine ? "active" : "draft";
+}
+
+/** The end of a flow: Final, and locked until reopened. */
+export function isLocked(lifecycle, value) {
+  return !!lifecycle?.hasMachine && phaseOf(lifecycle, value) === "final";
+}
+
+/** Every move out of a value: the drawn edges, and Reopen from a locked end state. */
+export function movesFrom(lifecycle, value) {
+  const from = value == null ? "" : String(value);
+  const moves = lifecycle.edges
+    .filter((edge) => edge.from === from)
+    .map((edge) => ({ ...edge, kind: "move" }));
+  if (isLocked(lifecycle, from) && !moves.some((move) => move.to === lifecycle.draft)) {
+    moves.push({ from, to: lifecycle.draft, event: REOPEN_EVENT, label: "Reopen", kind: "reopen" });
+  }
+  return moves;
+}
+
+const oneToken = (text) => String(text ?? "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
+
+/** The move a request names, by its event or by the state it goes to. */
+export function findMove(lifecycle, value, wanted) {
+  const event = wanted.event ? oneToken(wanted.event) : "";
+  const moves = movesFrom(lifecycle, value);
+  if (event && wanted.to) return moves.find((move) => move.event === event && move.to === wanted.to);
+  if (event) {
+    const named = moves.filter((move) => move.event === event);
+    return named.length === 1 ? named[0] : undefined;
+  }
+  if (wanted.to) {
+    const reaching = moves.filter((move) => move.to === wanted.to);
+    return reaching.length === 1 ? reaching[0] : undefined;
+  }
+  return undefined;
+}
+
+/** The roles \`%%rbac\` gives this move, or [] when it names none. */
+export function moveRoles(model, tableName, move) {
+  const roles = new Set();
+  for (const rule of model?.rbac?.transitions || []) {
+    if (rule.tableName !== tableName) continue;
+    if ((rule.edges || []).some((edge) => edge.from === move.from && edge.to === move.to)) {
+      for (const role of rule.roles || []) roles.add(role);
+    }
+  }
+  return [...roles];
+}
+
+/**
+ * May this person press this move? \`mayUpdate\` answers the fallback for a move
+ * nobody restricted — whether they may update the record at all.
+ */
+export async function mayPress(user, model, tableName, move, mayUpdate) {
+  const roles = moveRoles(model, tableName, move);
+  if (user?.isAdmin) return { allowed: true, roles };
+  if (roles.length > 0) return { allowed: holdsRole(user, roles), roles };
+  if (move.kind === "reopen") return { allowed: false, roles: [] };
+  return { allowed: await mayUpdate(), roles: [] };
+}
+`,
   "server/lib/naming.js": `/**
  * Naming, kept identical to @appwithai/core/utils.
  *
@@ -13186,6 +15381,34 @@ export async function destroyReportSession(db, token) {
   if (token) await db.remove("rpt_session", { token });
 }
 `,
+  "server/lib/report-log.js": `/**
+ * The reporting application's activity log — \`rpt_activity_log\`.
+ *
+ * Written by the sign-in, by every report and chart run, and by every
+ * administrator change; read by the System Logs screen. A failure to write it
+ * is swallowed: the log records what happened, and losing a line of it must
+ * never be the reason a report did not run or a sign-in was refused.
+ *
+ * Nothing that could carry business data goes in \`detail\` — no row values, no
+ * passwords, and never a query's result. A refusal names the tables it refused,
+ * which is the one thing the reader needs to see.
+ */
+export async function logReportActivity(db, entry) {
+  try {
+    await db.insert("rpt_activity_log", {
+      rpt_user_id: entry.user?.id ?? null,
+      email: entry.user?.email ?? entry.email ?? null,
+      action: entry.action,
+      target: entry.target ?? null,
+      outcome: entry.outcome,
+      detail: entry.detail ?? null,
+      duration_ms: entry.durationMs ?? null,
+    });
+  } catch {
+    // Deliberately ignored — see above.
+  }
+}
+`,
   "server/lib/router.js": `/**
  * A pattern router over Web \`Request\`.
  *
@@ -13334,7 +15557,7 @@ export class Router {
       const result = await matched.route.handler(request, ctx);
       return result instanceof Response ? result : errorResponse(new Error("Handler returned no Response"));
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, request.method);
     }
   }
 }
@@ -13589,6 +15812,196 @@ function evaluateGraph(graph, record, columns) {
   return { results, trace };
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Graphs authored in the graph editor: nodes that carry \`content\`              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * True for a graph whose nodes *compute* — an expression, function or switch
+ * with real content, or a chain of more than one decision table.
+ *
+ * Everything else is a compiled \`%%action\` table or a drawn flowchart and keeps
+ * its existing path. Without this split the editor's graphs were read as prose:
+ * a function node was handed to \`interpretAction\` by its *name*, and decided
+ * whatever its label sounded like.
+ */
+function isComputedGraph(graph) {
+  const nodes = graph.nodes || [];
+  const computes = nodes.some(
+    (node) =>
+      (node.type === "expressionNode" ||
+        node.type === "functionNode" ||
+        node.type === "switchNode") &&
+      node.content !== undefined
+  );
+  const tables = nodes.filter((node) => node.type === "decisionTableNode");
+  // A column with a \`field\` is read against that field ("> 40" under \`discount\`);
+  // the older table path evaluates every cell as a whole-record expression, which
+  // is the convention only \`%%action\` tables use.
+  const fieldBased = tables.some((node) =>
+    (node.content?.inputs || []).some((input) => String(input.field || "").trim() !== "")
+  );
+  return computes || tables.length > 1 || fieldBased;
+}
+
+/**
+ * One decision-table cell as an expression over the record.
+ *
+ * zen reads a cell against its column's field ("> 40" under \`discount\`), and a
+ * column with no field holds a whole-record check — the convention the table
+ * editor already uses. \`null\` means the cell is blank and matches anything.
+ */
+function cellExpression(field, cell) {
+  const text = String(cell ?? "").trim();
+  if (!text) return null;
+  if (!field) return text;
+  // "Is empty" and "is not empty" mean null, absent or blank — a cleared text field is "".
+  if (text === "null") return \`\${field} == null or \${field} == ""\`;
+  // The compiler writes the widened forms (\`null, ""\`, \`!= null and != ""\`); a hand-written
+  // table may still say the bare words. All of them mean the same thing here.
+  if (text === "!= null" || text === '!= null and != ""') {
+    return \`\${field} != null and \${field} != ""\`;
+  }
+  if (/^(==|!=|<=|>=|<|>)/.test(text)) return \`\${field} \${text}\`;
+  const LITERAL = \`(?:"[^"]*"|'[^']*'|-?\\\\d+(?:\\\\.\\\\d+)?|true|false|null)\`;
+  if (new RegExp(\`^\${LITERAL}(?:\\\\s*,\\\\s*\${LITERAL})+$\`).test(text)) {
+    return text
+      .match(new RegExp(LITERAL, "g"))
+      .map((part) => \`\${field} == \${part}\`)
+      .join(" or ");
+  }
+  if (new RegExp(\`^\${LITERAL}$\`).test(text)) return \`\${field} == \${text}\`;
+  return text;
+}
+
+function evaluateContentTable(node, context, trace) {
+  const content = node.content || {};
+  const matches = [];
+  for (const row of content.rules || []) {
+    let matched = true;
+    for (const input of content.inputs || []) {
+      const expression = cellExpression(input.field, row[input.id]);
+      if (expression === null) continue;
+      try {
+        if (!test(expression, context)) matched = false;
+      } catch (error) {
+        trace.push({ node: node.name, assumed: true, reason: error.message });
+        matched = false;
+      }
+      if (!matched) break;
+    }
+    if (!matched) continue;
+    const value = {};
+    for (const output of content.outputs || []) {
+      const cell = row[output.id];
+      if (cell === undefined || String(cell).trim() === "") continue;
+      try {
+        value[output.field] = evaluate(String(cell), context);
+      } catch {
+        value[output.field] = unquote(cell);
+      }
+    }
+    matches.push(value);
+    if (content.hitPolicy !== "collect") break;
+  }
+  return matches;
+}
+
+/**
+ * Run a function node's \`export const handler = async (input) => ({ ... })\`.
+ *
+ * zen runs this in a sandbox without imports, network or process access; the
+ * compiler refuses source that names any of them, and the handler here is given
+ * only a copy of the record. It is the administrator's own code in the
+ * administrator's own tab — not a boundary, which is why the compiler's check is
+ * the one that matters.
+ */
+async function runFunctionNode(node, context) {
+  const raw = typeof node.content === "string" ? node.content : node.content?.source || "";
+  const source = raw.replace(/\\bexport\\s+(?=const|function|async)/g, "");
+  // sandboxed handler, see above.
+  const factory = new Function("input", \`\${source}\\n;return handler(input);\`);
+  const out = await factory(JSON.parse(JSON.stringify(context)));
+  return out && typeof out === "object" ? out : {};
+}
+
+/**
+ * Walk a graph whose nodes compute, carrying one growing context.
+ *
+ * Mirrors zen: every node reads the context and adds to it; a switch sends the
+ * context down the edges whose \`sourceHandle\` is the statement that fit. The
+ * rule's answer is what the nodes *added* — the action row the application
+ * acts on — so \`trace\` records each node's contribution for the dry run.
+ */
+async function evaluateComputedGraph(graph, record) {
+  const nodes = new Map((graph.nodes || []).map((node) => [node.id, node]));
+  const outgoing = new Map();
+  for (const edge of graph.edges || []) {
+    if (!outgoing.has(edge.sourceId)) outgoing.set(edge.sourceId, []);
+    outgoing.get(edge.sourceId).push(edge);
+  }
+  const start = (graph.nodes || []).find((node) => node.type === "inputNode");
+  if (!start) return { results: [], trace: [] };
+
+  const context = { ...record };
+  const produced = {};
+  const trace = [];
+  const add = (values) => {
+    Object.assign(context, values);
+    Object.assign(produced, values);
+  };
+
+  const queue = [start.id];
+  const seen = new Set();
+  while (queue.length && seen.size < 200) {
+    const id = queue.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = nodes.get(id);
+    if (!node) continue;
+    let followed = outgoing.get(id) || [];
+
+    try {
+      if (node.type === "expressionNode") {
+        const values = {};
+        for (const row of node.content?.expressions || []) {
+          if (!row.key) continue;
+          values[row.key] = evaluate(row.value, { ...context, ...values });
+        }
+        add(values);
+        trace.push({ node: node.name, added: values });
+      } else if (node.type === "functionNode") {
+        const values = await runFunctionNode(node, context);
+        add(values);
+        trace.push({ node: node.name, added: values });
+      } else if (node.type === "decisionTableNode") {
+        const matches = evaluateContentTable(node, context, trace);
+        for (const match of matches) add(match);
+        trace.push({ node: node.name, matched: matches.length });
+      } else if (node.type === "switchNode") {
+        const fits = [];
+        for (const statement of node.content?.statements || []) {
+          const condition = String(statement.condition ?? "").trim();
+          if (statement.isDefault || !condition || test(condition, context)) fits.push(statement.id);
+          if (fits.length && node.content?.hitPolicy !== "collect") break;
+        }
+        followed = followed.filter((edge) => fits.includes(edge.sourceHandle));
+        trace.push({ node: node.name, branches: fits });
+      }
+    } catch (error) {
+      trace.push({ node: node.name, assumed: true, reason: error.message });
+      return {
+        results: [{ action: "error", message: \`Rule node "\${node.name}": \${error.message}\` }],
+        trace,
+      };
+    }
+
+    for (const edge of followed) queue.push(edge.targetId);
+  }
+
+  return { results: Object.keys(produced).length ? [produced] : [], trace };
+}
+
 /**
  * Evaluate every rule bound to an entity operation.
  *
@@ -13614,9 +16027,10 @@ export async function evaluateRules(rules, record, options = {}) {
     }
 
     const table = (graph.nodes || []).find((node) => node.type === "decisionTableNode");
-    const outcome = table
-      ? { results: evaluateDecisionTable(table, record), trace: [] }
-      : evaluateGraph(graph, record, columns);
+    let outcome;
+    if (isComputedGraph(graph)) outcome = await evaluateComputedGraph(graph, record);
+    else if (table) outcome = { results: evaluateDecisionTable(table, record), trace: [] };
+    else outcome = evaluateGraph(graph, record, columns);
 
     traces.push({ rule: rule.name, trace: outcome.trace });
 
@@ -13633,7 +16047,12 @@ export async function evaluateRules(rules, record, options = {}) {
        * so the write was stored and the caller was told nothing. \`reject\` stays
        * because the node-graph path and the JDM parse failure above emit it.
        */
-      if (action === "reject" || action === "error" || action === "prevent") {
+      if (
+        action === "reject" ||
+        action === "error" ||
+        action === "prevent" ||
+        action === "validation-error"
+      ) {
         violations.push({ ruleId: result.ruleId || rule.name, ...result });
       } else if (action === "set" && result.field) {
         mutations[result.field] = result.value;
@@ -13649,6 +16068,141 @@ export async function evaluateRules(rules, record, options = {}) {
 
   return { violations, mutations, notifications, traces };
 }
+`,
+  "server/lib/sagas.js": "/**\n * The background workflows — a saga's steps, run after the write that started\n * them.\n *\n * A `kind: saga` workflow is a list of steps (`%%step`) compiled into\n * `model.sagas` and seeded into `sys_workflow_definitions`. A rule starts one\n * with a `trigger-workflow` action naming it; a saga declared `trigger:\n * automatic` runs on every write its `operation` names. Until this file, the\n * browser application stored the sagas and never ran one: the rule matched,\n * its row went into `_notifications`, and the step that should have moved an\n * invoice to `paid` did nothing.\n *\n * This is also the only writer of a state field. A person's request may not\n * change one (`bus.routes.js` refuses it); a saga's UpdateEntity step writes it\n * here, directly, the way the NestJS executor writes through Kysely without\n * passing its own access guard. Row targeting follows that executor exactly:\n *\n *   no entity                the triggering record\n *   entity + targetSource    the row whose id is that context value (a column of\n *                            the triggering record, or what an earlier step\n *                            published)\n *   entity + targetField     the rows whose targetField equals the triggering\n *                            record's id — children pointing back at it\n *\n * Steps it does not run here (Decision, REST, Agent, Formula beyond a copy) are\n * recorded as skipped in the run's detail rather than failing it.\n */\n\nimport { ident } from \"./db.js\";\nimport { evaluateRules } from \"./rules.js\";\nimport { stateFieldFor } from \"./workflows.js\";\nimport { lifecycleOf } from \"./lifecycle.js\";\n\n/**\n * How many state moves one write may set off. A saga that writes a state runs\n * the entity's rules again (below), and a model whose rules move a record back\n * and forth would otherwise never stop.\n */\nconst MAX_STATE_WRITE_DEPTH = 8;\n\n/** Find a saga definition by name: the table first, the model as a fallback. */\nasync function sagaNamed(db, model, name) {\n  try {\n    const row = await db.one(\n      \"SELECT definition FROM sys_workflow_definitions WHERE name = $1 AND kind = 'saga' AND is_active = true\",\n      [name]\n    );\n    if (row?.definition) {\n      return typeof row.definition === \"string\" ? JSON.parse(row.definition) : row.definition;\n    }\n  } catch {\n    /* fall through to the model */\n  }\n  return (model.sagas || []).find((saga) => saga.name === name) ?? null;\n}\n\nfunction entityNamed(model, name) {\n  const wanted = String(name ?? \"\").trim().toLowerCase().replace(/^bus_/, \"\");\n  return (\n    model.entities.find(\n      (entity) =>\n        entity.name.toLowerCase() === wanted ||\n        entity.tableName === `bus_${wanted}` ||\n        entity.tableName === wanted\n    ) ?? null\n  );\n}\n\n/** A literal step value as the column will hold it. */\nfunction literal(raw) {\n  const value = String(raw ?? \"\").trim();\n  if (value === \"true\") return true;\n  if (value === \"false\") return false;\n  if (value === \"null\") return null;\n  return value;\n}\n\nasync function updateEntity(db, model, triggering, record, step, context) {\n  const props = step.props || {};\n  const target = props.entity ? entityNamed(model, props.entity) : triggering;\n  const field = String(props.field ?? \"\").trim();\n  if (!target || !field) return { step: step.nodeId, skipped: \"no entity or field\" };\n\n  const value =\n    props.source && context[props.source.trim()] !== undefined\n      ? context[props.source.trim()]\n      : literal(props.value);\n\n  const targetSource = props.targetSource?.trim();\n  const targetField = props.targetField?.trim() || \"id\";\n  let column = \"id\";\n  let match;\n  if (targetSource) {\n    match = context[targetSource];\n  } else if (target === triggering) {\n    match = record.id;\n  } else if (targetField !== \"id\") {\n    column = targetField;\n    match = record.id;\n  }\n  if (match === undefined || match === null) {\n    return { step: step.nodeId, skipped: \"no row to update\" };\n  }\n\n  // A saga writing a record's status makes a move like anyone else: only along\n  // an edge the diagram drew, from where the record is (lib/lifecycle.js), and\n  // it stamps `<state>_at` as a button press does. Roles are not asked.\n  const lifecycle = lifecycleOf(model, target.tableName);\n  if (lifecycle?.hasMachine && lifecycle.column === field) {\n    const from = lifecycle.edges.filter((edge) => edge.to === String(value)).map((edge) => edge.from);\n    if (from.length === 0) {\n      return { step: step.nodeId, skipped: `no drawn edge reaches \"${String(value)}\"` };\n    }\n    const stamp = `${String(value)}_at`;\n    const stamps = target.attributes.some((attribute) => attribute.columnName === stamp);\n    const rows = await db.query(\n      `UPDATE ${ident(target.tableName)}\n          SET ${ident(field)} = $1, updated_at = NOW(), version = COALESCE(version, 0) + 1\n              ${stamps ? `, ${ident(stamp)} = NOW()` : \"\"}\n        WHERE ${ident(column)} = $2 AND deleted_at IS NULL AND ${ident(field)} = ANY($3)\n        RETURNING id`,\n      [value, match, from]\n    );\n    return { step: step.nodeId, entity: target.name, field, value, rows: rows.length, ids: rows.map((row) => row.id) };\n  }\n\n  const rows = await db.query(\n    `UPDATE ${ident(target.tableName)}\n        SET ${ident(field)} = $1, updated_at = NOW(), version = COALESCE(version, 0) + 1\n      WHERE ${ident(column)} = $2 AND deleted_at IS NULL\n      RETURNING id`,\n    [value, match]\n  );\n  return {\n    step: step.nodeId,\n    entity: target.name,\n    field,\n    value,\n    rows: rows.length,\n    ids: rows.map((row) => row.id),\n  };\n}\n\nasync function createEntity(db, model, step, context) {\n  const props = step.props || {};\n  const target = entityNamed(model, props.entity);\n  if (!target) return { step: step.nodeId, skipped: \"unknown entity\" };\n  let fields = {};\n  try {\n    fields = props.fields ? JSON.parse(props.fields) : {};\n  } catch {\n    return { step: step.nodeId, skipped: \"fields is not JSON\" };\n  }\n  const values = {};\n  for (const [column, source] of Object.entries(fields)) {\n    values[column] =\n      typeof source === \"string\" && context[source] !== undefined ? context[source] : source;\n  }\n  // A record a workflow creates starts in its machine's initial state, as one\n  // a person creates does, unless the step names the state itself.\n  const state = await stateFieldFor(db, model, target);\n  if (state?.initial && (values[state.field] === undefined || values[state.field] === null)) {\n    values[state.field] = state.initial;\n  }\n  const created = await db.insert(target.tableName, values);\n  if (props.as) context[props.as.trim()] = created?.id;\n  return { step: step.nodeId, entity: target.name, created: created?.id ?? null };\n}\n\nasync function deleteEntity(db, model, triggering, record, step, context) {\n  const props = step.props || {};\n  const target = props.entity ? entityNamed(model, props.entity) : triggering;\n  if (!target) return { step: step.nodeId, skipped: \"unknown entity\" };\n  const targetSource = props.targetSource?.trim();\n  const targetField = props.targetField?.trim() || \"id\";\n  const column = targetSource ? \"id\" : target === triggering ? \"id\" : targetField;\n  const match = targetSource ? context[targetSource] : record.id;\n  if (match === undefined || match === null) return { step: step.nodeId, skipped: \"no row\" };\n  const rows = await db.query(\n    `UPDATE ${ident(target.tableName)} SET deleted_at = NOW()\n      WHERE ${ident(column)} = $1 AND deleted_at IS NULL RETURNING id`,\n    [match]\n  );\n  return { step: step.nodeId, entity: target.name, deleted: rows.length };\n}\n\n/**\n * A saga that failed while its caller owns the transaction. The caller rolls\n * back — the run row dies with it — so it carries the workflow and the reason to\n * put the failure back afterwards (`recordFailedSaga`) and to tell the person.\n */\nexport class SagaFailure extends Error {\n  constructor(workflow, reason, steps, operation) {\n    super(`Workflow \"${workflow}\" failed: ${reason}`);\n    this.name = \"SagaFailure\";\n    this.workflow = workflow;\n    this.reason = reason;\n    this.steps = steps;\n    this.operation = operation;\n  }\n}\n\n/**\n * Put a failed run back after the transaction that held it rolled back, on the\n * caller's own connection. Never throws: Run History is a record of the failure,\n * not part of it.\n */\nexport async function recordFailedSaga(db, entity, record, failure, user) {\n  try {\n    await db.insert(\"sys_workflow_runs\", {\n      workflow_name: failure.workflow,\n      entity_name: entity.name,\n      record_id: record.id,\n      trigger: \"saga\",\n      status: \"failed\",\n      detail: JSON.stringify({ operation: failure.operation ?? null, steps: failure.steps ?? [], error: failure.reason }),\n      created_by: user?.id ?? null,\n    });\n  } catch {\n    /* the move is already refused; a missing history row must not hide that */\n  }\n}\n\n/** Run one saga against the record that started it. */\nexport async function runSaga(db, model, entity, record, saga, user, options = {}) {\n  const context = { ...record };\n  const results = [];\n  let status = \"completed\";\n  for (const step of saga.steps || []) {\n    try {\n      if (step.type === \"UpdateEntity\") {\n        results.push(await updateEntity(db, model, entity, record, step, context));\n      } else if (step.type === \"CreateEntity\") {\n        results.push(await createEntity(db, model, step, context));\n      } else if (step.type === \"DeleteEntity\") {\n        results.push(await deleteEntity(db, model, entity, record, step, context));\n      } else {\n        results.push({ step: step.nodeId, skipped: `${step.type} is not run in the browser` });\n      }\n    } catch (error) {\n      results.push({ step: step.nodeId, error: error.message });\n      status = \"failed\";\n      // The caller owns a transaction: let it roll back rather than record a\n      // half-applied run that the rollback would take with it anyway.\n      if (options.throwOnError) {\n        throw new SagaFailure(saga.name, error.message, results, options.operation);\n      }\n      break;\n    }\n  }\n\n  await db.insert(\"sys_workflow_runs\", {\n    workflow_name: saga.name,\n    entity_name: entity.name,\n    record_id: record.id,\n    trigger: \"saga\",\n    status,\n    detail: JSON.stringify({ steps: results }),\n    created_by: user?.id ?? null,\n  });\n  return { saga: saga.name, status, steps: results };\n}\n\n/**\n * Every saga a write starts: those its rules named with `trigger-workflow`,\n * and those declared `trigger: automatic` for this operation. Run after the\n * write, against the record as stored — as the NestJS stack does.\n *\n * A saga that writes an entity's state field is itself a write that rules may\n * be keyed on (`status == \"paid\" and …`), and a person's request is no longer\n * how a state changes, so nothing else would evaluate them. After such a step\n * the moved rows are re-read and their UPDATE rules run again; only the sagas\n * those rules start are run, as `followStateWrites` does in the NestJS rules\n * service, to a depth of MAX_STATE_WRITE_DEPTH.\n *\n * `options` is for a button press, which is a write the person's request does\n * not make but a move does:\n *\n *   bound          the operations a move runs workflows under, in order —\n *                  `TRANSITION:<EVENT>` and `ENTER:<STATE>`. A saga declared\n *                  `status: <state>` is stored as `ENTER:<STATE>`, so a plain\n *                  save (UPDATE) never selects it.\n *   skipAutomatic  the form was saved a moment ago by the same press, and the\n *                  record's update sagas ran with that save.\n *   throwOnError   the caller owns a transaction: a failing saga throws\n *                  (SagaFailure) so it rolls back, instead of being recorded.\n */\nexport async function runTriggeredSagas(\n  db, model, entity, record, operation, notifications, user, depth = 0, options = {}\n) {\n  const names = new Map();\n  const add = (name, boundTo) => {\n    if (!names.has(name)) names.set(name, boundTo);\n  };\n  const automatic = () => {\n    if (depth !== 0 || options.skipAutomatic) return;\n    for (const saga of model.sagas || []) {\n      if (saga.entity !== entity.name || saga.trigger !== \"automatic\") continue;\n      if (saga.operation === \"ALL\" || saga.operation === operation) add(saga.name);\n    }\n  };\n  const bound = () => {\n    if (depth !== 0) return;\n    for (const wanted of options.bound || []) {\n      for (const saga of model.sagas || []) {\n        if (saga.entity !== entity.name || saga.trigger !== \"automatic\") continue;\n        if (String(saga.operation).toUpperCase() === wanted) add(saga.name, wanted);\n      }\n    }\n  };\n  const notified = () => {\n    for (const item of notifications || []) {\n      const action = String(item.action || \"\").toLowerCase();\n      const name = item.workflowName || item.workflow;\n      if (action.startsWith(\"trigger\") && name) add(String(name));\n    }\n  };\n  // A move runs the record's update sagas, then those bound to it, then the ones\n  // its rules start — the order the NestJS stack keeps. A write keeps its own.\n  if (options.bound) {\n    automatic();\n    bound();\n    notified();\n  } else {\n    notified();\n    automatic();\n  }\n\n  const runs = [];\n  for (const [name, boundTo] of names) {\n    const saga = await sagaNamed(db, model, name);\n    if (!saga) continue;\n    const run = await runSaga(db, model, entity, record, saga, user, {\n      throwOnError: options.throwOnError,\n      operation: boundTo ?? operation,\n    });\n    runs.push(run);\n    runs.push(...(await followStateWrites(db, model, run, user, depth, options)));\n  }\n  return runs;\n}\n\nasync function followStateWrites(db, model, run, user, depth, options = {}) {\n  if (depth >= MAX_STATE_WRITE_DEPTH) return [];\n  const runs = [];\n  for (const result of run.steps) {\n    if (!result.ids?.length) continue;\n    const target = entityNamed(model, result.entity);\n    if (!target) continue;\n    const state = await stateFieldFor(db, model, target);\n    if (!state || state.field !== result.field) continue;\n    const rules = await db.query(\n      `SELECT name, jdm_content FROM sys_rule_definitions\n        WHERE entity_name = $1 AND operation IN ('UPDATE', 'ALL') AND is_active = true\n        ORDER BY priority ASC`,\n      [target.name]\n    );\n    for (const id of result.ids) {\n      const row = await db.one(\n        `SELECT * FROM ${ident(target.tableName)} WHERE id = $1 AND deleted_at IS NULL`,\n        [id]\n      );\n      if (!row) continue;\n      const outcome = await evaluateRules(rules, row, {\n        columns: target.attributes.map((attribute) => attribute.columnName),\n      });\n      runs.push(\n        ...(await runTriggeredSagas(\n          db, model, target, row, \"UPDATE\", outcome.notifications, user, depth + 1,\n          { throwOnError: options.throwOnError }\n        ))\n      );\n    }\n  }\n  return runs;\n}\n",
+  "server/lib/workflows.js": `/**
+ * Where a workflow is read from — the table, not the model.
+ *
+ * \`sys_workflow_definitions\` is seeded at first boot from \`model.workflows\`,
+ * storing each workflow object whole in the \`definition\` column. Until now it
+ * was written there and read by three listing endpoints and nothing else: every
+ * *behavioural* use of a workflow — which transitions a record is offered, and
+ * whether a status change is recorded as modelled — read \`model.workflows\`
+ * instead, the copy compiled into the bundle.
+ *
+ * That split is fine while nothing can change either. It stops being fine the
+ * moment the admin screen can edit a workflow, because the edit lands in the
+ * table and the application keeps behaving from the model: a definition that is
+ * "seeded, visible in the admin screen, drawn by the viewer, and inert" — the
+ * failure this codebase has already documented once, in the dance-studio
+ * model's sixteen \`%%action\` lines.
+ *
+ * So the table is the source of truth, the way \`sys_rule_definitions\` already
+ * is for rules (\`bus.routes.js\` enforces from that table, not from
+ * \`model.rules\`) and the way the Application Dictionary is for screens. The
+ * model seeds it; after that, what the database says is what the application
+ * does.
+ *
+ * **The fallback to the model is deliberate and narrow.** An application
+ * generated before this table was seeded, or one whose seed was interrupted,
+ * would otherwise lose its state machines entirely rather than degrade — and
+ * losing them silently disables the transition UI on every record. Falling back
+ * keeps such an application behaving exactly as it did before.
+ */
+
+/**
+ * Every workflow for one entity, newest definition wins on a name collision.
+ *
+ * Parsed defensively: \`definition\` is JSONB the administrator can now write, and
+ * a row that will not parse should cost that one workflow rather than every
+ * screen that asks for one.
+ */
+export async function workflowsForEntity(db, model, entityName) {
+  let rows = [];
+  try {
+    rows = await db.select("sys_workflow_definitions", {
+      where: { entity_name: entityName, is_active: true },
+      orderBy: "name",
+    });
+  } catch {
+    rows = [];
+  }
+
+  if (rows.length === 0) {
+    return (model.workflows || []).filter((item) => item.entity === entityName);
+  }
+
+  const parsed = [];
+  for (const row of rows) {
+    const definition = parseDefinition(row);
+    if (definition) parsed.push(definition);
+  }
+  /* Every row failing to parse is not the same as no rows: the model is still
+     the better answer than nothing. */
+  if (parsed.length === 0) {
+    return (model.workflows || []).filter((item) => item.entity === entityName);
+  }
+  return parsed;
+}
+
+/**
+ * The one state machine an entity moves on, or null.
+ *
+ * A \`kind: saga\` definition is a multi-step process, not a lifecycle, and asking
+ * it for \`transitions\` gets an empty list — so the state machine is picked by
+ * kind rather than by being first.
+ */
+export async function stateMachineFor(db, model, entityName) {
+  const workflows = await workflowsForEntity(db, model, entityName);
+  return (
+    workflows.find((item) => (item.kind ?? "state") === "state" && Array.isArray(item.transitions)) ??
+    null
+  );
+}
+
+function parseDefinition(row) {
+  const raw = row.definition;
+  if (!raw) return null;
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  /* The row's own columns win over the stored blob for the three things the
+     row also carries: an administrator who renames a workflow edits the column,
+     and the blob it was seeded from would otherwise keep the old name. */
+  return {
+    ...value,
+    name: row.name ?? value.name,
+    entity: row.entity_name ?? value.entity,
+    kind: row.kind ?? value.kind ?? "state",
+  };
+}
+
+/**
+ * The column an entity's state machine drives, and the state a new record
+ * starts in — or null when the entity has no state machine.
+ *
+ * \`status\`, else \`state\`, else \`stage\`: the same order \`language/state-field.ts\`
+ * states for the checker, the generator and the NestJS stack. That column is
+ * system-managed. No person writes it: the bus routes drop it on create (the
+ * record starts in \`initial\`) and refuse a change to it on update, and only the
+ * application's background workflows — the saga executor in \`sagas.js\`, the
+ * rules that start it, the hooks — move it. The form shows it read-only in the
+ * record's header and the list grid always shows it.
+ */
+export const STATE_FIELD_CANDIDATES = ["status", "state", "stage"];
+
+export async function stateFieldFor(db, model, entity) {
+  const machine = await stateMachineFor(db, model, entity.name);
+  if (!machine) return null;
+  const field = STATE_FIELD_CANDIDATES.find((candidate) =>
+    entity.attributes.some((attribute) => attribute.columnName === candidate)
+  );
+  if (!field) return null;
+  const initial =
+    machine.initial ??
+    (machine.transitions || []).find((transition) => transition.from === "[*]")?.to ??
+    null;
+  return { field, initial, machine };
+}
+
+/** \`details.code\` of the refusal a person's write to a state field receives. */
+export const STATE_FIELD_REFUSAL_CODE = "STATE_FIELD_SYSTEM_MANAGED";
 `,
   "server/migrate.js": `/**
  * Schema and seed, run once at first boot.
@@ -13735,6 +16289,7 @@ function seedCounter(model, log) {
     count(model.users) +
     count(model.rules) +
     count(model.workflows) +
+    count(model.reports) +
     accessRuleCount(model) +
     /* The reporting application's own roles and accounts — one of each per
        \`%%rbac\` role. Counted because the stage ticks, and a progress bar that
@@ -13778,23 +16333,30 @@ export async function migrate(db, model, readAsset, log = () => {}) {
 
   log("Seeding the dictionary");
   const tick = seedCounter(model, log);
-  await seedReferences(db, model, tick);
-  await seedCategories(db, model, tick);
-  await seedDictionary(db, model, tick);
-  await seedRoles(db, model, tick);
-  await seedAdmin(db, model, log);
-  await seedRoleUsers(db, model, log, tick);
-  await seedRules(db, model, tick);
-  await seedWorkflows(db, model, tick);
-  await seedAccess(db, model, tick);
-  await seedReporting(db, model, log, tick);
-  await seedSampleData(db, model, log, tick);
+  /* One transaction for the whole seed — see Database.transaction. Without it the
+     browser flushes IndexedDB after every one of thousands of statements. The
+     \`seeded\` marker is inside it too, so a seed that fails part-way leaves no
+     marker and no half of a dictionary. */
+  await db.transaction(async (tx) => {
+    await seedReferences(tx, model, tick);
+    await seedCategories(tx, model, tick);
+    await seedDictionary(tx, model, tick);
+    await seedRoles(tx, model, tick);
+    await seedAdmin(tx, model, log);
+    await seedRoleUsers(tx, model, log, tick);
+    await seedRules(tx, model, tick);
+    await seedWorkflows(tx, model, tick);
+    await seedReports(tx, model, tick);
+    await seedAccess(tx, model, tick);
+    await seedReporting(tx, model, log, tick);
+    await seedSampleData(tx, model, log, tick);
 
-  await db.query(
-    \`INSERT INTO sys_schema_state (key, value) VALUES ('seeded', $1)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()\`,
-    [String(SCHEMA_VERSION)]
-  );
+    await tx.query(
+      \`INSERT INTO sys_schema_state (key, value) VALUES ('seeded', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()\`,
+      [String(SCHEMA_VERSION)]
+    );
+  });
 
   return { seeded: true };
 }
@@ -13898,8 +16460,9 @@ async function seedDictionary(db, model, tick = () => {}) {
     await db.query(
       \`INSERT INTO sys_column (sys_table_id, column_name, name, description, sys_reference_id,
                                is_mandatory, is_updateable, is_key, is_parent, is_identifier,
-                               is_selection_column, field_length, default_value, ref_table_name, seq_no)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                               is_selection_column, field_length, default_value, ref_table_name, seq_no,
+                               read_only_logic, mandatory_logic)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        ON CONFLICT (sys_table_id, column_name) DO NOTHING\`,
       [
         tableId,
@@ -13917,6 +16480,8 @@ async function seedDictionary(db, model, tick = () => {}) {
         column.defaultValue ?? null,
         column.refTableName ?? null,
         column.seqNo ?? 0,
+        column.readOnlyLogic ?? null,
+        column.mandatoryLogic ?? null,
       ]
     );
     tick();
@@ -13966,7 +16531,14 @@ async function seedDictionary(db, model, tick = () => {}) {
       [tabId, group.name]
     );
     if (exists) continue;
-    await db.insert("sys_field_group", { sys_tab_id: tabId, name: group.name, seq_no: group.seqNo ?? 0 });
+    await db.insert("sys_field_group", {
+      sys_tab_id: tabId,
+      name: group.name,
+      description: group.description ?? null,
+      columns: group.columns ?? 1,
+      is_collapsed_by_default: !!group.collapsed,
+      seq_no: group.seqNo ?? 0,
+    });
     tick();
   }
 
@@ -13990,8 +16562,11 @@ async function seedDictionary(db, model, tick = () => {}) {
       \`INSERT INTO sys_field (sys_tab_id, sys_column_id, sys_field_group_id, name, description,
                               is_displayed, is_displayed_grid, is_read_only, is_mandatory,
                               is_updateable, is_insertable, seq_no, seq_no_grid, display_length,
-                              field_type, sys_reference_id, default_value, is_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                              field_type, sys_reference_id, default_value, is_key,
+                              is_same_line, column_span,
+                              display_logic, read_only_logic, mandatory_logic)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
+               $23)
        ON CONFLICT (sys_tab_id, sys_column_id) DO NOTHING\`,
       [
         tabId,
@@ -14012,6 +16587,11 @@ async function seedDictionary(db, model, tick = () => {}) {
         field.referenceId ?? null,
         field.defaultValue ?? null,
         !!field.isKey,
+        !!field.isSameLine,
+        field.columnSpan ?? null,
+        field.displayLogic ?? null,
+        field.readOnlyLogic ?? null,
+        field.mandatoryLogic ?? null,
       ]
     );
     tick();
@@ -14150,10 +16730,13 @@ async function seedSampleData(db, model, log, tick = () => {}) {
       if (columns.length === 0) continue;
       const placeholders = columns.map((_, index) => \`$\${index + 1}\`).join(", ");
       try {
-        await db.query(
-          \`INSERT INTO \${table} (\${columns.join(", ")}) VALUES (\${placeholders})
-             ON CONFLICT DO NOTHING\`,
-          columns.map((column) => row[column])
+        // A savepoint, so one rejected row costs that row and not the seed.
+        await db.attempt(() =>
+          db.query(
+            \`INSERT INTO \${table} (\${columns.join(", ")}) VALUES (\${placeholders})
+               ON CONFLICT DO NOTHING\`,
+            columns.map((column) => row[column])
+          )
         );
         inserted++;
       } catch (error) {
@@ -14211,6 +16794,42 @@ async function seedWorkflows(db, model, tick = () => {}) {
       entity_name: saga.entity,
       kind: "saga",
       definition: JSON.stringify(saga),
+    });
+  }
+}
+
+/**
+ * The \`%%report\` questions, into a table the administrator can edit.
+ *
+ * They used to be read straight out of \`model.json\` on every request, which is
+ * why they were the one part of this application that could be read and never
+ * changed. Seeded by name, skipped when present — the same shape every other
+ * seed here uses, so a second boot does not overwrite an edited report with the
+ * model's original.
+ *
+ * \`sort_order\` preserves the model's own order. The reports screen lists them
+ * as the model wrote them, and a model puts the question its users ask most
+ * first.
+ */
+async function seedReports(db, model, tick = () => {}) {
+  const reports = Array.isArray(model.reports) ? model.reports : [];
+  for (const [index, report] of reports.entries()) {
+    const exists = await db.one("SELECT sys_report_id FROM sys_report WHERE name = $1", [
+      report.name,
+    ]);
+    tick();
+    if (exists) continue;
+    await db.insert("sys_report", {
+      name: report.name,
+      title: report.title ?? report.name,
+      entity_name: report.entity ?? null,
+      table_name: report.tableName ?? null,
+      chart: report.chart ?? null,
+      x_axis: report.x ?? null,
+      y_axis: report.y ?? null,
+      help: report.help ?? null,
+      sql_text: report.sql,
+      sort_order: index * 10,
     });
   }
 }
@@ -14709,14 +17328,18 @@ export function authRoutes(model) {
  */
 
 import { Router } from "../lib/router.js";
-import { badRequest, json, notFound, readJson } from "../lib/http.js";
+import { badRequest, errorResponse, json, notFound, readJson } from "../lib/http.js";
 import { ident } from "../lib/db.js";
-import { checkOperationAccess, checkTransitionAccess, requireUser } from "../lib/guards.js";
+import { checkOperationAccess, requireUser } from "../lib/guards.js";
+import { STATE_FIELD_REFUSAL_CODE, stateFieldFor, stateMachineFor } from "../lib/workflows.js";
+import { recordFailedSaga, runTriggeredSagas, SagaFailure } from "../lib/sagas.js";
 import { runHooks } from "../lib/hooks.js";
 import { evaluateRules } from "../lib/rules.js";
+import { logicViolations } from "../lib/field-logic.js";
 import { recordAudit } from "./audit.routes.js";
 import { labelsForRows } from "../lib/labels.js";
 import { toRouteName } from "../lib/naming.js";
+import { findMove, isLocked, lifecycleOf, mayPress, movesFrom, phaseOf } from "../lib/lifecycle.js";
 
 /** Columns every generated table carries; never editable by a client. */
 const MANAGED = new Set([
@@ -14759,7 +17382,11 @@ function entityOr404(model, segment) {
 }
 
 /** Metadata for one entity, assembled from the dictionary rows. */
-async function entityMetadata(db, entity) {
+async function entityMetadata(db, entity, model) {
+  /* The state field is system-managed (lib/workflows.js stateFieldFor): never
+     an input on the form, always a column of the list, whatever the field rows
+     say — an administrator's toggle can neither make it editable nor hide it. */
+  const state = model ? await stateFieldFor(db, model, entity) : null;
   const table = await db.one("SELECT * FROM sys_table WHERE table_name = $1", [entity.tableName]);
   if (!table) throw notFound(\`\${entity.tableName} is not in the dictionary\`);
 
@@ -14770,14 +17397,20 @@ async function entityMetadata(db, entity) {
             f.is_displayed, f.is_displayed_grid,
             f.is_read_only, f.is_mandatory, f.is_updateable, f.is_insertable,
             f.seq_no, f.seq_no_grid, f.field_type, f.sys_field_group_id,
-            g.name AS group_name
+            f.is_same_line, f.column_span,
+            f.display_logic,
+            COALESCE(f.read_only_logic, c.read_only_logic) AS read_only_logic,
+            COALESCE(f.mandatory_logic, c.mandatory_logic) AS mandatory_logic,
+            g.name AS group_name, g.description AS group_description,
+            g.columns AS group_columns, g.is_collapsed_by_default AS group_collapsed,
+            g.seq_no AS group_seq_no
        FROM sys_column c
        JOIN sys_table t ON t.sys_table_id = c.sys_table_id
        LEFT JOIN sys_tab tb ON tb.sys_table_id = t.sys_table_id
        LEFT JOIN sys_field f ON f.sys_column_id = c.sys_column_id AND f.sys_tab_id = tb.sys_tab_id
        LEFT JOIN sys_field_group g ON g.sys_field_group_id = f.sys_field_group_id
       WHERE t.table_name = $1
-      ORDER BY COALESCE(f.seq_no, c.seq_no)\`,
+      ORDER BY COALESCE(g.seq_no, 0), COALESCE(f.seq_no, c.seq_no)\`,
     [entity.tableName]
   );
 
@@ -14793,9 +17426,12 @@ async function entityMetadata(db, entity) {
       table_name: table.table_name,
       name: table.name,
       description: table.description,
+      state_field: state?.field ?? null,
     },
     entity: { name: entity.name, route: entity.routeName },
-    columns: columns.map((column) => ({
+    columns: columns.map((column) => {
+      const isState = state?.field === column.column_name;
+      return {
       sys_field_id: column.sys_field_id,
       name: column.name || column.column_name,
       column_name: column.column_name,
@@ -14804,12 +17440,13 @@ async function entityMetadata(db, entity) {
          the fallback. The form renders it under the control. */
       description: column.description ?? null,
       sys_reference_id: column.sys_reference_id,
-      is_mandatory: column.is_mandatory ?? false,
-      is_updateable: column.is_updateable !== false,
-      is_insertable: column.is_insertable !== false,
-      is_read_only: column.is_read_only ?? false,
-      is_displayed: column.is_displayed !== false,
-      is_displayed_grid: column.is_displayed_grid !== false,
+      is_mandatory: isState ? false : (column.is_mandatory ?? false),
+      is_updateable: isState ? false : column.is_updateable !== false,
+      is_insertable: isState ? false : column.is_insertable !== false,
+      is_read_only: isState ? true : (column.is_read_only ?? false),
+      is_displayed: isState ? false : column.is_displayed !== false,
+      is_displayed_grid: isState ? true : column.is_displayed_grid !== false,
+      is_state_field: isState,
       is_key: column.is_key ?? false,
       /* The column tying a detail row to its master, from
          \`%%entity <Child> parent: <Parent>\`. Projected so the dictionary screen
@@ -14821,8 +17458,23 @@ async function entityMetadata(db, entity) {
       field_type: column.field_type,
       seq_no: column.seq_no ?? 0,
       seq_no_grid: column.seq_no_grid ?? 0,
+      /* \`%%section\`: the heading, the sentence under it, the grid it draws
+         (2 columns), and whether this field spans a row of its own. */
       group_name: column.group_name,
-    })),
+      group_description: column.group_description ?? null,
+      group_columns: column.group_columns ?? null,
+      group_collapsed: column.group_collapsed ?? false,
+      is_same_line: column.is_same_line ?? false,
+      col_span: column.column_span ?? null,
+      /* Field logic (Compiere's Display, Read Only and Mandatory Logic). The
+         field's own wins over the column's; the state field carries none, as
+         it is never an input. The form evaluates these as the record is
+         edited, and \`enforceFieldLogic\` below on every write. */
+      display_logic: isState ? null : (column.display_logic ?? null),
+      read_only_logic: isState ? null : (column.read_only_logic ?? null),
+      mandatory_logic: isState ? null : (column.mandatory_logic ?? null),
+      };
+    }),
     window: window ? { sys_window_id: window.sys_window_id, name: window.name } : undefined,
   };
 }
@@ -14937,11 +17589,40 @@ function validate(entity, values, mode) {
 
 const isBlank = (value) => value == null || String(value).trim() === "";
 
-/** The column a state machine moves, when the entity has one. */
-function statusColumn(entity, model) {
-  const workflow = (model.workflows || []).find((item) => item.entity === entity.name);
+/**
+ * Field logic, enforced. The form hides, locks and requires fields as the
+ * record is edited, but the form is a convenience and this is the control —
+ * the same refusals the NestJS stack gives (lib/field-logic.js
+ * \`logicViolations\`): a displayed field whose mandatory logic holds for the
+ * record as it will be saved must have a value, and a field whose read-only
+ * logic holds for the record as it is stored cannot be changed.
+ *
+ * Read from the dictionary rows rather than from model.json, so a condition an
+ * administrator edits under Windows, Tabs & Fields applies on the next write.
+ */
+async function enforceFieldLogic(db, entity, model, record, changes, stored) {
+  const metadata = await entityMetadata(db, entity, model);
+  const fields = metadata.columns.filter(
+    (column) => column.mandatory_logic || column.read_only_logic
+  );
+  if (!fields.length) return;
+  const errors = logicViolations(fields, record, changes, stored);
+  if (errors.length) throw badRequest("Validation failed", errors);
+}
+
+/**
+ * The column a state machine moves, when the entity has one.
+ *
+ * Takes the workflow rather than the model: the definitions live in
+ * \`sys_workflow_definitions\` and an administrator can now edit them, so an
+ * entity's machine is whatever the table currently says it is. Reading
+ * \`model.workflows\` here would mean an entity given a machine after generation
+ * never had its status changes recorded, and one whose machine was deleted went
+ * on being treated as having one.
+ */
+function statusColumn(entity, workflow) {
   if (!workflow) return null;
-  const candidates = ["status", "state", "workflow_state"];
+  const candidates = ["status", "state", "stage"];
   return entity.attributes.find((attribute) => candidates.includes(attribute.columnName))?.columnName ?? null;
 }
 
@@ -14954,15 +17635,52 @@ async function rulesFor(db, entity, operation) {
   );
 }
 
+/**
+ * The record version an \`If-Match\` header names: \`"3"\`, \`"v3"\`, \`3\` or a weak
+ * \`W/"3"\`. Anything else is refused with 400 rather than read as \`NaN\`, which
+ * would never equal a version and turn every save into a false conflict.
+ */
+function parseIfMatch(header) {
+  if (header == null || header.trim() === "" || header.trim() === "*") return undefined;
+  const match = /^(?:W\\/)?"?v?(\\d+)"?$/i.exec(header.trim());
+  if (!match) throw badRequest(\`If-Match must name a record version, such as "3"; got \${header}\`);
+  return Number(match[1]);
+}
+
+/**
+ * A record's version as an ETag — what a client sends back as \`If-Match\` to
+ * save against the version it read.
+ */
+function etagHeader(row) {
+  return row?.version != null ? { ETag: \`"\${row.version}"\` } : {};
+}
+
+/**
+ * The 409 a stale save gets — the same body the NestJS stack sends, so one
+ * form can key its reload-or-overwrite dialog on \`details.code\`. The record is
+ * not included: the form re-reads it through GET, which applies field access.
+ */
+function versionConflict(entity, id, expectedVersion, currentVersion) {
+  return json(
+    {
+      statusCode: 409,
+      error: "Conflict",
+      message: "This record was changed by someone else after you opened it.",
+      details: { code: "VERSION_CONFLICT", entity: entity.name, id, expectedVersion, currentVersion },
+    },
+    { status: 409 }
+  );
+}
+
 export function busRoutes(model) {
   const router = new Router();
 
   router.get("/:entity/meta", async (_request, { db, params }) =>
-    json(await entityMetadata(db, entityOr404(model, params.entity)))
+    json(await entityMetadata(db, entityOr404(model, params.entity), model))
   );
 
   router.get("/:entity/fields/form", async (_request, { db, params, query }) => {
-    const metadata = await entityMetadata(db, entityOr404(model, params.entity));
+    const metadata = await entityMetadata(db, entityOr404(model, params.entity), model);
     const includeHidden = query.get("includeHidden") === "true";
     return json(
       metadata.columns
@@ -14972,7 +17690,7 @@ export function busRoutes(model) {
   });
 
   router.get("/:entity/fields/grid", async (_request, { db, params, query }) => {
-    const metadata = await entityMetadata(db, entityOr404(model, params.entity));
+    const metadata = await entityMetadata(db, entityOr404(model, params.entity), model);
     const includeHidden = query.get("includeHidden") === "true";
     return json(
       metadata.columns
@@ -15068,7 +17786,7 @@ export function busRoutes(model) {
       [params.id]
     );
     if (!row) throw notFound(\`No \${entity.name} with id \${params.id}\`);
-    return json(row);
+    return json(row, { headers: etagHeader(row) });
   });
 
   router.post("/:entity", async (request, { db, params, user }) => {
@@ -15079,11 +17797,21 @@ export function busRoutes(model) {
     const body = await readJson(request);
     let values = sanitize(entity, body);
 
+    // A new record starts in its machine's initial state, whatever the request
+    // said: the state is the application's to set, never a person's. A hook
+    // below may still set it, and the sagas the write starts move it on.
+    const state = await stateFieldFor(db, model, entity);
+    if (state) {
+      delete values[state.field];
+      if (state.initial) values[state.field] = state.initial;
+    }
+
     const before = await runHooks(model.hooks, "beforeCreate", entity.name, values);
     if (before.failures.length) throw badRequest("A lifecycle hook refused the write", before.failures);
     values = before.record;
 
     validate(entity, values, "create");
+    await enforceFieldLogic(db, entity, model, values, values, null);
 
     const outcome = await evaluateRules(await rulesFor(db, entity, "CREATE"), values, {
       columns: entity.attributes.map((attribute) => attribute.columnName),
@@ -15101,6 +17829,9 @@ export function busRoutes(model) {
 
     const created = await db.insert(entity.tableName, values);
     const after = await runHooks(model.hooks, "afterCreate", entity.name, created);
+    const runs = await runTriggeredSagas(
+      db, model, entity, created, "CREATE", outcome.notifications, user
+    );
 
     await recordAudit(db, {
       user,
@@ -15110,8 +17841,11 @@ export function busRoutes(model) {
       after: created,
     });
 
+    const stored = runs.length
+      ? (await db.one(\`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1\`, [created.id])) ?? created
+      : created;
     return json(
-      { ...created, _hooks: [...before.log, ...after.log], _notifications: outcome.notifications },
+      { ...stored, _hooks: [...before.log, ...after.log], _notifications: outcome.notifications, _workflows: runs },
       { status: 201 }
     );
   });
@@ -15127,8 +17861,46 @@ export function busRoutes(model) {
     );
     if (!current) throw notFound(\`No \${entity.name} with id \${params.id}\`);
 
+    // Optimistic locking, as the NestJS stack does it: the form sends the
+    // version it opened the record at, and a save against a version someone
+    // has since moved past is refused before anything else runs.
+    const expectedVersion = parseIfMatch(request.headers.get("if-match"));
+    if (expectedVersion !== undefined && Number(current.version ?? 0) !== expectedVersion) {
+      return versionConflict(entity, params.id, expectedVersion, Number(current.version ?? 0));
+    }
+    // The end of a flow is Final and locked; Reopen is the way back.
+    const locked = lockedResponse(model, entity, current);
+    if (locked) return locked;
+
     const body = await readJson(request);
     let values = sanitize(entity, body);
+
+    // The state is changed only by background workflows. The value the record
+    // already holds is dropped, so a form sending the whole record back still
+    // saves; any other value is refused, for every person, administrator
+    // included — the same answer the NestJS stack gives.
+    const state = await stateFieldFor(db, model, entity);
+    if (state && Object.prototype.hasOwnProperty.call(values, state.field)) {
+      if (String(values[state.field] ?? "") === String(current[state.field] ?? "")) {
+        delete values[state.field];
+      } else {
+        return json(
+          {
+            statusCode: 403,
+            message:
+              \`"\${state.field}" is changed only by the record's moves, never through a form. \` +
+              "Use one of the record's action buttons (POST …/transition).",
+            details: {
+              code: STATE_FIELD_REFUSAL_CODE,
+              entity: entity.tableName,
+              field: state.field,
+              current: current[state.field] ?? null,
+            },
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     const before = await runHooks(model.hooks, "beforeUpdate", entity.name, values, { previous: current });
     if (before.failures.length) throw badRequest("A lifecycle hook refused the write", before.failures);
@@ -15139,6 +17911,7 @@ export function busRoutes(model) {
     // The rule sees the record it would become, not the fragment submitted:
     // \`status == 'draft'\` has to be answerable when the write only sets a title.
     const merged = { ...current, ...values };
+    await enforceFieldLogic(db, entity, model, merged, values, current);
     const outcome = await evaluateRules(await rulesFor(db, entity, "UPDATE"), merged, {
       columns: entity.attributes.map((attribute) => attribute.columnName),
     });
@@ -15150,16 +17923,31 @@ export function busRoutes(model) {
     }
     Object.assign(values, applicableMutations(entity, outcome.mutations));
 
-    await checkTransitionAccess(db, user, entity.tableName, current, { ...current, ...values }, statusColumn(entity, model));
-
     values.updated_by = user.id;
     values.updated_at = new Date().toISOString();
     values.version = (current.version ?? 1) + 1;
 
-    const updated = await db.update(entity.tableName, values, { id: params.id });
+    // Conditioned on the version read above. Requests share one PGlite and
+    // interleave at every await, so two saves can both pass the check before
+    // either writes; this makes the second one match no row instead of
+    // replacing the first.
+    const updated = await db.update(entity.tableName, values, {
+      id: params.id,
+      version: current.version ?? null,
+    });
+    if (!updated) {
+      const now = await db.one(\`SELECT version FROM \${ident(entity.tableName)} WHERE id = $1\`, [params.id]);
+      return versionConflict(entity, params.id, expectedVersion ?? Number(current.version ?? 0), Number(now?.version ?? 0));
+    }
     const after = await runHooks(model.hooks, "afterUpdate", entity.name, updated, { previous: current });
 
     await recordWorkflowRun(db, model, entity, current, updated, user);
+    const runs = await runTriggeredSagas(
+      db, model, entity, updated, "UPDATE", outcome.notifications, user
+    );
+    const stored = runs.length
+      ? (await db.one(\`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1\`, [params.id])) ?? updated
+      : updated;
     await recordAudit(db, {
       user,
       action: "UPDATE",
@@ -15169,7 +17957,10 @@ export function busRoutes(model) {
       after: updated,
     });
 
-    return json({ ...updated, _hooks: [...before.log, ...after.log], _notifications: outcome.notifications });
+    return json(
+      { ...stored, _hooks: [...before.log, ...after.log], _notifications: outcome.notifications, _workflows: runs },
+      { headers: etagHeader(stored) }
+    );
   };
 
   router.put("/:entity/:id", write);
@@ -15185,6 +17976,8 @@ export function busRoutes(model) {
       [params.id]
     );
     if (!current) throw notFound(\`No \${entity.name} with id \${params.id}\`);
+    const locked = lockedResponse(model, entity, current);
+    if (locked) return locked;
 
     const before = await runHooks(model.hooks, "beforeDelete", entity.name, current);
     if (before.failures.length) throw badRequest("A lifecycle hook refused the delete", before.failures);
@@ -15218,7 +18011,295 @@ export function busRoutes(model) {
     return json({ success: true, id: params.id });
   });
 
+  /**
+   * The record's action buttons for this person, from where it is — the moves
+   * of its flow they may press, and Reopen at the end of it (lib/lifecycle.js).
+   */
+  router.get("/:entity/:id/actions", async (_request, { db, params, user }) => {
+    const entity = entityOr404(model, params.entity);
+    await checkOperationAccess(db, user, entity.tableName, "read");
+    const lifecycle = lifecycleOf(model, entity.tableName);
+    if (!lifecycle?.hasMachine) return json([]);
+    const record = await db.one(
+      \`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1 AND deleted_at IS NULL\`,
+      [params.id]
+    );
+    if (!record) throw notFound(\`No \${entity.name} with id \${params.id}\`);
+    const mayUpdate = () => updateAllowed(db, user, entity.tableName);
+    const actions = [];
+    for (const move of movesFrom(lifecycle, record[lifecycle.column])) {
+      const decision = await mayPress(user, model, entity.tableName, move, mayUpdate);
+      if (!decision.allowed) continue;
+      actions.push({
+        event: move.event,
+        to: move.to,
+        label: move.label,
+        kind: move.kind,
+        restricted: decision.roles.length > 0,
+        roles: decision.roles,
+      });
+    }
+    return json(actions);
+  });
+
+  /**
+   * Press a move: \`{ event }\` or \`{ to }\`, with the version the record was read
+   * at as If-Match. The edge, the role and the record's rules are judged, then
+   * the state is written with its \`<state>_at\`, and the sagas the move starts
+   * run — the same contract as the NestJS stack's POST …/transition.
+   *
+   * With \`data\` — the form as it stands — the press is two transactions. The
+   * first saves the form, the record staying in the status it is in (the same
+   * handler a PATCH reaches, so the same rules and field logic judge it). The
+   * second is the move: the sagas bound to the status it reaches (\`status:
+   * <state>\`, stored \`ENTER:<STATE>\`) run in it, and the status is written only
+   * if every one succeeds. A saga that fails undoes the move alone: the typing
+   * stays saved, the status stays where it was, and the refusal says so
+   * (\`details.phase: "workflow"\`, the new \`details.version\`).
+   */
+  router.post("/:entity/:id/transition", async (request, { db, params, user }) => {
+    const entity = entityOr404(model, params.entity);
+    requireUser(user);
+    await checkOperationAccess(db, user, entity.tableName, "read");
+    const lifecycle = lifecycleOf(model, entity.tableName);
+    if (!lifecycle?.hasMachine) throw notFound(\`\${entity.name} has no status flow to move along\`);
+
+    let current = await db.one(
+      \`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1 AND deleted_at IS NULL\`,
+      [params.id]
+    );
+    if (!current) throw notFound(\`No \${entity.name} with id \${params.id}\`);
+
+    let expectedVersion = parseIfMatch(request.headers.get("if-match"));
+    if (expectedVersion === undefined) {
+      return json(
+        {
+          statusCode: 428,
+          message: "A move needs the version the record was read at, as If-Match.",
+          details: { code: "PRECONDITION_REQUIRED" },
+        },
+        { status: 428 }
+      );
+    }
+
+    const body = await readJson(request);
+
+    // Transaction one: save the form in the status the record is in. It commits
+    // before the move starts, so a failing saga cannot take it back.
+    let savedFirst = false;
+    if (body?.data && typeof body.data === "object" && Object.keys(body.data).length > 0) {
+      let saved;
+      try {
+        saved = await write(
+          new Request(request.url, {
+            method: "PATCH",
+            headers: { "content-type": "application/json", "if-match": \`"\${expectedVersion}"\` },
+            body: JSON.stringify(body.data),
+          }),
+          { db, params, user }
+        );
+      } catch (error) {
+        // A save the form's own PATCH would refuse (validation, a hook) is refused the same way.
+        return withPhase(errorResponse(error, "PATCH"), "save");
+      }
+      if (saved.status >= 400) return withPhase(saved, "save");
+      current = await db.one(
+        \`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1 AND deleted_at IS NULL\`,
+        [params.id]
+      );
+      expectedVersion = Number(current.version ?? 0);
+      savedFirst = true;
+    }
+    if (Number(current.version ?? 0) !== expectedVersion) {
+      return versionConflict(entity, params.id, expectedVersion, Number(current.version ?? 0));
+    }
+
+    const from = current[lifecycle.column] == null ? null : String(current[lifecycle.column]);
+    const move = findMove(lifecycle, from, { event: body?.event, to: body?.to });
+    if (!move) {
+      const offered = movesFrom(lifecycle, from).map((item) => item.event || item.to);
+      return afterSave(
+        json(
+          {
+            statusCode: 409,
+            message:
+              \`"\${body?.event ?? body?.to ?? ""}" is not a move of this record from "\${from ?? "nothing"}". \` +
+              (offered.length ? \`Its moves are: \${offered.join(", ")}.\` : "It has no moves from here."),
+            details: { code: "INVALID_TRANSITION", entity: entity.tableName, id: params.id, from, offered },
+          },
+          { status: 409 }
+        )
+      );
+    }
+
+    const decision = await mayPress(user, model, entity.tableName, move, () =>
+      updateAllowed(db, user, entity.tableName)
+    );
+    if (!decision.allowed) {
+      return afterSave(
+        json(
+          {
+            statusCode: 403,
+            message:
+              move.kind === "reopen" && decision.roles.length === 0
+                ? "Only an administrator can reopen this record."
+                : \`"\${move.label}" can be pressed by: \${decision.roles.join(", ")}.\`,
+            details: { code: "TRANSITION_FORBIDDEN", entity: entity.tableName, id: params.id, roles: decision.roles },
+          },
+          { status: 403 }
+        )
+      );
+    }
+
+    /** A refusal after the save says the save stands, and at which version. */
+    function afterSave(response) {
+      return savedFirst
+        ? withPhase(response, "workflow", { saved: true, version: Number(current.version ?? 0) })
+        : response;
+    }
+
+    // Transaction two. Everything the move does is one unit: a saga that fails
+    // throws, the transaction rolls back, and the record is as the save left it.
+    try {
+      return await db.transaction(async (db) => {
+        const now = new Date().toISOString();
+        const values = {
+          [lifecycle.column]: move.to,
+          updated_by: user.id,
+          updated_at: now,
+          version: (current.version ?? 1) + 1,
+        };
+        const stamp = \`\${move.to}_at\`;
+        if (entity.attributes.some((attribute) => attribute.columnName === stamp)) values[stamp] = now;
+
+        // Refusing rules hold on a move as on a save, judged on the record as it
+        // will be: "a resolved case needs its notes".
+        const merged = { ...current, ...values };
+        const outcome = await evaluateRules(await rulesFor(db, entity, "UPDATE"), merged, {
+          columns: entity.attributes.map((attribute) => attribute.columnName),
+        });
+        if (outcome.violations.length) {
+          return afterSave(
+            json(
+              { statusCode: 422, message: "A business rule refused this move", violations: outcome.violations },
+              { status: 422 }
+            )
+          );
+        }
+
+        const updated = await db.update(entity.tableName, values, {
+          id: params.id,
+          version: current.version ?? null,
+        });
+        if (!updated) {
+          const latest = await db.one(\`SELECT version FROM \${ident(entity.tableName)} WHERE id = $1\`, [params.id]);
+          return versionConflict(entity, params.id, expectedVersion, Number(latest?.version ?? 0));
+        }
+        await recordWorkflowRun(db, model, entity, current, updated, user);
+        const runs = await runTriggeredSagas(db, model, entity, updated, "UPDATE", outcome.notifications, user, 0, {
+          bound: [move.event ? \`TRANSITION:\${String(move.event).toUpperCase()}\` : null, \`ENTER:\${String(move.to).toUpperCase()}\`].filter(Boolean),
+          skipAutomatic: savedFirst,
+          throwOnError: true,
+        });
+        const stored = runs.length
+          ? (await db.one(\`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1\`, [params.id])) ?? updated
+          : updated;
+        await recordAudit(db, {
+          user,
+          action: "UPDATE",
+          entityType: entity.tableName,
+          entityId: params.id,
+          before: current,
+          after: stored,
+        });
+        return json(
+          {
+            ...stored,
+            lifecycle: {
+              column: lifecycle.column,
+              from,
+              to: move.to,
+              phase: phaseOf(lifecycle, move.to),
+              event: move.event,
+            },
+            _workflows: runs,
+          },
+          { headers: etagHeader(stored) }
+        );
+      });
+    } catch (error) {
+      if (!(error instanceof SagaFailure)) throw error;
+      // The rollback took the failed run with it; put it back for Run History.
+      await recordFailedSaga(db, entity, current, error, user);
+      // Write the failure reason so the form can show it beside the action buttons.
+      try {
+        await db.query(
+          \`UPDATE \${ident(entity.tableName)} SET doc_status_message = $1 WHERE id = $2\`,
+          [error.reason ?? error.message, params.id]
+        );
+      } catch (_) { /* best effort */ }
+      return json(
+        {
+          statusCode: 422,
+          message: \`"\${move.label}" did not go through: \${error.message}. The record is still "\${from}".\`,
+          error: "Unprocessable Entity",
+          details: {
+            code: "WORKFLOW_FAILED",
+            entity: entity.tableName,
+            id: params.id,
+            from,
+            to: move.to,
+            workflow: error.workflow,
+            reason: error.reason,
+            ...(savedFirst ? { phase: "workflow", saved: true, version: Number(current.version ?? 0) } : {}),
+          },
+        },
+        { status: 422 }
+      );
+    }
+  });
+
   return router;
+}
+
+/** Whether this person may update the table — the fallback for a move nobody restricted. */
+/** The same refusal, with \`details.phase\` (and any extra) added; status and body otherwise kept. */
+async function withPhase(response, phase, extra = {}) {
+  let body;
+  try {
+    body = await response.clone().json();
+  } catch {
+    return response;
+  }
+  return json({ ...body, details: { ...(body.details ?? {}), ...extra, phase } }, { status: response.status });
+}
+
+async function updateAllowed(db, user, tableName) {
+  try {
+    await checkOperationAccess(db, user, tableName, "update");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 409 RECORD_FINAL for a record at the end of its flow, else null. */
+function lockedResponse(model, entity, current) {
+  const lifecycle = lifecycleOf(model, entity.tableName);
+  if (!lifecycle || !isLocked(lifecycle, current[lifecycle.column])) return null;
+  return json(
+    {
+      statusCode: 409,
+      message: "This record is Final and cannot be changed. Reopen it to make changes.",
+      details: {
+        code: "RECORD_FINAL",
+        entity: entity.tableName,
+        id: current.id,
+        state: current[lifecycle.column],
+      },
+    },
+    { status: 409 }
+  );
 }
 
 /** Only apply a rule's \`set\` when the target is a real column of the entity. */
@@ -15233,13 +18314,13 @@ function applicableMutations(entity, mutations) {
 
 /** Record a state change against the entity's machine, when it crossed one. */
 async function recordWorkflowRun(db, model, entity, before, after, user) {
-  const column = statusColumn(entity, model);
+  const workflow = await stateMachineFor(db, model, entity.name);
+  const column = statusColumn(entity, workflow);
   if (!column) return;
   const from = before[column];
   const to = after[column];
   if (!to || from === to) return;
 
-  const workflow = (model.workflows || []).find((item) => item.entity === entity.name);
   const transition = (workflow?.transitions || []).find(
     (item) => item.from === String(from) && item.to === String(to)
   );
@@ -15359,6 +18440,340 @@ export function modelRoutes(model, readAsset) {
   return router;
 }
 `,
+  "server/modules/report-admin.routes.js": `/**
+ * The reporting application's administration — \`/report-admin\`.
+ *
+ * The Enterprise Reporting platform gives its administrators Users, Roles,
+ * Permissions, Data Sources and System Logs. In the browser build those are
+ * real here too, over the tables this tab already enforces from:
+ *
+ *   rpt_user, rpt_role     who may sign in, and as which reporting role
+ *   rpt_role_tables        which of the application's tables a role may read —
+ *                          read by \`resolveReportSession\` on every request, so
+ *                          a grant changed here applies to the next query
+ *   rpt_activity_log       sign-ins, runs, refusals and the changes made here
+ *
+ * The seed writes these once, from the model's \`%%rbac\`; after that they are
+ * the administrator's. A change here is not undone by a reload.
+ *
+ * Every route is administrator-only, decided on the server. The client hides
+ * the section from anyone else, and that is a courtesy rather than the control.
+ */
+
+import { Router } from "../lib/router.js";
+import { hashPassword } from "../lib/auth.js";
+import { badRequest, conflict, forbidden, json, notFound, readJson, unauthorized } from "../lib/http.js";
+import { ident } from "../lib/db.js";
+import { logReportActivity } from "../lib/report-log.js";
+
+const EMAIL = /^[^\\s@]+@[^\\s@]+$/;
+const MIN_PASSWORD = 5;
+
+export function reportAdminRoutes(model) {
+  const router = new Router();
+  const pack = model.reporting || {};
+
+  /** The application's tables — the only names a grant may carry. */
+  const entities = (model.entities || []).map((entity) => ({
+    table: entity.tableName,
+    entity: entity.name,
+    displayName: entity.displayName || entity.name,
+    description: entity.description || null,
+    category: entity.category || null,
+  }));
+  const knownTables = new Set(entities.map((entity) => entity.table));
+
+  router.use(async (_request, { reportUser }) => {
+    if (!reportUser) throw unauthorized("Sign in to the reporting application to continue");
+    if (!reportUser.isAdmin) throw forbidden("Only a reporting administrator may do this");
+  });
+
+  const audit = (db, reportUser, action, target, detail) =>
+    logReportActivity(db, { user: reportUser, action, target, outcome: "ok", detail });
+
+  async function roleOr404(db, id) {
+    const role = await db.one("SELECT * FROM rpt_role WHERE rpt_role_id = $1", [id]);
+    if (!role) throw notFound("No such reporting role");
+    return role;
+  }
+
+  async function userOr404(db, id) {
+    const user = await db.one("SELECT * FROM rpt_user WHERE rpt_user_id = $1", [id]);
+    if (!user) throw notFound("No such reporting user");
+    return user;
+  }
+
+  // ── Users ──────────────────────────────────────────────────────────────────
+
+  router.get("/users", async (_request, { db }) => {
+    const rows = await db.query(
+      \`SELECT u.rpt_user_id, u.name, u.email, u.description, u.is_active, u.created_at,
+              r.rpt_role_id, r.name AS role_name, r.is_admin,
+              (SELECT MAX(l.occurred_at) FROM rpt_activity_log l
+                WHERE l.rpt_user_id = u.rpt_user_id AND l.action = 'sign-in' AND l.outcome = 'ok') AS last_sign_in
+         FROM rpt_user u
+         LEFT JOIN rpt_role r ON r.rpt_role_id = u.rpt_role_id
+        ORDER BY r.is_admin DESC NULLS LAST, u.name\`
+    );
+    return json(
+      rows.map((row) => ({
+        id: row.rpt_user_id,
+        name: row.name,
+        email: row.email,
+        description: row.description,
+        isActive: row.is_active !== false,
+        createdAt: row.created_at,
+        lastSignIn: row.last_sign_in,
+        roleId: row.rpt_role_id,
+        role: row.role_name,
+        isAdmin: row.is_admin === true,
+      }))
+    );
+  });
+
+  router.post("/users", async (request, { db, reportUser }) => {
+    const body = await readJson(request);
+    const name = String(body.name ?? "").trim();
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const password = String(body.password ?? "");
+    if (!name) throw badRequest("A user needs a name");
+    if (!EMAIL.test(email)) throw badRequest("That is not an email address");
+    if (password.length < MIN_PASSWORD) {
+      throw badRequest(\`A password needs at least \${MIN_PASSWORD} characters\`);
+    }
+    if (await db.one("SELECT 1 FROM rpt_user WHERE lower(email) = $1", [email])) {
+      throw conflict(\`\${email} already has a reporting account\`);
+    }
+    const roleId = body.roleId ? (await roleOr404(db, body.roleId)).rpt_role_id : null;
+
+    const row = await db.insert("rpt_user", {
+      name,
+      email,
+      password_hash: await hashPassword(password),
+      rpt_role_id: roleId,
+      is_active: true,
+    });
+    await audit(db, reportUser, "create user", email);
+    return json({ id: row.rpt_user_id }, { status: 201 });
+  });
+
+  router.patch("/users/:id", async (request, { db, params, reportUser }) => {
+    const user = await userOr404(db, params.id);
+    const body = await readJson(request);
+    const self = user.rpt_user_id === reportUser.id;
+    const changes = {};
+    const said = [];
+
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) throw badRequest("A user needs a name");
+      changes.name = name;
+      said.push("name");
+    }
+    if (body.roleId !== undefined) {
+      const role = body.roleId ? await roleOr404(db, body.roleId) : null;
+      // Demoting yourself is how an installation ends up with nobody who can
+      // undo it — the platform refuses it for the same reason.
+      if (self && !role?.is_admin) throw badRequest("You cannot remove your own administrator role");
+      changes.rpt_role_id = role ? role.rpt_role_id : null;
+      said.push(\`role → \${role ? role.name : "none"}\`);
+    }
+    if (body.isActive !== undefined) {
+      if (self && !body.isActive) throw badRequest("You cannot deactivate your own account");
+      changes.is_active = !!body.isActive;
+      said.push(body.isActive ? "activated" : "deactivated");
+    }
+    if (body.password !== undefined) {
+      const password = String(body.password);
+      if (password.length < MIN_PASSWORD) {
+        throw badRequest(\`A password needs at least \${MIN_PASSWORD} characters\`);
+      }
+      changes.password_hash = await hashPassword(password);
+      said.push("password");
+    }
+    if (said.length === 0) throw badRequest("Nothing to change");
+
+    await db.update("rpt_user", changes, { rpt_user_id: user.rpt_user_id });
+
+    // A deactivated account, or one whose password changed, keeps no session
+    // it already had — other than the administrator's own current one.
+    if (changes.is_active === false || changes.password_hash) {
+      await db.query("DELETE FROM rpt_session WHERE rpt_user_id = $1 AND token <> $2", [
+        user.rpt_user_id,
+        reportUser.token,
+      ]);
+    }
+    await audit(db, reportUser, "update user", user.email, said.join(", "));
+    return json({ success: true });
+  });
+
+  router.delete("/users/:id", async (_request, { db, params, reportUser }) => {
+    const user = await userOr404(db, params.id);
+    if (user.rpt_user_id === reportUser.id) throw badRequest("You cannot delete your own account");
+    await db.remove("rpt_user", { rpt_user_id: user.rpt_user_id });
+    await audit(db, reportUser, "delete user", user.email);
+    return json({ success: true });
+  });
+
+  // ── Roles and their table grants ───────────────────────────────────────────
+
+  router.get("/roles", async (_request, { db }) => {
+    const roles = await db.query(
+      \`SELECT r.*, (SELECT COUNT(*) FROM rpt_user u WHERE u.rpt_role_id = r.rpt_role_id) AS users
+         FROM rpt_role r
+        ORDER BY r.is_admin DESC, r.name\`
+    );
+    const grants = await db.query("SELECT rpt_role_id, table_name FROM rpt_role_tables ORDER BY table_name");
+    const byRole = new Map();
+    for (const grant of grants) {
+      if (!byRole.has(grant.rpt_role_id)) byRole.set(grant.rpt_role_id, []);
+      byRole.get(grant.rpt_role_id).push(grant.table_name);
+    }
+    return json(
+      roles.map((role) => ({
+        id: role.rpt_role_id,
+        name: role.name,
+        declaredAs: role.declared_as,
+        description: role.description,
+        isAdmin: role.is_admin === true,
+        createdAt: role.created_at,
+        users: Number(role.users ?? 0),
+        tables: role.is_admin === true ? null : byRole.get(role.rpt_role_id) ?? [],
+      }))
+    );
+  });
+
+  router.post("/roles", async (request, { db, reportUser }) => {
+    const body = await readJson(request);
+    const name = String(body.name ?? "").trim();
+    if (!name) throw badRequest("A role needs a name");
+    if (await db.one("SELECT 1 FROM rpt_role WHERE lower(name) = lower($1)", [name])) {
+      throw conflict(\`A role named \${name} already exists\`);
+    }
+    const row = await db.insert("rpt_role", {
+      name,
+      description: String(body.description ?? "").trim() || null,
+      is_admin: false,
+    });
+    await audit(db, reportUser, "create role", name);
+    return json({ id: row.rpt_role_id }, { status: 201 });
+  });
+
+  router.patch("/roles/:id", async (request, { db, params, reportUser }) => {
+    const role = await roleOr404(db, params.id);
+    const body = await readJson(request);
+    const changes = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) throw badRequest("A role needs a name");
+      const clash = await db.one(
+        "SELECT 1 FROM rpt_role WHERE lower(name) = lower($1) AND rpt_role_id <> $2",
+        [name, role.rpt_role_id]
+      );
+      if (clash) throw conflict(\`A role named \${name} already exists\`);
+      changes.name = name;
+    }
+    if (body.description !== undefined) changes.description = String(body.description).trim() || null;
+    if (Object.keys(changes).length === 0) throw badRequest("Nothing to change");
+    await db.update("rpt_role", changes, { rpt_role_id: role.rpt_role_id });
+    await audit(db, reportUser, "update role", role.name, Object.keys(changes).join(", "));
+    return json({ success: true });
+  });
+
+  /**
+   * Replace the tables a role may read. The administrator role has no rows —
+   * an empty scope there means "every table" — so it cannot be narrowed here,
+   * and a name that is not one of the application's tables is refused rather
+   * than stored as a grant that could never match anything.
+   */
+  router.put("/roles/:id/tables", async (request, { db, params, reportUser }) => {
+    const role = await roleOr404(db, params.id);
+    if (role.is_admin) throw badRequest("The administrator role reads every table and is not scoped");
+    const body = await readJson(request);
+    const tables = [...new Set((Array.isArray(body.tables) ? body.tables : []).map(String))];
+    const unknown = tables.filter((table) => !knownTables.has(table));
+    if (unknown.length > 0) throw badRequest(\`Not tables of this application: \${unknown.join(", ")}\`);
+
+    await db.query("DELETE FROM rpt_role_tables WHERE rpt_role_id = $1", [role.rpt_role_id]);
+    for (const table of tables) {
+      await db.query("INSERT INTO rpt_role_tables (rpt_role_id, table_name) VALUES ($1, $2)", [
+        role.rpt_role_id,
+        table,
+      ]);
+    }
+    await audit(db, reportUser, "update permissions", role.name, \`\${tables.length} of \${knownTables.size} tables\`);
+    return json({ success: true, tables: tables.sort() });
+  });
+
+  router.delete("/roles/:id", async (_request, { db, params, reportUser }) => {
+    const role = await roleOr404(db, params.id);
+    if (role.is_admin) throw badRequest("The administrator role cannot be deleted");
+    // Its users are kept and left holding no role — \`ON DELETE SET NULL\` —
+    // which reads nothing, the safe direction for an access change to fail in.
+    await db.remove("rpt_role", { rpt_role_id: role.rpt_role_id });
+    await audit(db, reportUser, "delete role", role.name);
+    return json({ success: true });
+  });
+
+  // ── Data sources ───────────────────────────────────────────────────────────
+
+  /**
+   * The one data source the pack registers: this application's own database.
+   * Row counts are read live, so the screen says what a query would find now.
+   */
+  router.get("/data-sources", async (_request, { db }) => {
+    const tables = [];
+    for (const entity of entities) {
+      let rows = null;
+      try {
+        rows = Number(await db.value(\`SELECT COUNT(*) FROM \${ident(entity.table)}\`));
+      } catch {
+        rows = null;
+      }
+      tables.push({ ...entity, rows });
+    }
+    return json([
+      {
+        name: pack.dataSource?.name ?? model.project?.name ?? "Application database",
+        description: pack.dataSource?.description ?? null,
+        clientType: pack.dataSource?.clientType ?? "pg",
+        database: pack.application?.databaseName ?? null,
+        engine: "PostgreSQL (WebAssembly, in this tab)",
+        status: "connected",
+        tables,
+      },
+    ]);
+  });
+
+  // ── System logs ────────────────────────────────────────────────────────────
+
+  router.get("/logs", async (request, { db }) => {
+    const url = new URL(request.url, "http://localhost");
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 1000);
+    const outcome = url.searchParams.get("outcome");
+    const rows = outcome
+      ? await db.query(
+          "SELECT * FROM rpt_activity_log WHERE outcome = $1 ORDER BY occurred_at DESC LIMIT $2",
+          [outcome, limit]
+        )
+      : await db.query("SELECT * FROM rpt_activity_log ORDER BY occurred_at DESC LIMIT $1", [limit]);
+    return json(
+      rows.map((row) => ({
+        id: row.rpt_activity_log_id,
+        at: row.occurred_at,
+        email: row.email,
+        action: row.action,
+        target: row.target,
+        outcome: row.outcome,
+        detail: row.detail,
+        durationMs: row.duration_ms,
+      }))
+    );
+  });
+
+  return router;
+}
+`,
   "server/modules/report-auth.routes.js": `/**
  * The reporting application's sign-in — the other login.
  *
@@ -15380,6 +18795,7 @@ import {
   destroyReportSession,
   reportSessionCookie,
 } from "../lib/report-auth.js";
+import { logReportActivity } from "../lib/report-log.js";
 
 /** What a caller may know about itself. Never the token or the hash. */
 function present(reportUser) {
@@ -15425,10 +18841,18 @@ export function reportAuthRoutes(model) {
        * Two messages would say which addresses exist — and on this side of the
        * pair that is a longer list than a reader might expect, because every
        * \`%%rbac\` role has an account. The application's own sign-in makes the
-       * same choice.
+       * same choice. The log records the address that was tried, which is
+       * only ever shown to a reporting administrator.
        */
+      await logReportActivity(db, { email: identifier, action: "sign-in", outcome: "refused" });
       throw unauthorized("Invalid email or password");
     }
+    await logReportActivity(db, {
+      user: { id: user.rpt_user_id, email: user.email },
+      action: "sign-in",
+      outcome: "ok",
+      detail: user.role_name ? \`as \${user.role_name}\` : "holding no reporting role",
+    });
 
     const token = await createReportSession(db, user.rpt_user_id, request.headers.get("user-agent"));
     return json(
@@ -15523,8 +18947,9 @@ export function reportAuthRoutes(model) {
  *
  * What is not: there is no SQL editor, nothing here writes a definition, and
  * the platform's NL→SQL pipeline, scheduled deliveries and knowledge graph need
- * servers this runtime does not have. A read-only mirror is worth more than a
- * set of buttons that answer "not in the browser build".
+ * servers this runtime does not have. The screens say so rather than offering
+ * buttons that fail. Who may read which table *is* editable, by a reporting
+ * administrator, through \`report-admin.routes.js\`.
  *
  * ## Access
  *
@@ -15540,6 +18965,7 @@ export function reportAuthRoutes(model) {
 
 import { Router } from "../lib/router.js";
 import { badRequest, forbidden, json, notFound, unauthorized } from "../lib/http.js";
+import { logReportActivity } from "../lib/report-log.js";
 
 /**
  * The most rows one report returns.
@@ -15639,6 +19065,7 @@ export function reportingRoutes(model) {
         charts: visibleCharts.length,
         chartsTotal: charts.length,
         dashboards: dashboards.length,
+        queries: queries.filter((query) => tablesRefused(reportUser, query).length === 0).length,
       },
     });
   });
@@ -15664,10 +19091,18 @@ export function reportingRoutes(model) {
     json(
       dashboards.map((dashboard) => {
         const chartOf = new Map(charts.map((chart) => [chart.key, chart]));
+        const reportOf = new Map(reports.map((report) => [report.key, report]));
         const widgets = (dashboard.widgets || []).filter((widget) => {
-          const chart = widget.chartKey ? chartOf.get(widget.chartKey) : null;
-          if (!chart) return !widget.chartKey;
-          return readable(reportUser)(chart);
+          // A tile is a chart or a report, and either one reads a query. Both
+          // are held to the role's tables — a report tile used to pass
+          // unchecked, and then refused itself on the dashboard with a 403.
+          const target = widget.chartKey
+            ? chartOf.get(widget.chartKey)
+            : widget.reportKey
+              ? reportOf.get(widget.reportKey)
+              : null;
+          if (!target) return !widget.chartKey && !widget.reportKey;
+          return readable(reportUser)(target);
         });
         return {
           ...dashboard,
@@ -15702,7 +19137,15 @@ export function reportingRoutes(model) {
     }
 
     const refused = tablesRefused(reportUser, query);
+    const action = \`run \${params.kind.replace(/s$/, "")}\`;
     if (refused.length > 0) {
+      await logReportActivity(db, {
+        user: reportUser,
+        action,
+        target: item.name,
+        outcome: "refused",
+        detail: \`may not read \${refused.join(", ")}\`,
+      });
       throw forbidden(
         \`\${reportUser.role ?? "This role"} may not read \${refused.join(", ")}, which "\${item.name}" queries.\`
       );
@@ -15716,16 +19159,34 @@ export function reportingRoutes(model) {
     // means. One row past the cap distinguishes a full page from a truncated
     // one without counting the whole thing twice.
     let rows;
+    let numeric;
     try {
-      rows = await db.query(\`SELECT * FROM (\${body}) AS report_body LIMIT \${MAX_ROWS + 1}\`);
+      ({ rows, numeric } = await db.queryWithNumeric(\`SELECT * FROM (\${body}) AS report_body LIMIT \${MAX_ROWS + 1}\`));
     } catch (error) {
       // The query came out of the model, so this is a defect in the document or
       // in the derivation rather than in the request. Name the report and quote
       // the database — nobody can act on "the report failed".
+      await logReportActivity(db, {
+        user: reportUser,
+        action,
+        target: item.name,
+        outcome: "failed",
+        detail: error?.message || String(error),
+        durationMs: Date.now() - started,
+      });
       throw badRequest(
         \`Report "\${item.name}" failed: \${error?.message || String(error)}\`
       );
     }
+
+    await logReportActivity(db, {
+      user: reportUser,
+      action,
+      target: item.name,
+      outcome: "ok",
+      detail: \`\${Math.min(rows.length, MAX_ROWS)} row\${rows.length === 1 ? "" : "s"}\`,
+      durationMs: Date.now() - started,
+    });
 
     const truncated = rows.length > MAX_ROWS;
     if (truncated) rows = rows.slice(0, MAX_ROWS);
@@ -15736,6 +19197,8 @@ export function reportingRoutes(model) {
       // Off the first row rather than a driver field list, so the column order
       // the query's own SELECT declares is the order it renders in.
       columns: rows.length > 0 ? Object.keys(rows[0]) : [],
+      // Which of those are NUMERIC, which arrives as a string — see queryWithNumeric.
+      numeric,
       rows,
       rowCount: rows.length,
       truncated,
@@ -15773,15 +19236,31 @@ export function reportingRoutes(model) {
  * server, a second database and a seeder, and a browser tab has none of those.
  * The same directive, read a second way.
  *
- * The reports are not a table. They come off \`model.json\` — the model *is* the
- * definition, and storing a copy in \`sys_\` would only create something that can
- * disagree with it. Nothing in this runtime edits a report, so nothing needs a
- * row to edit.
+ * **The reports are a table now, and that is a reversal.** This comment used to
+ * say they were not: that they came off \`model.json\`, that the model *was* the
+ * definition, and that "nothing in this runtime edits a report, so nothing needs
+ * a row to edit". The last clause was the load-bearing one and it stopped being
+ * true the moment the administrator section was asked to offer create, update
+ * and delete — at which point "no row to edit" is not a design, it is the reason
+ * the feature cannot exist.
+ *
+ * So \`sys_report\` is seeded from \`model.json\` at first boot and read from after
+ * that, which is what \`sys_rule_definitions\` already did for rules and what the
+ * Application Dictionary does for screens. The NestJS stack has had the same
+ * table since migration 018, so this also closes a gap between the two rather
+ * than inventing something for one of them.
+ *
+ * The concern the old comment had — a copy that can disagree with the model — is
+ * real and is the point rather than a cost: an administrator who edits a report
+ * *means* to disagree with the model, the same way one who hides a field does.
+ * Regenerating restores the model's version, because the seed skips a report
+ * whose name is already there and a regenerated application starts on an empty
+ * database.
  */
 
 import { Router } from "../lib/router.js";
-import { badRequest, json, notFound } from "../lib/http.js";
-import { requireUser } from "../lib/guards.js";
+import { badRequest, json, noContent, notFound, readJson } from "../lib/http.js";
+import { requireAdmin, requireUser } from "../lib/guards.js";
 
 /**
  * The most rows one report returns.
@@ -15823,6 +19302,31 @@ function assertReadOnly(sql) {
   return body;
 }
 
+/**
+ * A row as the rest of the application talks about a report.
+ *
+ * The table's column names are the NestJS stack's (\`sql_text\`, \`x_axis\`,
+ * \`entity_name\`); the shape every caller already reads is the model's (\`sql\`,
+ * \`x\`, \`entity\`). Translated in one place so neither side has to learn the
+ * other's spelling.
+ */
+function fromRow(row) {
+  return {
+    id: row.sys_report_id,
+    name: row.name,
+    title: row.title,
+    entity: row.entity_name ?? null,
+    tableName: row.table_name ?? null,
+    chart: row.chart ?? null,
+    x: row.x_axis ?? null,
+    y: row.y_axis ?? null,
+    help: row.help ?? null,
+    sql: row.sql_text,
+    sortOrder: row.sort_order,
+    isActive: row.is_active !== false,
+  };
+}
+
 /** What a caller may see: everything except the query itself. */
 function withoutSql(report) {
   const { sql: _sql, ...meta } = report;
@@ -15831,23 +19335,43 @@ function withoutSql(report) {
 
 export function reportsRoutes(model) {
   const router = new Router();
-  router.use(async (_request, { user }) => {
+  /* Reads open to any signed-in user, writes administrator-only — the same
+     arrangement \`/sys\`, \`/rules\` and \`/workflows\` use. A report's SQL runs
+     against this application's whole database, so who may write one is a
+     different question from who may read the answers. */
+  router.use(async (request, { user }) => {
     requireUser(user);
+    if (request.method !== "GET") requireAdmin(user);
   });
 
-  const reports = Array.isArray(model.reports) ? model.reports : [];
-  const byName = new Map(reports.map((report) => [report.name, report]));
+  async function reportByName(db, name) {
+    const row = await db.one("SELECT * FROM sys_report WHERE name = $1", [name]);
+    return row ? fromRow(row) : null;
+  }
 
-  router.get("/", async () => json(reports.map(withoutSql)));
+  router.get("/", async (_request, { db }) => {
+    const rows = await db.select("sys_report", { orderBy: "sort_order" });
+    return json(rows.map((row) => withoutSql(fromRow(row))));
+  });
 
-  router.get("/:name", async (_request, { params }) => {
-    const report = byName.get(params.name);
+  router.get("/:name", async (_request, { db, params, user }) => {
+    const report = await reportByName(db, params.name);
     if (!report) throw notFound(\`No report named "\${params.name}"\`);
-    return json(withoutSql(report));
+    /*
+     * The query itself goes only to an administrator, who is the only caller
+     * that can edit one — everyone else gets what they always got.
+     *
+     * \`withoutSql\` exists because a report's SQL names tables the reader may
+     * have no access to, and reading the statement is a way to learn the schema
+     * and the joins behind a screen that would otherwise only show its results.
+     * Editing needs the text, so this route hands it over; that is a reason to
+     * gate it, not a reason to widen it.
+     */
+    return json(user?.isAdmin ? report : withoutSql(report));
   });
 
   router.get("/:name/run", async (_request, { db, params }) => {
-    const report = byName.get(params.name);
+    const report = await reportByName(db, params.name);
     if (!report) throw notFound(\`No report named "\${params.name}"\`);
 
     const body = assertReadOnly(report.sql);
@@ -15858,10 +19382,11 @@ export function reportsRoutes(model) {
     // means. One row past the cap distinguishes a full page from a truncated
     // one without counting the whole thing twice.
     let rows;
+    let numeric;
     try {
-      rows = await db.query(
+      ({ rows, numeric } = await db.queryWithNumeric(
         \`SELECT * FROM (\${body}) AS report_body LIMIT \${MAX_ROWS + 1}\`
-      );
+      ));
     } catch (error) {
       // The query came out of the model, so this is a defect in the document
       // rather than in the request. Name the report and quote the database —
@@ -15877,6 +19402,8 @@ export function reportsRoutes(model) {
       // Off the first row rather than a driver field list, so the column order
       // the report's own SELECT declares is the order it renders in.
       columns: rows.length > 0 ? Object.keys(rows[0]) : [],
+      // Which of those are NUMERIC, which arrives as a string — see queryWithNumeric.
+      numeric,
       rows,
       rowCount: rows.length,
       truncated,
@@ -15884,7 +19411,142 @@ export function reportsRoutes(model) {
     });
   });
 
+  /*
+   * Create, update and delete.
+   *
+   * **The SQL is checked here as well as on every run**, and both matter. The
+   * run-time check is the one that cannot be skipped, because \`sys_report\` is
+   * an ordinary table whose rows predate this route and could be written by
+   * anything that reaches the database. The save-time check is the one that
+   * tells an administrator *now* that what they typed is not a query this
+   * application will execute, rather than storing it and failing whenever
+   * somebody next opens the report.
+   *
+   * It is the same \`assertReadOnly\` both times, deliberately: two spellings of
+   * "read-only" is how one of them comes to permit something the other refuses.
+   */
+  function reportFields(body, existing = {}) {
+    const values = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) throw badRequest("A report needs a \`name\`");
+      if (!/^[a-z0-9][a-z0-9-]*$/i.test(name)) {
+        throw badRequest("\`name\` is the report's handle in a URL — letters, digits and hyphens");
+      }
+      values.name = name;
+    }
+    if (body.title !== undefined) {
+      const title = String(body.title).trim();
+      if (!title) throw badRequest("A report needs a \`title\` — the question it answers");
+      values.title = title;
+    }
+    if (body.entity !== undefined) {
+      values.entity_name = body.entity || null;
+      /* \`tableName\` follows the entity rather than being accepted beside it:
+         two fields naming the same thing is two chances to disagree. */
+      const entity = body.entity ? resolveReportEntity(model, body.entity) : null;
+      values.table_name = entity ? entity.tableName : null;
+    }
+    if (body.help !== undefined) values.help = body.help || null;
+    if (body.sortOrder !== undefined) {
+      const order = Number(body.sortOrder);
+      if (!Number.isInteger(order)) throw badRequest("\`sortOrder\` must be a whole number");
+      values.sort_order = order;
+    }
+    if (body.isActive !== undefined) values.is_active = !!body.isActive;
+
+    /*
+     * A chart needs both axes or neither. The dashboard draws \`chart\` with \`x\`
+     * and \`y\`; one without the other renders an empty frame, which reads as a
+     * broken report rather than as a report nobody finished configuring.
+     */
+    if (body.chart !== undefined || body.x !== undefined || body.y !== undefined) {
+      const chart = body.chart ? String(body.chart).trim() : null;
+      if (chart && !CHART_TYPES.has(chart)) {
+        throw badRequest(\`\\\`chart\\\` must be one of \${[...CHART_TYPES].join(", ")}\`);
+      }
+      const x = body.x !== undefined ? body.x || null : (existing.x_axis ?? null);
+      const y = body.y !== undefined ? body.y || null : (existing.y_axis ?? null);
+      if (chart && (!x || !y)) {
+        throw badRequest("A chart needs both \`x\` and \`y\` — an axis on its own draws nothing");
+      }
+      values.chart = chart;
+      values.x_axis = chart ? x : null;
+      values.y_axis = chart ? y : null;
+    }
+
+    if (body.sql !== undefined) {
+      values.sql_text = assertReadOnly(body.sql);
+    }
+    if (!values.sql_text && !existing.sql_text) {
+      throw badRequest("A report needs \`sql\` — the query that answers the question");
+    }
+    return values;
+  }
+
+  router.post("/", async (request, { db }) => {
+    const body = await readJson(request);
+    const values = { sort_order: 0, is_active: true, ...reportFields(body) };
+    if (!values.name) throw badRequest("A report needs a \`name\`");
+    if (!values.title) throw badRequest("A report needs a \`title\`");
+
+    const clash = await db.one("SELECT sys_report_id FROM sys_report WHERE name = $1", [
+      values.name,
+    ]);
+    /* Answered as a conflict rather than left to the unique index, so the
+       message names the report instead of quoting a constraint. */
+    if (clash) throw badRequest(\`A report named "\${values.name}" already exists\`);
+
+    const row = await db.insert("sys_report", values);
+    return json(fromRow(row), { status: 201 });
+  });
+
+  router.patch("/:name", async (request, { db, params }) => {
+    const existing = await db.one("SELECT * FROM sys_report WHERE name = $1", [params.name]);
+    if (!existing) throw notFound(\`No report named "\${params.name}"\`);
+
+    const body = await readJson(request);
+    const values = reportFields(body, existing);
+    if (Object.keys(values).length === 0) throw badRequest("Nothing to change");
+
+    if (values.name && values.name !== existing.name) {
+      const clash = await db.one("SELECT sys_report_id FROM sys_report WHERE name = $1", [
+        values.name,
+      ]);
+      if (clash) throw badRequest(\`A report named "\${values.name}" already exists\`);
+    }
+    values.updated_at = new Date().toISOString();
+
+    const row = await db.update("sys_report", values, { sys_report_id: existing.sys_report_id });
+    return json(fromRow(row));
+  });
+
+  router.delete("/:name", async (_request, { db, params }) => {
+    const existing = await db.one("SELECT sys_report_id FROM sys_report WHERE name = $1", [
+      params.name,
+    ]);
+    if (!existing) throw notFound(\`No report named "\${params.name}"\`);
+    await db.remove("sys_report", { sys_report_id: existing.sys_report_id });
+    return noContent();
+  });
+
   return router;
+}
+
+/** The chart types the dashboard knows how to draw. */
+const CHART_TYPES = new Set(["bar", "line", "pie", "area"]);
+
+/** The entity a report names, by any of the spellings a model might use. */
+function resolveReportEntity(model, name) {
+  const wanted = String(name ?? "").toLowerCase();
+  return (
+    (model.entities || []).find(
+      (entity) =>
+        entity.name.toLowerCase() === wanted ||
+        entity.tableName === wanted ||
+        entity.route === wanted
+    ) || null
+  );
 }
 `,
   "server/modules/rules.routes.js": `/**
@@ -15899,15 +19561,31 @@ export function reportsRoutes(model) {
  */
 
 import { Router } from "../lib/router.js";
-import { badRequest, json, notFound, readJson } from "../lib/http.js";
-import { requireUser } from "../lib/guards.js";
+import { badRequest, json, noContent, notFound, readJson } from "../lib/http.js";
+import { requireAdmin, requireUser } from "../lib/guards.js";
 import { evaluateRules, interpretCondition } from "../lib/rules.js";
 import { resolveEntity } from "./bus.routes.js";
 
 export function rulesRoutes(model) {
   const router = new Router();
-  router.use(async (_request, { user }) => {
+  /*
+   * Reads open to any signed-in user, writes administrator-only — the same
+   * arrangement \`/sys\` uses, and for the same reason. Every write in this
+   * application is filtered through these rules, so a rule is a statement about
+   * what the business permits; someone who can edit one can decide what the
+   * application accepts from everybody else.
+   *
+   * Keyed on the HTTP method rather than per-route, deliberately: there are more
+   * write routes than anyone remembers, and one added later would otherwise
+   * default to open. \`POST /evaluate\` is the single exception and is carved out
+   * explicitly below — it writes nothing, it is the dry run.
+   */
+  router.use(async (request, { user }) => {
     requireUser(user);
+    if (request.method === "GET") return;
+    const path = new URL(request.url).pathname;
+    if (request.method === "POST" && path.endsWith("/evaluate")) return;
+    requireAdmin(user);
   });
 
   router.get("/", async (_request, { db, query }) => {
@@ -15924,6 +19602,121 @@ export function rulesRoutes(model) {
     ]);
     if (!row) throw notFound("No such rule");
     return json(withReading(model)(row));
+  });
+
+  /*
+   * Create, update and delete.
+   *
+   * A rule is four things the engine needs — the entity it binds to, when it
+   * fires, in what order, and the JDM graph that decides — so those are what is
+   * validated. \`jdm_content\` is stored as text and parsed on evaluation, which
+   * means a syntactically broken graph would be accepted here and fail on the
+   * next write to the entity, a long way from the screen that caused it. It is
+   * parsed on the way in instead.
+   *
+   * \`table_name\` is derived rather than accepted: it is the entity's, and a
+   * caller who could set it independently could bind a rule to one entity and
+   * have it evaluated against another's columns.
+   */
+  function ruleFields(body, entity, existing = {}) {
+    const values = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) throw badRequest("A rule needs a \`name\`");
+      values.name = name;
+    }
+    if (body.description !== undefined) values.description = body.description || null;
+    if (entity) {
+      values.entity_name = entity.name;
+      values.table_name = entity.tableName;
+    }
+    if (body.event !== undefined) {
+      const event = String(body.event).trim();
+      if (!EVENTS.has(event)) throw badRequest(\`\\\`event\\\` must be one of \${[...EVENTS].join(", ")}\`);
+      values.event = event;
+    }
+    if (body.operation !== undefined) {
+      const operation = String(body.operation).trim().toUpperCase();
+      if (!OPERATIONS.has(operation))
+        throw badRequest(\`\\\`operation\\\` must be one of \${[...OPERATIONS].join(", ")}\`);
+      values.operation = operation;
+    }
+    if (body.priority !== undefined) {
+      const priority = Number(body.priority);
+      if (!Number.isInteger(priority)) throw badRequest("\`priority\` must be a whole number");
+      values.priority = priority;
+    }
+    if (body.is_active !== undefined) values.is_active = !!body.is_active;
+    if (body.jdm_content !== undefined) {
+      const content =
+        typeof body.jdm_content === "string" ? body.jdm_content : JSON.stringify(body.jdm_content);
+      try {
+        const graph = JSON.parse(content);
+        if (!graph || typeof graph !== "object" || !Array.isArray(graph.nodes)) {
+          throw new Error("a JDM graph needs a \`nodes\` array");
+        }
+      } catch (error) {
+        throw badRequest(\`\\\`jdm_content\\\` is not a usable JDM graph: \${error.message}\`);
+      }
+      values.jdm_content = content;
+    }
+    if (!values.jdm_content && !existing.jdm_content) {
+      throw badRequest("A rule needs \`jdm_content\` — the JDM graph that decides");
+    }
+    return values;
+  }
+
+  router.post("/", async (request, { db }) => {
+    const body = await readJson(request);
+    const entityName = body.entity_name || body.entity;
+    if (!entityName) throw badRequest("A rule needs an \`entity_name\`");
+    const entity = resolveEntity(model, entityName);
+    if (!entity) throw notFound(\`No entity "\${entityName}" in this model\`);
+
+    const values = {
+      event: "beforeCreate",
+      operation: "ALL",
+      priority: 100,
+      is_active: true,
+      ...ruleFields(body, entity),
+    };
+    const row = await db.insert("sys_rule_definitions", values);
+    return json(withReading(model)(row), { status: 201 });
+  });
+
+  router.patch("/:id", async (request, { db, params }) => {
+    const existing = await db.one(
+      "SELECT * FROM sys_rule_definitions WHERE sys_rule_definition_id = $1",
+      [params.id]
+    );
+    if (!existing) throw notFound("No such rule");
+
+    const body = await readJson(request);
+    const entityName = body.entity_name || body.entity;
+    let entity = null;
+    if (entityName) {
+      entity = resolveEntity(model, entityName);
+      if (!entity) throw notFound(\`No entity "\${entityName}" in this model\`);
+    }
+
+    const values = ruleFields(body, entity, existing);
+    if (Object.keys(values).length === 0) throw badRequest("Nothing to change");
+    values.updated_at = new Date().toISOString();
+
+    const row = await db.update("sys_rule_definitions", values, {
+      sys_rule_definition_id: params.id,
+    });
+    return json(withReading(model)(row));
+  });
+
+  router.delete("/:id", async (_request, { db, params }) => {
+    const existing = await db.one(
+      "SELECT sys_rule_definition_id FROM sys_rule_definitions WHERE sys_rule_definition_id = $1",
+      [params.id]
+    );
+    if (!existing) throw notFound("No such rule");
+    await db.remove("sys_rule_definitions", { sys_rule_definition_id: params.id });
+    return noContent();
   });
 
   router.post("/evaluate", async (request, { db }) => {
@@ -15949,6 +19742,27 @@ export function rulesRoutes(model) {
 
   return router;
 }
+
+/**
+ * What the rules engine actually dispatches on.
+ *
+ * \`bus.service\` runs \`beforeCreate\`/\`beforeUpdate\` hooks and then
+ * \`enforceBusinessRules(table, data, action)\`, so a rule whose event is not one
+ * of these is seeded, listed, and never evaluated — the silent-inert failure the
+ * dance-studio model's sixteen actions already demonstrated once. Rejected at
+ * the door rather than stored.
+ */
+const EVENTS = new Set([
+  "beforeCreate",
+  "afterCreate",
+  "beforeUpdate",
+  "afterUpdate",
+  "beforeDelete",
+  "afterDelete",
+]);
+
+/** \`ALL\` is the wildcard the evaluate query already matches on. */
+const OPERATIONS = new Set(["ALL", "CREATE", "UPDATE", "DELETE"]);
 
 /**
  * Annotate a rule with how its decisions were read.
@@ -15997,7 +19811,8 @@ function withReading(model) {
 import { Router } from "../lib/router.js";
 import { ident } from "../lib/db.js";
 import { columnsOf, labelForTable } from "../lib/labels.js";
-import { json, notFound, readJson } from "../lib/http.js";
+import { badRequest, json, notFound, readJson } from "../lib/http.js";
+import { parseLogic } from "../lib/field-logic.js";
 import { readableTables, requireAdmin, requireUser } from "../lib/guards.js";
 import { recordAudit } from "./audit.routes.js";
 
@@ -16166,9 +19981,25 @@ export function sysRoutes(model) {
       "is_mandatory",
       "seq_no",
       "seq_no_grid",
+      "display_logic",
+      "read_only_logic",
+      "mandatory_logic",
     ]) {
       if (key in body) allowed[key] = body[key];
     }
+    /* Field logic is checked here as the checker checks it in the model
+       (EML156): a condition that does not parse would hide or lock nothing and
+       say nothing, so it is refused with the reason rather than stored. */
+    const problems = [];
+    for (const key of ["display_logic", "read_only_logic", "mandatory_logic"]) {
+      if (!(key in allowed)) continue;
+      const text = allowed[key] == null ? "" : String(allowed[key]).trim();
+      allowed[key] = text || null;
+      if (!text) continue;
+      const parsed = parseLogic(text);
+      if (!parsed.ok) problems.push(\`\${key}: \${parsed.error}\`);
+    }
+    if (problems.length) throw badRequest("Validation failed", problems);
     const updated = await db.update("sys_field", allowed, { sys_field_id: params.id });
     if (!updated) throw notFound("No such field");
     return json(updated);
@@ -16219,11 +20050,27 @@ export function sysRoutes(model) {
   });
 
   router.get("/model-summary", async (_request, { db }) => {
+    /*
+     * Counted from the tables, not from the model, for the three an
+     * administrator can now edit.
+     *
+     * These read \`model.rules\` and \`model.workflows\` until the admin screens
+     * grew create and delete — at which point a screen reporting "18 Rules"
+     * over a list showing seventeen is not a stale number, it is the dictionary
+     * describing a different application from the one running. \`entities\`,
+     * \`hooks\` and \`categories\` stay on the model: nothing edits those, and the
+     * model is where they live.
+     */
     const counts = {
       entities: model.entities.length,
-      rules: (model.rules || []).length,
-      workflows: (model.workflows || []).length,
-      sagas: (model.sagas || []).length,
+      rules: await db.value("SELECT COUNT(*)::int FROM sys_rule_definitions"),
+      workflows: await db.value(
+        "SELECT COUNT(*)::int FROM sys_workflow_definitions WHERE kind = 'state'"
+      ),
+      sagas: await db.value(
+        "SELECT COUNT(*)::int FROM sys_workflow_definitions WHERE kind = 'saga'"
+      ),
+      reports: await db.value("SELECT COUNT(*)::int FROM sys_report"),
       hooks: (model.hooks || []).length,
       categories: (model.categories || []).length,
     };
@@ -16247,23 +20094,38 @@ export function sysRoutes(model) {
   "server/modules/workflow.routes.js": `/**
  * \`/workflows\` and \`/workflow-definitions\` — the processes the model declared.
  *
- * A state machine has no endpoint that "runs" it, and inventing one would be a
- * second way to change a record's status that the guards, hooks and rules on
- * the ordinary update path know nothing about. So this module reads: the
- * machines, the transitions available from where a record actually is, and the
- * runs that have already happened. Moving a record is a PUT to the record.
+ * A state machine still has no endpoint that "runs" it, and inventing one would
+ * be a second way to change a record's status that the guards, hooks and rules
+ * on the ordinary update path know nothing about. **Moving a record is a PUT to
+ * the record**, and that has not changed.
+ *
+ * What this module now also does is let an administrator edit the machine
+ * itself — create a definition, change its transitions, retire it. That is a
+ * different thing from running one: it changes which moves *exist*, not which
+ * one a particular record is making, and it goes through the same table the
+ * readers read (\`sys_workflow_definitions\`, via \`lib/workflows.js\`) so an edit
+ * takes effect on the next request rather than at the next generation.
+ *
+ * Reads are open to any signed-in user; every write is administrator-only.
  */
 
+import { isLocked, lifecycleOf, phaseOf } from "../lib/lifecycle.js";
 import { Router } from "../lib/router.js";
-import { json, notFound } from "../lib/http.js";
-import { requireUser } from "../lib/guards.js";
+import { badRequest, json, noContent, notFound, readJson } from "../lib/http.js";
+import { requireAdmin, requireUser } from "../lib/guards.js";
 import { resolveEntity } from "./bus.routes.js";
 import { ident } from "../lib/db.js";
+import { stateFieldFor } from "../lib/workflows.js";
 
 export function workflowRoutes(model) {
   const router = new Router();
-  router.use(async (_request, { user }) => {
+  /* Reads open to any signed-in user, writes administrator-only — the same
+     arrangement \`/sys\` and \`/rules\` use. A state machine decides which moves a
+     record may make, so editing one changes what the application permits
+     everybody else to do. */
+  router.use(async (request, { user }) => {
     requireUser(user);
+    if (request.method !== "GET") requireAdmin(user);
   });
 
   router.get("/definitions", async (_request, { db }) =>
@@ -16277,6 +20139,116 @@ export function workflowRoutes(model) {
     );
     if (!row) throw notFound("No such workflow");
     return json(row);
+  });
+
+  /*
+   * Create, update and delete a definition.
+   *
+   * What is stored is the workflow object itself, in \`definition\`, exactly as
+   * the seed writes it — so a machine edited here is read back by
+   * \`stateMachineFor\` and drives the transition UI and the run log immediately.
+   * That is only true because the readers were moved onto this table; before
+   * that an edit here changed nothing, which is the whole reason this shape was
+   * worth building rather than a screen that looked like it worked.
+   *
+   * \`transitions\` is validated rather than trusted. A transition with no \`from\`
+   * or no \`to\` is not a move, and the two readers would silently skip it — so it
+   * is refused at the door rather than stored and ignored.
+   */
+  function workflowFields(body, entity, existing = {}) {
+    const values = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) throw badRequest("A workflow needs a \`name\`");
+      values.name = name;
+    }
+    if (entity) values.entity_name = entity.name;
+    if (body.kind !== undefined) {
+      const kind = String(body.kind).trim();
+      if (!KINDS.has(kind)) throw badRequest(\`\\\`kind\\\` must be one of \${[...KINDS].join(", ")}\`);
+      values.kind = kind;
+    }
+    if (body.is_active !== undefined) values.is_active = !!body.is_active;
+
+    if (body.definition !== undefined) {
+      const definition =
+        typeof body.definition === "string" ? safeParse(body.definition) : body.definition;
+      if (!definition || typeof definition !== "object") {
+        throw badRequest("\`definition\` must be an object describing the workflow");
+      }
+      const kind = values.kind ?? existing.kind ?? "state";
+      if (kind === "state") {
+        const transitions = definition.transitions;
+        if (!Array.isArray(transitions) || transitions.length === 0) {
+          throw badRequest("A \`state\` workflow needs at least one transition");
+        }
+        for (const [index, transition] of transitions.entries()) {
+          if (!transition || !String(transition.from ?? "").trim() || !String(transition.to ?? "").trim()) {
+            throw badRequest(
+              \`transitions[\${index}] needs both a \\\`from\\\` and a \\\`to\\\` — a half-drawn edge is not a move\`
+            );
+          }
+        }
+      }
+      values.definition = JSON.stringify(definition);
+    }
+
+    if (!values.definition && !existing.definition) {
+      throw badRequest("A workflow needs a \`definition\`");
+    }
+    return values;
+  }
+
+  router.post("/definitions", async (request, { db }) => {
+    const body = await readJson(request);
+    const entityName = body.entity_name || body.entity;
+    if (!entityName) throw badRequest("A workflow needs an \`entity_name\`");
+    const entity = resolveEntity(model, entityName);
+    if (!entity) throw notFound(\`No entity "\${entityName}" in this model\`);
+
+    const values = { kind: "state", is_active: true, ...workflowFields(body, entity) };
+    const row = await db.insert("sys_workflow_definitions", values);
+    return json(row, { status: 201 });
+  });
+
+  router.patch("/definitions/:id", async (request, { db, params }) => {
+    const existing = await db.one(
+      "SELECT * FROM sys_workflow_definitions WHERE sys_workflow_definition_id = $1",
+      [params.id]
+    );
+    if (!existing) throw notFound("No such workflow");
+
+    const body = await readJson(request);
+    const entityName = body.entity_name || body.entity;
+    let entity = null;
+    if (entityName) {
+      entity = resolveEntity(model, entityName);
+      if (!entity) throw notFound(\`No entity "\${entityName}" in this model\`);
+    }
+
+    const values = workflowFields(body, entity, existing);
+    if (Object.keys(values).length === 0) throw badRequest("Nothing to change");
+    values.updated_at = new Date().toISOString();
+
+    const row = await db.update("sys_workflow_definitions", values, {
+      sys_workflow_definition_id: params.id,
+    });
+    return json(row);
+  });
+
+  /*
+   * Deleting a definition leaves its runs alone. \`sys_workflow_runs\` is the
+   * record of what the application actually did, and a history that disappears
+   * when somebody tidies up a definition is not a history.
+   */
+  router.delete("/definitions/:id", async (_request, { db, params }) => {
+    const existing = await db.one(
+      "SELECT sys_workflow_definition_id FROM sys_workflow_definitions WHERE sys_workflow_definition_id = $1",
+      [params.id]
+    );
+    if (!existing) throw notFound("No such workflow");
+    await db.remove("sys_workflow_definitions", { sys_workflow_definition_id: params.id });
+    return noContent();
   });
 
   router.get("/runs", async (_request, { db, query }) => {
@@ -16304,54 +20276,66 @@ export function workflowRoutes(model) {
   });
 
   /**
-   * Where a record can go next.
+   * Where a record can go next — information, not an offer.
    *
-   * The transitions are filtered by the caller's roles here as well as being
-   * enforced on the write, because a UI that offers a button the server will
-   * refuse is worse than one that offers nothing.
+   * A state is never typed: a person moves a record by pressing one of its
+   * moves (POST /bus/:entity/:id/transition), whose buttons come from
+   * GET /bus/:entity/:id/actions. This is the picture of the flow beside them —
+   * where the record is, which moves the diagram draws from there, and whether
+   * it has reached a locked end.
    */
-  router.get("/entity/:entityName/:id/transitions", async (_request, { db, params, user }) => {
+  router.get("/entity/:entityName/:id/transitions", async (_request, { db, params }) => {
     const entity = resolveEntity(model, params.entityName);
     if (!entity) throw notFound(\`No entity "\${params.entityName}"\`);
 
-    const workflow = (model.workflows || []).find((item) => item.entity === entity.name);
-    if (!workflow) return json({ workflow: null, current: null, transitions: [] });
+    const state = await stateFieldFor(db, model, entity);
+    if (!state) return json({ workflow: null, column: null, current: null, transitions: [], systemManaged: true });
 
-    const column = ["status", "state", "workflow_state"].find((candidate) =>
-      entity.attributes.some((attribute) => attribute.columnName === candidate)
-    );
     const record = await db.one(
       \`SELECT * FROM \${ident(entity.tableName)} WHERE id = $1 AND deleted_at IS NULL\`,
       [params.id]
     );
     if (!record) throw notFound(\`No \${entity.name} with id \${params.id}\`);
 
-    const current = column ? record[column] : null;
-    const restrictions = await db.query(
-      "SELECT from_state, to_state, role_name FROM sys_transition_access WHERE table_name = $1 AND is_active = true",
-      [entity.tableName]
+    const current = record[state.field] ?? null;
+    const transitions = (state.machine.transitions || []).filter(
+      (transition) =>
+        String(transition.from) === String(current ?? state.initial ?? "") && transition.to !== "[*]"
     );
-    const held = new Set((user.roles || []).map((role) => role.toLowerCase().replace(/[\\s-]+/g, "_")));
 
-    const transitions = (workflow.transitions || [])
-      .filter((transition) => String(transition.from) === String(current ?? workflow.initial ?? ""))
-      .map((transition) => {
-        const required = restrictions
-          .filter(
-            (row) => row.from_state === String(transition.from) && row.to_state === String(transition.to)
-          )
-          .map((row) => row.role_name);
-        const permitted =
-          !required.length ||
-          user.isAdmin ||
-          required.some((role) => held.has(role.toLowerCase().replace(/[\\s-]+/g, "_")));
-        return { ...transition, requiredRoles: required, permitted };
-      });
-
-    return json({ workflow: workflow.name, column, current, transitions });
+    const lifecycle = lifecycleOf(model, entity.tableName);
+    return json({
+      workflow: state.machine.name,
+      column: state.field,
+      current,
+      transitions,
+      systemManaged: true,
+      // Where the record is in its lifecycle, and whether that end is locked.
+      phase: lifecycle ? phaseOf(lifecycle, current) : null,
+      locked: lifecycle ? isLocked(lifecycle, current) : false,
+    });
   });
 
   return router;
+}
+
+/**
+ * The two kinds the model compiles, and the two the readers understand.
+ *
+ * \`state\` is a lifecycle — \`stateMachineFor\` picks it and the transition UI
+ * draws it. \`saga\` is a multi-step process with no \`transitions\` of its own, so
+ * it is listed and never offered as a move. A third spelling would be stored,
+ * shown, and understood by neither.
+ */
+const KINDS = new Set(["state", "saga"]);
+
+/** JSON that may not be JSON — the caller supplies this one. */
+function safeParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 `,
   "styles.css": `/*
@@ -16778,6 +20762,13 @@ a { color: var(--primary); }
   padding: 16px 20px; border-bottom: 1px solid var(--border);
 }
 .record__title { margin: 0; font-size: 17px; }
+.record__state {
+  display: inline-flex; align-items: center; padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
 .record__close {
   margin-left: auto; border: 0; background: transparent; color: var(--text-faint);
   font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
@@ -16794,12 +20785,23 @@ a { color: var(--primary); }
 .group__name { font-size: 14px; font-weight: 650; color: var(--primary); }
 .group__desc { margin: 1px 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text-faint); }
 .group__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+/* \`%%section\`: exactly two columns, and a field alone on its row spans both. One
+   column on a narrow screen, where two would leave neither readable. */
+.group__fields--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.group__fields--2 > .field--wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .group__fields--2 { grid-template-columns: minmax(0, 1fr); } }
+details.group > summary.group__name { cursor: pointer; }
 
 .field { display: grid; gap: 6px; align-content: start; }
 .field--wide { grid-column: 1 / -1; }
 .field__head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .field__label { font-size: 13px; font-weight: 600; }
 .field__required { color: var(--destructive); }
+/* Field logic: \`.field\` is a grid, which beats the UA's [hidden] rule, so
+   display logic needs saying explicitly; a field locked by read-only logic
+   is told apart from one that is always read-only. */
+.field[hidden] { display: none; }
+.field--logic-locked .field__input { background: var(--surface-2); }
 .chip {
   display: inline-flex; align-items: center; gap: 3px;
   font-size: 10.5px; font-family: var(--mono); padding: 1px 7px; border-radius: 4px;
@@ -16849,6 +20851,49 @@ a { color: var(--primary); }
 .dict__row:hover { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
 .dict__detail { margin-bottom: var(--gap, 16px); }
 .dict__help { max-width: 34ch; color: var(--text-faint); font-size: 12px; }
+
+/* A value in a table that is also the control that changes it — the field
+   visibility toggles. A <button> so it is reachable by keyboard and announced
+   as one; styled as text because a row of twelve buttons reads as a toolbar
+   rather than as data. */
+.linklike {
+  font: inherit; color: var(--primary); background: none; border: 0; padding: 0;
+  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.linklike:hover:not(:disabled) { color: var(--text); }
+.linklike:disabled { opacity: 0.5; cursor: progress; text-decoration: none; }
+
+/* ---------------------------------------------------------------------------
+   The admin editors — one form shape for rules, processes and reports.
+
+   Deliberately not a modal. This application runs inside an iframe on the page
+   that generated it, where a dialog is not guaranteed to appear; the same
+   reason the dashboard's purge control is two-step. The form takes the place of
+   what the reader was looking at instead.
+   --------------------------------------------------------------------------- */
+.editor-host:empty { display: none; }
+.editor {
+  display: grid; gap: 12px; margin: 14px 0 18px; padding: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+}
+.editor .field__input--code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.5; resize: vertical;
+}
+.editor__actions { display: flex; gap: 8px; margin-top: 4px; }
+.editor__error {
+  margin: 0; padding: 9px 11px; border-radius: var(--radius-sm);
+  background: var(--destructive-soft, rgba(220, 38, 38, 0.1));
+  border-left: 3px solid var(--destructive);
+  font-size: 13px; white-space: pre-wrap;
+}
+.field__hint { margin: 0; font-size: 12px; color: var(--text-faint); }
+
+/* A delete that arms on the first click. \`is-armed\` is what says so — the label
+   changes too, but colour alone would not reach somebody who cannot see it. */
+.btn.is-armed { background: var(--destructive); border-color: var(--destructive); color: #fff; }
+
+.rule__actions, .report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .muted { color: var(--text-faint); }
 
 .record__actions { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 20px; border-top: 1px solid var(--border); flex-wrap: wrap; }
@@ -16860,6 +20905,12 @@ a { color: var(--primary); }
 }
 .violations__title { margin: 0 0 5px; font-size: 13.5px; color: var(--destructive); font-family: var(--sans); font-weight: 650; }
 .violations__list { margin: 0; padding-left: 18px; font-size: 13px; }
+.conflict { width: 100%; margin: 8px 0; border-collapse: collapse; font-size: 13px; }
+.conflict th, .conflict td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.conflict th { font-weight: 600; }
+.conflict__clash td { background: color-mix(in srgb, var(--destructive) 8%, transparent); }
+.conflict small { color: var(--destructive); }
+.conflict__actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 
 /* ------------------------------------------------------------- buttons --- */
 
@@ -16913,7 +20964,11 @@ a { color: var(--primary); }
 .side__title { margin: 0 0 6px; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); font-weight: 700; }
 .side__meta { margin: 0 0 11px; font-size: 13px; }
 .side__transitions { display: grid; gap: 7px; }
+.side__actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.side__actions .side__meta { flex-basis: 100%; margin: 0; }
 .side__empty { margin: 0; font-size: 12.5px; color: var(--text-faint); }
+.side__notice { margin: 0 0 11px; padding: 8px 10px; border: 1px solid #f0c36d; border-radius: 6px; background: #fff7e0; color: #5c4200; font-size: 12.5px; }
+.side__notice p { margin: 4px 0 0; }
 .side__list { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12.5px; }
 .side__list dt { color: var(--text-faint); }
 .side__list dd { margin: 0; font-family: var(--mono); font-size: 11.5px; }
@@ -17092,70 +21147,478 @@ a { color: var(--primary); }
 /* --------------------------------------------------- reporting ---------- */
 
 /*
- * The reporting application, told apart from the one it reports on.
+ * The way into the reporting application, on the application's own screens.
  *
- * The same design system — two applications generated from one model should not
- * look like two products — with one deliberate difference: a slate accent
- * instead of the teal. A reader who is signed into both at once in one tab has
- * to be able to tell, at a glance, which one they are looking at, and the
- * masthead is the only thing always on screen.
+ * The reporting application itself is drawn in the Enterprise Reporting
+ * platform's own design — see the \`.er\` block at the end of this file. What is
+ * here is the slate accent the application uses for the door to it: the sign-in
+ * screen's link and the dashboard's card.
  */
 :root {
   --reporting: #3f4a5a;
   --reporting-soft: #eef1f5;
 }
 
-.login--report .login__aside { background: var(--reporting-soft); }
-.login__mark--report { background: var(--reporting); }
-.login--report .btn--primary { background: var(--reporting); border-color: var(--reporting); }
-.login--report .btn--primary:hover { background: #313a47; border-color: #313a47; }
-.login--report .login__hint { background: var(--reporting-soft); }
 .login__aside-note {
   margin: 18px 0 20px; font-size: 12.5px; line-height: 1.55; color: var(--text-soft);
 }
 
-.masthead--report { border-bottom: 2px solid var(--reporting); }
-.masthead__badge {
-  padding: 4px 9px; border-radius: 999px; background: var(--reporting); color: #fff;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+/* The second application, named on the first screen. \`.btn\` is an <a> here, so
+   it needs the decoration and line-height a <button> got for free. */
+.login__other {
+  margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border);
 }
-.avatar--report { background: var(--reporting); }
-.shell--report .actionbar .btn.is-active {
+.login__other h2 { margin: 0 0 4px; font-size: 18px; }
+.login__other .login__aside-note { margin: 10px 0 16px; }
+.btn--report {
   background: var(--reporting); border-color: var(--reporting); color: #fff;
+  text-decoration: none; line-height: 1.2;
 }
-.crumbs__note { color: var(--text-faint); font-size: 12px; }
-
-/* The dashboard's tiles: one chart each, in a grid that collapses on a phone. */
-.report-grid {
-  display: grid; gap: 14px; margin: 14px 0 26px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-}
-.report-tile {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 14px 16px; min-width: 0;
-}
-.report-tile h3 { margin: 0 0 8px; font-size: 14px; }
-.report-tile .report-chart { color: var(--reporting); width: 100%; height: auto; }
-
-.report-tables {
-  display: grid; gap: 4px; margin: 10px 0 24px; padding: 0; list-style: none;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-}
-.report-tables li { font-size: 12.5px; }
-
-/* A saved query, shown where a reader asks where a number came from. */
-.report-sql { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 13px; background: var(--surface); }
-.report-sql > summary { cursor: pointer; font-size: 13px; font-weight: 500; }
-.report-sql pre {
-  margin: 10px 0 0; padding: 11px 12px; overflow-x: auto;
-  background: var(--surface-2); border-radius: var(--radius-sm);
-  font-family: var(--mono); font-size: 12px; line-height: 1.5;
-}
-.shell--report .report-chart { color: var(--reporting); }
+.btn--report:hover:not(:disabled) { background: #313a47; border-color: #313a47; }
 
 /* The entry point on the application's own dashboard. */
 .category--reporting .category__count { color: var(--reporting); font-weight: 600; text-transform: none; }
 .card--reporting { border-left: 3px solid var(--reporting); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Enterprise Reporting — the browser preview, in the platform's own design.
+ *
+ * Everything below is scoped to \`.er\` and prefixed \`er-\`, so none of it reaches
+ * the application above. The tokens are the Enterprise Reporting platform's —
+ * \`src/styles/globals.css\` in businessappwithai/enterprise_reporting_tanstack,
+ * the Tremor palette on Tailwind's blue and gray scales — value for value, light
+ * and dark. The sizes are its Tailwind classes turned into pixels: the 256px
+ * sidebar (\`w-64\`, \`w-16\` collapsed), the 56px header (\`h-14\`), 24px page
+ * padding (\`p-6\`), \`rounded-tremor-default\` 8px cards with the \`tremor-card\`
+ * shadow, \`text-tremor-default\` 14px body text.
+ *
+ * When the platform changes a token, change it here. The palette is the part a
+ * reader notices first, and a preview whose blue is not the platform's blue is
+ * one that looks like a different product.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.er {
+  --t-brand-faint: #eff6ff;
+  --t-brand-muted: #bfdbfe;
+  --t-brand-subtle: #60a5fa;
+  --t-brand: #3b82f6;
+  --t-brand-emphasis: #1d4ed8;
+  --t-brand-inverted: #ffffff;
+  --t-bg-muted: #f9fafb;
+  --t-bg-subtle: #f3f4f6;
+  --t-bg: #ffffff;
+  --t-bg-emphasis: #374151;
+  --t-border: #e5e7eb;
+  --t-ring: #e5e7eb;
+  --t-content-subtle: #9ca3af;
+  --t-content: #6b7280;
+  --t-content-emphasis: #374151;
+  --t-content-strong: #111827;
+  --t-shadow-input: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --t-shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --t-shadow-dropdown: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --t-radius-small: 6px;
+  --t-radius: 8px;
+
+  min-height: 100vh;
+  background: var(--t-bg-muted);
+  color: var(--t-content-strong);
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+[data-theme="dark"] .er {
+  --t-brand-faint: #0b1229;
+  --t-brand-muted: #172554;
+  --t-brand-subtle: #1e40af;
+  --t-brand: #3b82f6;
+  --t-brand-emphasis: #60a5fa;
+  --t-brand-inverted: #172554;
+  --t-bg-muted: #131a2b;
+  --t-bg-subtle: #1f2937;
+  --t-bg: #111827;
+  --t-bg-emphasis: #d1d5db;
+  --t-border: #1f2937;
+  --t-ring: #1f2937;
+  --t-content-subtle: #4b5563;
+  --t-content: #6b7280;
+  --t-content-emphasis: #e5e7eb;
+  --t-content-strong: #f9fafb;
+}
+.er *, .er *::before, .er *::after { box-sizing: border-box; }
+/* The application styles its headings in a display face; the platform's are
+   the body sans at a heavier weight, so they are reset here rather than
+   inherited from the page around them. */
+.er :is(h1, h2, h3, h4, p) { font-family: inherit; letter-spacing: normal; }
+.er a { color: inherit; text-decoration: none; }
+.er code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--t-bg-subtle);
+}
+
+/* Icons — lucide at h-4 w-4 unless sized. */
+.er-iconwrap { display: inline-flex; flex-shrink: 0; width: 16px; height: 16px; }
+.er-iconwrap svg { width: 100%; height: 100%; }
+.er-icon--xs { width: 12px; height: 12px; }
+.er-icon--sm { width: 14px; height: 14px; }
+.er-icon--md, .er-icon--lg { width: 20px; height: 20px; }
+.er-icon--xl { width: 40px; height: 40px; }
+.er-brand { color: var(--t-brand); }
+.er-subtle { color: var(--t-content-subtle); }
+
+/* ── Layout: app-shell.tsx ─────────────────────────────────────────────────── */
+.er-sidebar-desktop { display: none; }
+.er-content { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; transition: margin-left 300ms; }
+@media (min-width: 1024px) {
+  .er-sidebar-desktop { display: block; }
+  .er-content { margin-left: 256px; }
+  .er-content.is-collapsed { margin-left: 64px; }
+  .er-mobile-only { display: none !important; }
+}
+.er-mobile-overlay {
+  position: fixed; inset: 0; z-index: 40; background: rgb(17 24 39 / 0.5);
+  opacity: 0; pointer-events: none; transition: opacity 300ms;
+}
+.er-mobile-overlay.is-open { opacity: 1; pointer-events: auto; }
+.er-sidebar-mobile {
+  position: fixed; left: 0; top: 0; z-index: 50; height: 100vh; width: 256px;
+  transform: translateX(-100%); transition: transform 300ms;
+}
+.er-sidebar-mobile.is-open { transform: translateX(0); }
+.er-sidebar-mobile .er-sidebar { position: relative; }
+@media (min-width: 1024px) { .er-mobile-overlay, .er-sidebar-mobile { display: none; } }
+.er-main { flex: 1; overflow: auto; padding: 16px; }
+@media (min-width: 768px) { .er-main { padding: 24px; } }
+
+/* ── sidebar.tsx ───────────────────────────────────────────────────────────── */
+.er-sidebar {
+  position: fixed; left: 0; top: 0; z-index: 40; height: 100vh; width: 256px;
+  border-right: 1px solid var(--t-border); background: var(--t-bg);
+  transition: width 300ms;
+}
+.er-sidebar.is-collapsed { width: 64px; }
+.er-sidebar__brand {
+  display: flex; align-items: center; height: 56px; padding: 0 16px;
+  border-bottom: 1px solid var(--t-border);
+}
+.er-sidebar.is-collapsed .er-sidebar__brand { justify-content: center; }
+.er-sidebar__logo { display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--t-content-strong); }
+.er-sidebar__scroll { height: calc(100vh - 56px); overflow-y: auto; padding: 16px 0; }
+.er-nav__group { padding: 4px 12px; }
+.er-nav__heading {
+  margin: 0 0 8px; padding: 0 8px; font-size: 12px; line-height: 16px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.025em; color: var(--t-content-subtle);
+}
+.er-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.er-nav__item {
+  display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px;
+  border-radius: var(--t-radius-small); font-weight: 500; color: var(--t-content);
+  white-space: nowrap; overflow: hidden;
+}
+.er-nav__item:hover { background: var(--t-bg-subtle); color: var(--t-content-emphasis); }
+.er-nav__item.is-active, .er-nav__item.is-active:hover { background: var(--t-brand-faint); color: var(--t-brand); }
+.er-sidebar.is-collapsed .er-nav__item { justify-content: center; padding: 0 8px; }
+.er-nav__label { overflow: hidden; text-overflow: ellipsis; }
+.er-separator { height: 1px; margin: 8px 0; background: var(--t-border); }
+.er-sidebar__collapse {
+  position: absolute; right: -12px; top: 64px; display: inline-flex; align-items: center;
+  justify-content: center; width: 24px; height: 24px; padding: 0; cursor: pointer;
+  border: 1px solid var(--t-border); border-radius: 9999px; background: var(--t-bg);
+  color: var(--t-content); box-shadow: var(--t-shadow-input);
+}
+.er-sidebar__collapse:hover { background: var(--t-bg-muted); }
+
+/* ── header.tsx ────────────────────────────────────────────────────────────── */
+.er-header {
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center;
+  justify-content: space-between; height: 56px; padding: 0 24px;
+  border-bottom: 1px solid var(--t-border); background: var(--t-bg);
+}
+.er-header__left, .er-header__right { display: flex; align-items: center; gap: 8px; }
+.er-themeselect { width: 192px; }
+@media (max-width: 639px) { .er-themeselect { width: 132px; } }
+.er-menuwrap { position: relative; }
+.er-avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  margin: 2px; padding: 0; border: 0; cursor: pointer; border-radius: var(--t-radius-small);
+  background: var(--t-bg-subtle); color: var(--t-content-emphasis); font-size: 12px; font-weight: 500;
+}
+.er-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; width: 224px; padding: 4px;
+  border: 1px solid var(--t-border); border-radius: var(--t-radius); background: var(--t-bg);
+  box-shadow: var(--t-shadow-dropdown);
+}
+.er-menu--wide { width: 320px; padding: 0; }
+.er-menu__label { padding: 6px 8px; }
+.er-menu__label--split { padding: 16px; border-bottom: 1px solid var(--t-border); font-weight: 600; }
+.er-menu__name { margin: 0 0 4px; font-weight: 500; color: var(--t-content-strong); }
+.er-menu__email { margin: 0; font-size: 12px; line-height: 16px; color: var(--t-content); }
+.er-menu__note { padding: 4px 8px; font-size: 12px; line-height: 16px; color: var(--t-content); }
+.er-menu__note:empty { display: none; }
+.er-menu__separator { height: 1px; margin: 4px -4px; background: var(--t-border); }
+.er-menu__empty { padding: 32px 0; text-align: center; color: var(--t-content); }
+.er-menu__item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0;
+  border-radius: var(--t-radius-small); background: transparent; color: var(--t-content-emphasis);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.er-menu__item:hover { background: var(--t-bg-subtle); }
+.er-menu__item--danger { color: #ef4444; }
+
+/* The one strip the platform does not have: what this is. */
+.er-previewstrip {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 24px;
+  border-bottom: 1px solid var(--t-border); background: var(--t-brand-faint);
+  color: var(--t-content-emphasis); font-size: 12px; line-height: 18px;
+}
+.er-previewstrip .er-iconwrap { margin-top: 2px; color: var(--t-brand); }
+.er-previewstrip a { color: var(--t-brand); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── page-header.tsx, breadcrumb.tsx ───────────────────────────────────────── */
+.er-stack { display: flex; flex-direction: column; gap: 24px; }
+.er-pageheader { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.er-pageheader__lead { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.er-pageheader__text { min-width: 0; }
+.er-pageheader__titlerow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.er-pageheader__title { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; color: var(--t-content-strong); }
+.er-pageheader__description { margin: 4px 0 0; color: var(--t-content); }
+.er-pageheader__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.er-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; color: var(--t-content); margin-bottom: -12px; }
+.er-breadcrumb a:hover { color: var(--t-content-strong); }
+.er-breadcrumb .is-current { color: var(--t-content-strong); font-weight: 500; }
+.er-sectionhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.er-sectiontitle { margin: 0; font-size: 18px; line-height: 28px; font-weight: 500; color: var(--t-content-strong); }
+.er-label { font-size: 12px; line-height: 16px; color: var(--t-content); }
+.er-text { margin: 0; color: var(--t-content); }
+.er-strong { font-weight: 500; color: var(--t-content-strong); }
+.er-mt { margin-top: 12px; }
+.er-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 42ch; }
+.er-selfstart { align-self: flex-start; }
+
+/* ── Grids ─────────────────────────────────────────────────────────────────── */
+.er-grid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
+.er-grid--3 { gap: 16px; }
+@media (min-width: 640px) { .er-grid--4, .er-grid--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) {
+  .er-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .er-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .er-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+
+/* ── card.tsx, kpi-card.tsx ────────────────────────────────────────────────── */
+.er-card {
+  position: relative; display: block; width: 100%; min-width: 0; border-radius: var(--t-radius);
+  background: var(--t-bg); box-shadow: 0 0 0 1px var(--t-ring), var(--t-shadow-card);
+  color: var(--t-content-strong);
+}
+a.er-card { transition: box-shadow 150ms; }
+a.er-card:hover { box-shadow: 0 0 0 1px var(--t-ring), var(--t-shadow-dropdown); }
+.er-card__header { display: flex; flex-direction: column; gap: 4px; padding: 24px; }
+.er-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.er-card__title { margin: 0; font-size: 18px; line-height: 28px; font-weight: 500; color: var(--t-content-strong); }
+.er-card__title--sm { font-size: 14px; line-height: 20px; }
+.er-card__description { margin: 4px 0 0; color: var(--t-content); }
+.er-card__content { padding: 0 24px 24px; }
+.er-card__footer { display: flex; align-items: center; padding: 0 24px 24px; }
+.er-card__flush { overflow: hidden; border-radius: var(--t-radius); }
+.er-kpi { padding: 24px; }
+.er-kpi__label { display: flex; align-items: center; gap: 8px; color: var(--t-content); }
+.er-kpi__metric { margin: 8px 0 0; font-size: 30px; line-height: 36px; font-weight: 600; color: var(--t-content-strong); }
+.er-module { padding: 24px; }
+.er-module__head { display: flex; align-items: center; gap: 8px; }
+
+/* The "Content by type" bar list. */
+.er-barlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.er-barlist li { position: relative; display: flex; justify-content: space-between; align-items: center; height: 32px; padding: 0 8px; }
+.er-barlist__bar { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--t-brand-faint); }
+[data-theme="dark"] .er-barlist__bar { background: var(--t-brand-muted); }
+.er-barlist__name, .er-barlist__value { position: relative; display: flex; align-items: center; gap: 8px; }
+.er-barlist__name { color: var(--t-content-strong); }
+.er-barlist__value { font-weight: 500; color: var(--t-content-strong); }
+.er-taglist { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── table.tsx ─────────────────────────────────────────────────────────────── */
+.er-table-wrap { width: 100%; overflow: auto; }
+.er-table { width: 100%; border-collapse: collapse; font-size: 14px; color: var(--t-content); }
+.er-table th {
+  padding: 14px 16px; text-align: left; white-space: nowrap; font-weight: 600;
+  color: var(--t-content-strong); border-bottom: 1px solid var(--t-border);
+}
+.er-table td { padding: 16px; text-align: left; vertical-align: middle; border-top: 1px solid var(--t-border); }
+.er-table tbody tr:first-child td { border-top: 0; }
+.er-table tbody tr { transition: background-color 100ms; }
+.er-table tbody tr:hover { background: var(--t-bg-muted); }
+.er-table tr.is-link { cursor: pointer; }
+
+/* ── button.tsx ────────────────────────────────────────────────────────────── */
+.er-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0;
+  border: 1px solid transparent; font: inherit; font-weight: 500; white-space: nowrap;
+  cursor: pointer; transition: background-color 100ms, border-color 100ms, color 100ms;
+}
+.er-btn:disabled { opacity: 0.5; pointer-events: none; }
+.er-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--t-brand-muted); }
+.er-btn--default {
+  border-radius: var(--t-radius); box-shadow: var(--t-shadow-input); background: var(--t-brand);
+  border-color: var(--t-brand); color: var(--t-brand-inverted);
+}
+.er-btn--default:hover { background: var(--t-brand-emphasis); border-color: var(--t-brand-emphasis); }
+.er-btn--outline {
+  border-radius: var(--t-radius); box-shadow: var(--t-shadow-input); background: var(--t-bg);
+  border-color: var(--t-border); color: var(--t-content-emphasis);
+}
+.er-btn--outline:hover { background: var(--t-bg-muted); }
+.er-btn--secondary {
+  border-radius: var(--t-radius); box-shadow: var(--t-shadow-input); background: var(--t-bg-subtle);
+  border-color: var(--t-border); color: var(--t-content-emphasis);
+}
+.er-btn--ghost { border-radius: var(--t-radius); background: transparent; color: var(--t-content-emphasis); }
+.er-btn--ghost:hover { background: var(--t-bg-subtle); }
+.er-btn--link { background: transparent; color: var(--t-brand); }
+.er-btn--size-default { padding: 8px 16px; font-size: 14px; line-height: 20px; }
+.er-btn--size-sm { padding: 6px 12px; font-size: 12px; line-height: 16px; }
+.er-btn--size-icon { width: 36px; height: 36px; padding: 0; border-radius: var(--t-radius-small); }
+.er-btn--block { width: 100%; }
+
+/* ── badge.tsx ─────────────────────────────────────────────────────────────── */
+.er-badge {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: max-content;
+  flex-shrink: 0; padding: 2px 8px; border-radius: var(--t-radius-small); white-space: nowrap;
+  font-size: 12px; line-height: 16px; font-weight: 500; box-shadow: inset 0 0 0 1px var(--t-border);
+}
+.er-badge--default { background: var(--t-brand-faint); color: var(--t-brand-emphasis); box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.2); }
+.er-badge--secondary { background: var(--t-bg-subtle); color: var(--t-content-emphasis); }
+.er-badge--outline { background: transparent; color: var(--t-content-emphasis); }
+.er-badge--neutral { background: rgb(107 114 128 / 0.1); color: var(--t-content-emphasis); box-shadow: inset 0 0 0 1px rgb(107 114 128 / 0.2); }
+.er-badge--warning { background: rgb(245 158 11 / 0.1); color: #b45309; box-shadow: inset 0 0 0 1px rgb(245 158 11 / 0.2); }
+.er-badge--destructive { background: rgb(239 68 68 / 0.1); color: #b91c1c; box-shadow: inset 0 0 0 1px rgb(239 68 68 / 0.2); }
+.er-badge--icon { text-transform: capitalize; }
+
+/* ── input.tsx, label.tsx, select.tsx ──────────────────────────────────────── */
+.er-input, .er-select {
+  display: flex; width: 100%; padding: 8px 12px; border: 1px solid var(--t-border);
+  border-radius: var(--t-radius); background: var(--t-bg); color: var(--t-content-emphasis);
+  box-shadow: var(--t-shadow-input); font: inherit; font-size: 14px; line-height: 20px; outline: none;
+  transition: border-color 100ms, box-shadow 100ms;
+}
+.er-select { height: 38px; padding: 0 12px; cursor: pointer; }
+.er-input::placeholder { color: var(--t-content); }
+.er-input:focus, .er-select:focus { border-color: var(--t-brand-subtle); box-shadow: 0 0 0 2px var(--t-brand-muted); }
+.er-label-strong { font-weight: 500; line-height: 1; color: var(--t-content-strong); }
+.er-field { display: flex; flex-direction: column; gap: 8px; }
+.er-toolbar { display: flex; align-items: center; gap: 16px; }
+.er-searchwrap { position: relative; flex: 1; max-width: 448px; }
+.er-searchicon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--t-content); }
+.er-input--search { padding-left: 40px; }
+
+/* ── alert.tsx ─────────────────────────────────────────────────────────────── */
+.er-alert {
+  display: flex; gap: 12px; padding: 12px 16px; border: 1px solid var(--t-border);
+  border-radius: var(--t-radius); background: var(--t-bg); color: var(--t-content-emphasis);
+}
+.er-alert > .er-iconwrap { margin-top: 2px; color: var(--t-brand); }
+.er-alert--destructive { border-color: rgb(239 68 68 / 0.5); color: #b91c1c; }
+[data-theme="dark"] .er-alert--destructive { color: #f87171; }
+.er-alert--destructive > .er-iconwrap { color: currentColor; }
+.er-alert__title { margin: 0; font-weight: 500; }
+.er-alert__body { margin-top: 2px; font-size: 14px; }
+
+/* Loading and empty states. */
+.er-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 32px; color: var(--t-content); }
+.er-spinner {
+  width: 20px; height: 20px; border-radius: 9999px; border: 2px solid var(--t-border);
+  border-top-color: var(--t-brand); animation: er-spin 800ms linear infinite;
+}
+.er-spinner--inline { width: 14px; height: 14px; border-color: rgb(255 255 255 / 0.4); border-top-color: #fff; }
+@keyframes er-spin { to { transform: rotate(360deg); } }
+.er-empty { padding: 48px 24px; text-align: center; }
+.er-empty__title { margin: 0; font-weight: 500; color: var(--t-content-strong); }
+.er-empty__detail { margin: 4px 0 0; color: var(--t-content); }
+.er-unavailable { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 24px; max-width: 68ch; }
+.er-code {
+  margin: 0; padding: 16px; overflow-x: auto; border-radius: var(--t-radius); background: var(--t-bg-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 18px;
+  color: var(--t-content-strong); white-space: pre;
+}
+.er-code code { padding: 0; background: none; }
+
+/* ── Charts (Recharts, as SVG) and the dashboard grid ──────────────────────── */
+.er-chart { display: block; width: 100%; height: auto; }
+.er-chart__grid { stroke: var(--t-border); stroke-dasharray: 3 3; }
+.er-chart__tick, .er-chart__legend { fill: var(--t-content); font-size: 12px; font-family: inherit; }
+.er-chart__legend { fill: var(--t-content-emphasis); }
+.er-chart__bar { fill: var(--t-brand); }
+.er-chart__line { fill: none; stroke: var(--t-brand); stroke-width: 2; }
+.er-chart__area { fill: var(--t-brand); fill-opacity: 0.15; }
+
+/* react-grid-layout: twelve columns, 100px rows, 16px gutters. */
+.er-dashgrid { display: grid; gap: 16px; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 100px; }
+.er-tile { display: flex; flex-direction: column; overflow: hidden; }
+.er-tile__head { padding: 16px 16px 8px; }
+.er-tile__body { flex: 1; min-height: 0; overflow: auto; padding: 0 16px 16px; }
+.er-tile__body:has(> .er-chart) { display: flex; align-items: center; }
+.er-tile__body > .er-chart { height: 100%; max-height: 100%; }
+.er-tile__body .er-table td, .er-tile__body .er-table th { padding: 8px 10px; }
+@media (max-width: 1023px) {
+  .er-dashgrid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+  .er-tile { grid-column: auto !important; grid-row: auto !important; min-height: 280px; }
+}
+
+/* ── login.tsx ─────────────────────────────────────────────────────────────── */
+.er-login {
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: linear-gradient(to bottom right, var(--t-bg-muted), var(--t-bg-subtle));
+}
+.er-login__column { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; max-width: 448px; padding: 32px 0; }
+.er-login__header { align-items: center; text-align: center; }
+.er-login__mark {
+  display: inline-flex; margin-bottom: 16px; padding: 12px; border-radius: 9999px;
+  background: var(--t-brand); color: var(--t-brand-inverted);
+}
+.er-login__title { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; color: var(--t-content-strong); }
+.er-login__fields { display: flex; flex-direction: column; gap: 16px; }
+.er-login__accounts { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.er-login__note { display: flex; gap: 8px; margin: 0; font-size: 12px; line-height: 18px; color: var(--t-content); text-align: left; }
+.er-login__note .er-iconwrap { margin-top: 2px; }
+.er-accounts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.er-accounts__row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%;
+  padding: 8px 10px; border: 1px solid var(--t-border); border-radius: var(--t-radius-small);
+  background: var(--t-bg); color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.er-accounts__row:hover { background: var(--t-bg-muted); border-color: var(--t-brand-muted); }
+.er-accounts__row .er-label { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+.er-accounts__email { font-size: 12px; line-height: 16px; color: var(--t-content); overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Administration: dialog.tsx, row actions, the table-grant grid ─────────── */
+.er-dialog-overlay {
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgb(0 0 0 / 0.5);
+}
+.er-dialog { width: 100%; max-width: 512px; max-height: calc(100vh - 32px); overflow: auto; box-shadow: var(--t-shadow-dropdown); }
+.er-dialog__body { display: flex; flex-direction: column; gap: 16px; }
+.er-dialog__footer { justify-content: flex-end; gap: 8px; }
+.er-rowactions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.er-btn--danger { color: #ef4444; }
+.er-btn--danger.is-armed { background: #ef4444; color: #fff; }
+.er-titled { display: inline-flex; align-items: center; gap: 8px; }
+.er-inline { display: flex; align-items: center; gap: 8px; }
+.er-select--inline { width: auto; min-width: 180px; }
+.er-block { display: block; }
+.er-grantgroup { margin: 0 0 16px; padding: 0; border: 0; }
+.er-grantgroup legend { padding: 0; margin-bottom: 8px; }
+.er-grantgrid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+.er-grant {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--t-border); border-radius: var(--t-radius-small); background: var(--t-bg);
+}
+.er-grant:hover { background: var(--t-bg-muted); }
+.er-grant:has(input:checked) { border-color: var(--t-brand-subtle); background: var(--t-brand-faint); }
+.er-grant input { margin-top: 3px; accent-color: var(--t-brand); }
+/* In the slide-over the collapse button is the close button, and it sits inside
+   the panel: hung off the edge as on the desktop, it peeked into the page
+   while the panel was closed. */
+.er-sidebar-mobile .er-sidebar__collapse { right: 12px; top: 16px; }
 `,
   "sw.js": `/**
  * The Service Worker — this application's HTTP layer.
@@ -17424,8 +21887,22 @@ async function forward(base, request) {
   );
 
   const result = await answer;
-  return new Response(result.body, { status: result.status, headers: result.headers });
+  /* A 204, 205 or 304 may not carry a body, and the constructor throws rather
+     than ignoring one. The host answers every request with an ArrayBuffer — a
+     zero-byte one for a 204 — which is still a body as far as \`new Response\`
+     is concerned, so passing it through rejected the fetch handler and the
+     browser reported \`net::ERR_FAILED\`: a request that never reached the
+     application, on a route that was answering correctly. Every DELETE in the
+     administrator section failed this way, and the same routes returned 204
+     without complaint over the Node host, which has no such boundary. */
+  return new Response(NULL_BODY_STATUS.has(result.status) ? null : result.body, {
+    status: result.status,
+    headers: result.headers,
+  });
 }
+
+/** Statuses the Response constructor refuses to pair with a body. */
+const NULL_BODY_STATUS = new Set([204, 205, 304]);
 
 /**
  * Ask every page under this scope to hand over a fresh port.
@@ -17566,6 +22043,7 @@ export class ApiError extends Error {
     this.body = body;
     this.detail = body?.detail;
     this.violations = body?.violations;
+    this.details = body?.details;
   }
 }
 
@@ -17578,8 +22056,8 @@ export class ApiError extends Error {
  * application because a reporting call expired, which is the confusion the two
  * sessions exist to prevent.
  */
-async function request(method, path, body, audience = "app") {
-  const headers = {};
+async function request(method, path, body, audience = "app", extraHeaders = {}) {
+  const headers = { ...extraHeaders };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (audience === "report") {
     if (reportToken) headers[REPORT_HEADER] = \`Bearer \${reportToken}\`;
@@ -17621,9 +22099,11 @@ async function request(method, path, body, audience = "app") {
 
 export const api = {
   get: (path) => request("GET", path),
-  post: (path, body) => request("POST", path, body ?? {}),
-  put: (path, body) => request("PUT", path, body ?? {}),
-  patch: (path, body) => request("PATCH", path, body ?? {}),
+  post: (path, body, headers) => request("POST", path, body ?? {}, "app", headers),
+  // \`headers\` is how a save sends If-Match — the version the form opened the
+  // record at — so the server can refuse it if someone saved in between.
+  put: (path, body, headers) => request("PUT", path, body ?? {}, "app", headers),
+  patch: (path, body, headers) => request("PATCH", path, body ?? {}, "app", headers),
   delete: (path) => request("DELETE", path),
 };
 
@@ -17631,6 +22111,9 @@ export const api = {
 export const reportApi = {
   get: (path) => request("GET", path, undefined, "report"),
   post: (path, body) => request("POST", path, body ?? {}, "report"),
+  put: (path, body) => request("PUT", path, body ?? {}, "report"),
+  patch: (path, body) => request("PATCH", path, body ?? {}, "report"),
+  delete: (path) => request("DELETE", path, undefined, "report"),
 };
 
 /** \`{ a: 1, b: null }\` -> \`?a=1\`, skipping what is not set. */
@@ -17881,6 +22364,236 @@ export const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (character) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]
   );
+
+/**
+ * A NUMERIC as text: grouped, with two decimals when it has a fraction.
+ *
+ * Postgres hands NUMERIC over as a string so no digit is lost, and money is
+ * DECIMAL(18,4) — printed as it arrived, an amount read \`25955.7000\`. Formatted
+ * from the string rather than a parsed Number, which \`Intl\` treats as an exact
+ * decimal, so a value past 2^53 keeps its digits. Up to four decimals survive,
+ * which is the scale money is stored at; trailing zeros past the second do not.
+ */
+export function formatNumeric(value) {
+  const text = String(value);
+  if (!/^-?\\d+(\\.\\d+)?$/.test(text)) return text;
+  const fraction = /\\.\\d*[1-9]/.test(text);
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: fraction ? 2 : 0,
+    maximumFractionDigits: 4,
+  }).format(text);
+}
+`,
+  "ui/editor.js": `/**
+ * The admin screens' shared editor: one form builder and one two-step delete.
+ *
+ * The dictionary, the rules, the processes and the reports all now offer
+ * create, edit and delete, and all four want the same three things — a form
+ * whose fields come from a description rather than from markup, a save that
+ * reports the server's refusal rather than swallowing it, and a delete that
+ * cannot happen on one misplaced click. Written once here rather than four
+ * times, because four copies is how three of them come to disagree about what
+ * "cancel" does.
+ *
+ * ## No \`confirm()\` and no \`prompt()\`
+ *
+ * This application runs inside an iframe on the page that generated it, and a
+ * modal dialog is not guaranteed to appear there — the same reason the
+ * dashboard's purge control is two-step rather than a \`confirm()\`. So a delete
+ * arms itself on the first click and commits on the second, and anything that
+ * needs typing gets a real field in a real form.
+ *
+ * ## The server is the validator
+ *
+ * These forms check almost nothing. Every rule about what a rule, a workflow or
+ * a report may contain lives in the routes — the six events the engine
+ * dispatches on, the read-only SQL guard, a chart needing both axes — and a
+ * second copy here would be a second answer that drifts. What the form does is
+ * put the server's refusal where the reader can act on it: beside the field
+ * they are editing, not in a toast that vanishes.
+ */
+
+import { el, mount, toast } from "./dom.js";
+
+/**
+ * Build a form from a field description.
+ *
+ * \`fields\` is an array of \`{ name, label, type, options, hint, rows, required }\`.
+ * \`type\` is one of \`text\`, \`number\`, \`textarea\`, \`select\`, \`checkbox\`; anything
+ * else renders as \`text\`, because a typo in a field description should cost a
+ * plain input rather than a blank screen.
+ *
+ * \`onSave\` receives the collected values and may throw — the message is shown
+ * in the form and the form stays open with what the reader typed still in it.
+ * That is the whole reason this returns a node rather than a promise: a save
+ * that fails must not lose the work.
+ */
+export function editorForm({ title, lede, fields, values = {}, saveLabel = "Save", onSave, onCancel }) {
+  const inputs = new Map();
+  const error = el("p.editor__error", { hidden: true });
+
+  const controls = fields.map((field) => {
+    const id = \`editor-\${field.name}\`;
+    const current = values[field.name];
+    let input;
+
+    if (field.type === "textarea") {
+      input = el("textarea.field__input.field__input--code", {
+        id,
+        rows: field.rows ?? 8,
+        spellcheck: "false",
+      });
+      input.value = current == null ? "" : String(current);
+    } else if (field.type === "select") {
+      input = el(
+        "select.field__input",
+        { id },
+        ...(field.options || []).map((option) => {
+          const value = typeof option === "string" ? option : option.value;
+          const label = typeof option === "string" ? option : option.label;
+          const node = el("option", { value }, label);
+          if (String(current ?? "") === String(value)) node.selected = true;
+          return node;
+        })
+      );
+    } else if (field.type === "checkbox") {
+      input = el("input", { id, type: "checkbox" });
+      input.checked = current !== false;
+    } else {
+      input = el("input.field__input", {
+        id,
+        type: field.type === "number" ? "number" : "text",
+      });
+      input.value = current == null ? "" : String(current);
+    }
+
+    inputs.set(field.name, { input, field });
+
+    return el(
+      "div.field",
+      el(
+        "div.field__head",
+        el("label.field__label", { for: id }, field.label),
+        field.required ? el("span.chip.chip--text", "Required") : null
+      ),
+      input,
+      field.hint ? el("p.field__hint", field.hint) : null
+    );
+  });
+
+  function collect() {
+    const out = {};
+    for (const [name, { input, field }] of inputs) {
+      if (field.type === "checkbox") {
+        out[name] = input.checked;
+        continue;
+      }
+      const raw = input.value;
+      if (field.type === "number") {
+        out[name] = raw === "" ? undefined : Number(raw);
+        continue;
+      }
+      const text = typeof raw === "string" ? raw.trim() : raw;
+      /* An empty optional field is sent as "" rather than omitted, so clearing
+         one actually clears it — \`undefined\` would leave the old value in
+         place, which reads as the save having silently failed. */
+      out[name] = field.required && text === "" ? "" : text;
+    }
+    return out;
+  }
+
+  const save = el("button.btn.btn--primary", { type: "submit" }, saveLabel);
+  const form = el(
+    "form.editor",
+    {
+      onsubmit: async (event) => {
+        event.preventDefault();
+        error.hidden = true;
+        save.disabled = true;
+        save.textContent = "Saving…";
+        try {
+          await onSave(collect());
+        } catch (failure) {
+          /* The server's own words. It knows why it refused and this screen
+             does not, so paraphrasing here can only lose information. */
+          error.textContent = failure?.message || String(failure);
+          error.hidden = false;
+          save.disabled = false;
+          save.textContent = saveLabel;
+        }
+      },
+    },
+    el("h3.section-title", title),
+    lede ? el("p.lede", lede) : null,
+    ...controls,
+    error,
+    el(
+      "div.editor__actions",
+      save,
+      el("button.btn", { type: "button", onclick: () => onCancel?.() }, "Cancel")
+    )
+  );
+
+  /* Focus the first field so a keyboard reader can start typing, and so opening
+     the form is visibly *about* that form rather than a section that appeared
+     somewhere on the page. */
+  queueMicrotask(() => inputs.values().next().value?.input?.focus());
+  return form;
+}
+
+/**
+ * A delete that takes two clicks.
+ *
+ * The first arms it and says what will happen; the second does it. A third
+ * click anywhere else disarms it, because a control left armed across a scroll
+ * is a control waiting to be hit by accident.
+ */
+export function deleteButton(label, description, onDelete) {
+  const button = el("button.btn.btn--danger.btn--small", { type: "button" }, label);
+  let armed = false;
+
+  const disarm = () => {
+    armed = false;
+    button.textContent = label;
+    button.classList.remove("is-armed");
+    document.removeEventListener("click", away, true);
+  };
+  const away = (event) => {
+    if (event.target !== button) disarm();
+  };
+
+  button.addEventListener("click", async () => {
+    if (!armed) {
+      armed = true;
+      button.textContent = description || "Really delete?";
+      button.classList.add("is-armed");
+      document.addEventListener("click", away, true);
+      return;
+    }
+    disarm();
+    button.disabled = true;
+    try {
+      await onDelete();
+    } catch (error) {
+      toast(error.message, "error");
+      button.disabled = false;
+    }
+  });
+
+  return button;
+}
+
+/**
+ * Put an editor where the reader is looking.
+ *
+ * The form replaces the panel's contents rather than appearing above or below
+ * it: on a list of thirty reports, a form rendered at the top is a form the
+ * reader has to go and find.
+ */
+export function openEditor(host, form) {
+  mount(host, form);
+  host.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
 `,
   "ui/main.js": `/**
  * The shell: masthead, action bar, breadcrumb, and which screen is on show.
@@ -18119,7 +22832,12 @@ async function render() {
 
     if (admin) {
       setCrumbs([{ label: admin[0] }]);
-      return void (await admin[1](outlet));
+      /* The admin screens are read-only except one: the dictionary offers the
+         field-visibility toggle, which is administrator-only. The server
+         refuses a non-admin write regardless (\`sys.routes.js\` guards on the
+         method), so this decides whether the control is *offered*, not whether
+         it is allowed. */
+      return void (await admin[1](outlet, { user: state.user }));
     }
 
     setCrumbs([{ label: "Not found" }]);
@@ -18451,6 +23169,7 @@ if (typeof window.matchMedia === "function") {
 import { el, mount, spinner, empty, displayValue, toast } from "../dom.js";
 import { api } from "../api.js";
 import { setHelp } from "../main.js";
+import { deleteButton, editorForm, openEditor } from "../editor.js";
 
 /**
  * The Application Dictionary, as the application actually holds it.
@@ -18459,22 +23178,25 @@ import { setHelp } from "../main.js";
  * the dictionary and none of the part that decides what a screen looks like.
  * The reference type on a column is why a field is a dropdown rather than a
  * text box; the reference lists are the dropdown's values; the windows and tabs
- * are how the screens are grouped. All of it is seeded at first boot and all of
- * it is readable, so all of it is shown.
+ * are how the screens are grouped; the fields are what each tab actually draws.
+ * All of it is seeded at first boot and all of it is readable, so all of it is
+ * shown.
  *
- * Picking a table opens its columns. That is one request per table rather than
- * one for every table at load, because a seventeen-entity model has several
- * hundred columns and nobody reads them all at once.
+ * Picking a table opens its columns, and picking a tab opens its fields. That is
+ * one request per table rather than one for every table at load, because a
+ * seventeen-entity model has several hundred columns and nobody reads them all at
+ * once.
  */
-export async function dictionaryView(root) {
+export async function dictionaryView(root, { user } = {}) {
   mount(root, spinner("Reading the dictionary"));
-  const [tables, summary, references, refLists, windows, tabs] = await Promise.all([
+  const [tables, summary, references, refLists, windows, tabs, fields] = await Promise.all([
     api.get("/sys/tables"),
     api.get("/sys/model-summary"),
     api.get("/sys/references"),
     api.get("/sys/ref-list"),
     api.get("/sys/windows"),
     api.get("/sys/tabs"),
+    api.get("/sys/fields"),
   ]);
 
   const columnsByTable = new Map();
@@ -18492,14 +23214,188 @@ export async function dictionaryView(root) {
 
   const detail = el("div.dict__detail", el("p.muted", "Select a table to see its columns."));
 
-  async function showColumns(table) {
-    if (!columnsByTable.has(table.sys_table_id)) {
-      columnsByTable.set(
-        table.sys_table_id,
-        await api.get(\`/sys/columns?tableId=\${table.sys_table_id}\`)
-      );
+  /*
+   * A field is not a column, and this screen used to stop one short of saying so.
+   *
+   * \`sys_column\` is where a value is stored; \`sys_field\` is where it is *placed* —
+   * whether it appears on the form at all, whether it appears in the grid, in
+   * what order, under what label, and whether it can be edited. That is the third
+   * leg of the window/tab/field triple the rest of this section already shows, and
+   * the application reads it on every screen it draws: \`/bus/<entity>/fields/form\`
+   * and \`.../fields/grid\` are both queries over these rows. They were seeded (323
+   * of them on the hospital model), served by \`/sys/fields\`, and rendered nowhere,
+   * so the one part of the dictionary that decides what a form looks like was the
+   * one part a reader could not look at.
+   */
+  const fieldsByTab = new Map();
+  for (const field of fields) {
+    if (!fieldsByTab.has(field.sys_tab_id)) fieldsByTab.set(field.sys_tab_id, []);
+    fieldsByTab.get(field.sys_tab_id).push(field);
+  }
+
+  const fieldDetail = el("div.dict__detail", el("p.muted", "Select a tab to see its fields."));
+
+  /* The stat counts what this caller can actually open, for the same reason the
+     Tables list is scoped: a count of 323 above a list offering eight of them
+     reads as a broken screen rather than as access control working. */
+  const readableTabIds = new Set(
+    tabs
+      .filter((tab) => tables.some((row) => row.sys_table_id === tab.sys_table_id))
+      .map((tab) => tab.sys_tab_id)
+  );
+  const visibleFieldCount = fields.filter((field) => readableTabIds.has(field.sys_tab_id)).length;
+
+  /* Columns are fetched per table and cached; the fields view needs the same rows
+     to name the column each field sits on, so it goes through the same cache
+     rather than adding a second request for what is already in hand. */
+  async function columnsFor(tableId) {
+    if (!columnsByTable.has(tableId)) {
+      columnsByTable.set(tableId, await api.get(\`/sys/columns?tableId=\${tableId}\`));
     }
-    const columns = columnsByTable.get(table.sys_table_id);
+    return columnsByTable.get(tableId);
+  }
+
+  const yesNo = (value) => (value ? "Yes" : "No");
+
+  /**
+   * The one dictionary write this application offers, and it had no caller.
+   *
+   * \`PATCH /sys/fields/:id\` has been in \`sys.routes.js\` since the dictionary
+   * was, under a comment calling it "the one dictionary write the application
+   * itself offers, because it is the one that pays off immediately: a column
+   * hidden here disappears from every grid and form without regenerating". It
+   * paid off for nobody: no screen listed the fields, so nothing could reach it.
+   * The Fields panel is where it belongs.
+   *
+   * Administrator-only *as an offer*. \`sys.routes.js\` refuses any non-GET from a
+   * caller who is not one, so this decides what is drawn, never what is allowed
+   * — a reader who is not an administrator sees the value and no control rather
+   * than a control that answers 403.
+   *
+   * The row is updated from the server's response rather than from what was
+   * clicked: the endpoint returns the updated row, and trusting the optimistic
+   * value is how a screen comes to disagree with the database it is describing.
+   */
+  function visibilityCell(field, key, onChanged) {
+    if (!user?.isAdmin) return el("td", yesNo(field[key]));
+
+    const label = key === "is_displayed" ? "the form" : "the list";
+    const button = el(
+      "button.linklike",
+      { type: "button", title: \`\${field[key] ? "Remove from" : "Add to"} \${label}\` },
+      yesNo(field[key])
+    );
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      button.disabled = true;
+      try {
+        const updated = await api.patch(\`/sys/fields/\${field.sys_field_id}\`, {
+          [key]: !field[key],
+        });
+        Object.assign(field, updated);
+        toast(
+          \`\${field.name} is \${field[key] ? "on" : "off"} \${label}. The screen picks it up next time it loads.\`,
+          "success"
+        );
+        onChanged();
+      } catch (error) {
+        toast(error.message, "error");
+        button.disabled = false;
+      }
+    });
+    return el("td", button);
+  }
+
+  async function showFields(tab) {
+    const table = tables.find((row) => row.sys_table_id === tab.sys_table_id);
+    /* \`/sys/tables\` is scoped to what this caller's roles may read; \`/sys/tabs\`
+       and \`/sys/fields\` are not. Showing the fields of a table absent from that
+       scoped list would make this screen name columns of an entity the rest of
+       the application refuses to show — so the tab is listed and its fields are
+       not, which is the same rule the Tables list above already follows. */
+    if (!table) {
+      mount(
+        fieldDetail,
+        el(
+          "div",
+          el("h3.section-title", tab.name),
+          el("p.muted", "This tab belongs to an entity your roles cannot read.")
+        )
+      );
+      return;
+    }
+    const rows = fieldsByTab.get(tab.sys_tab_id) ?? [];
+    const columnName = new Map(
+      (await columnsFor(table.sys_table_id)).map((c) => [c.sys_column_id, c.column_name])
+    );
+    mount(
+      fieldDetail,
+      el(
+        "div",
+        el("h3.section-title", \`\${tab.name} — \${rows.length} fields\`),
+        el(
+          "p.lede",
+          "“On form” and “In grid” are what the application asks for when it draws this " +
+            "entity’s record screen and its list. Sequence is the order it draws them in." +
+            (user?.isAdmin
+              ? " Both are editable: click one to hide or show that field. The column stays in the" +
+                " database and the screen stops drawing it — no regeneration, no migration."
+              : "")
+        ),
+        rows.length === 0
+          ? el("p.muted", "No fields are seeded against this tab.")
+          : el(
+              "div.table-wrap",
+              el(
+                "table.table",
+                el(
+                  "thead",
+                  el(
+                    "tr",
+                    ["Field", "Column", "On form", "In grid", "Form seq", "Grid seq", "Required", "Read only", "Logic", "Type", "Help"].map(
+                      (heading) => el("th", heading)
+                    )
+                  )
+                ),
+                el(
+                  "tbody",
+                  rows.map((field) =>
+                    el(
+                      "tr",
+                      el("td", field.name || "—"),
+                      el("td", el("code", columnName.get(field.sys_column_id) || "—")),
+                      visibilityCell(field, "is_displayed", () => showFields(tab)),
+                      visibilityCell(field, "is_displayed_grid", () => showFields(tab)),
+                      el("td", displayValue(field.seq_no ?? "—")),
+                      el("td", displayValue(field.seq_no_grid ?? "—")),
+                      el("td", yesNo(field.is_mandatory)),
+                      el("td", yesNo(field.is_read_only)),
+                      el("td", logicCell(field)),
+                      el("td", field.field_type || "—"),
+                      el("td.dict__help", field.description || "—")
+                    )
+                  )
+                )
+              )
+            )
+      )
+    );
+  }
+
+  /* Compiere's Display, Read Only and Mandatory Logic, as the dictionary row
+     holds them — what makes the field appear, lock or become required. */
+  function logicCell(field) {
+    const parts = [
+      ["Display", field.display_logic],
+      ["Read only", field.read_only_logic],
+      ["Mandatory", field.mandatory_logic],
+    ].filter(([, logic]) => logic);
+    if (!parts.length) return "—";
+    return parts.map(([label, logic]) => el("div", \`\${label}: \`, el("code", logic)));
+  }
+
+  async function showColumns(table) {
+    const columns = await columnsFor(table.sys_table_id);
     mount(
       detail,
       el(
@@ -18558,6 +23454,7 @@ export async function dictionaryView(root) {
           ["List values", refLists.length],
           ["Windows", windows.length],
           ["Tabs", tabs.length],
+          ["Fields", visibleFieldCount],
           ["Rules", summary.counts.rules],
         ]),
 
@@ -18636,26 +23533,34 @@ export async function dictionaryView(root) {
             "table.table",
             el(
               "thead",
-              el("tr", ["Window", "Tab", "Table", "Sequence"].map((heading) => el("th", heading)))
+              el("tr", ["Window", "Tab", "Table", "Sequence", "Fields"].map((heading) => el("th", heading)))
             ),
             el(
               "tbody",
               tabs.length === 0
-                ? [el("tr", el("td", { colspan: 4 }, "No tabs seeded."))]
+                ? [el("tr", el("td", { colspan: 5 }, "No tabs seeded."))]
                 : tabs.map((tab) => {
                     const window = windows.find((row) => row.sys_window_id === tab.sys_window_id);
                     const table = tables.find((row) => row.sys_table_id === tab.sys_table_id);
                     return el(
-                      "tr",
+                      "tr.dict__row",
+                      {
+                        onclick: () => showFields(tab),
+                        title: \`Show the fields of \${tab.name}\`,
+                      },
                       el("td", window?.name || "—"),
                       el("td", tab.name),
                       el("td", table ? el("code", table.table_name) : "—"),
-                      el("td", displayValue(tab.seq_no ?? "—"))
+                      el("td", displayValue(tab.seq_no ?? "—")),
+                      el("td", table ? displayValue((fieldsByTab.get(tab.sys_tab_id) ?? []).length) : "—")
                     );
                   })
             )
           )
-        )
+        ),
+
+        el("h3.section-title", "Fields"),
+        fieldDetail
       )
     )
   );
@@ -18665,12 +23570,62 @@ const entityFor = (name, summary) =>
   Object.keys(summary.records).find((key) => key.toLowerCase() === String(name).replace(/\\s+/g, "").toLowerCase()) ??
   name;
 
-export async function rulesView(root) {
+/**
+ * The rules screen, and the first of the three that can now be edited.
+ *
+ * \`bus.routes.js\` enforces from \`sys_rule_definitions\`, so a rule changed here
+ * governs the next write to its entity — no regeneration, the same bargain the
+ * dictionary's field toggles make. Administrator-only as an offer; the routes
+ * refuse a non-admin write regardless.
+ */
+export async function rulesView(root, { user } = {}) {
   mount(root, spinner("Loading rules"));
-  const rules = await api.get("/rules");
+  const [rules, model] = await Promise.all([api.get("/rules"), api.get("/model")]);
+  const entities = (model.entities || []).map((entity) => entity.name).sort();
+  const editor = el("div.editor-host");
+  const reload = () => rulesView(root, { user });
+
+  const newButton = user?.isAdmin
+    ? el(
+        "button.btn.btn--primary.btn--small",
+        {
+          onclick: () =>
+            openEditor(
+              editor,
+              editorForm({
+                title: "New rule",
+                lede:
+                  "A rule is evaluated against the record being written and nothing else — a condition naming a parent's column or a count of children is undefined at evaluation, and the rule silently never fires.",
+                fields: ruleFields(entities),
+                values: { event: "beforeCreate", operation: "ALL", priority: 100, jdm_content: EMPTY_JDM },
+                saveLabel: "Create rule",
+                onSave: async (values) => {
+                  await api.post("/rules", values);
+                  toast("Rule created", "success");
+                  await reload();
+                },
+                onCancel: () => mount(editor),
+              })
+            ),
+        },
+        "New rule"
+      )
+    : null;
 
   if (!rules.length) {
-    mount(root, panel("Business rules", "", empty("This model declares no rules", "Add a %%rule section to the EML and regenerate.")));
+    mount(
+      root,
+      panel(
+        "Business rules",
+        "",
+        el(
+          "div",
+          newButton,
+          editor,
+          empty("This model declares no rules", "Add a %%rule section to the EML and regenerate — or create one here.")
+        )
+      )
+    );
     return;
   }
 
@@ -18678,7 +23633,11 @@ export async function rulesView(root) {
     root,
     panel(
       "Business rules",
-      "Compiled from the model's %%rule sections into GoRules JDM, and evaluated here by the browser engine.",
+      "Compiled from the model's %%rule sections into GoRules JDM, and evaluated here by the browser engine. An administrator can change one without regenerating: the engine reads these rows on every write.",
+      el(
+        "div",
+        newButton,
+        editor,
       el(
         "div.cards",
         rules.map((rule) =>
@@ -18709,16 +23668,83 @@ export async function rulesView(root) {
                 )
               : el("p.rule__meta", "No branching decisions."),
             el(
-              "button.btn.btn--small",
-              { onclick: () => tryRule(rule) },
-              "Try this rule"
+              "div.rule__actions",
+              el("button.btn.btn--small", { onclick: () => tryRule(rule) }, "Try this rule"),
+              user?.isAdmin
+                ? el(
+                    "button.btn.btn--small",
+                    {
+                      onclick: () =>
+                        openEditor(
+                          editor,
+                          editorForm({
+                            title: \`Edit \${rule.name}\`,
+                            fields: ruleFields(entities),
+                            values: rule,
+                            onSave: async (values) => {
+                              await api.patch(\`/rules/\${rule.sys_rule_definition_id}\`, values);
+                              toast("Rule saved", "success");
+                              await reload();
+                            },
+                            onCancel: () => mount(editor),
+                          })
+                        ),
+                    },
+                    "Edit"
+                  )
+                : null,
+              user?.isAdmin
+                ? deleteButton("Delete", \`Delete \${rule.name}?\`, async () => {
+                    await api.delete(\`/rules/\${rule.sys_rule_definition_id}\`);
+                    toast(\`\${rule.name} deleted\`, "success");
+                    await reload();
+                  })
+                : null
             )
           )
         )
       )
+      )
     )
   );
 }
+
+/**
+ * The fields a rule has, as the routes define them.
+ *
+ * \`event\` and \`operation\` are \`select\`s rather than text because the server
+ * accepts exactly these values — offering a free-text box invites a rule that
+ * is stored, listed, and never evaluated, which is the failure the route's own
+ * validation exists to refuse.
+ */
+function ruleFields(entities) {
+  return [
+    { name: "name", label: "Name", required: true },
+    { name: "entity_name", label: "Entity", type: "select", options: entities, required: true },
+    {
+      name: "event",
+      label: "Runs on",
+      type: "select",
+      options: ["beforeCreate", "afterCreate", "beforeUpdate", "afterUpdate", "beforeDelete", "afterDelete"],
+      hint: "When the engine evaluates it, relative to the write.",
+    },
+    { name: "operation", label: "Operation", type: "select", options: ["ALL", "CREATE", "UPDATE", "DELETE"] },
+    { name: "priority", label: "Priority", type: "number", hint: "Lower runs first." },
+    { name: "description", label: "Description" },
+    { name: "is_active", label: "Active", type: "checkbox" },
+    {
+      name: "jdm_content",
+      label: "Decision graph (JDM)",
+      type: "textarea",
+      rows: 12,
+      required: true,
+      hint: "GoRules JDM: an object with a \`nodes\` array. Refused at save time if it will not parse.",
+    },
+  ];
+}
+
+/** A graph the engine accepts and that decides nothing — a starting point. */
+const EMPTY_JDM = JSON.stringify({ nodes: [], edges: [] }, null, 2);
 
 /** Evaluate a rule against a record the reader types, and show the trace. */
 async function tryRule(rule) {
@@ -18753,12 +23779,53 @@ async function tryRule(rule) {
   }
 }
 
-export async function processesView(root) {
+/**
+ * The processes screen, editable for the same reason the rules screen is.
+ *
+ * Worth knowing what an edit here does and does not do. \`lib/workflows.js\`
+ * reads these rows, so changing a machine's transitions changes which moves the
+ * transition UI offers and which status changes the run log records as
+ * modelled — on the next request, without regenerating. What it does not do is
+ * *move* a record: that is still a PUT to the record, through the guards, hooks
+ * and rules, and there is deliberately no side door.
+ */
+export async function processesView(root, { user } = {}) {
   mount(root, spinner("Loading processes"));
-  const [definitions, runs] = await Promise.all([
+  const [definitions, runs, model] = await Promise.all([
     api.get("/workflows/definitions"),
     api.get("/workflows/runs?limit=25"),
+    api.get("/model"),
   ]);
+  const entities = (model.entities || []).map((entity) => entity.name).sort();
+  const editor = el("div.editor-host");
+  const reload = () => processesView(root, { user });
+
+  const newButton = user?.isAdmin
+    ? el(
+        "button.btn.btn--primary.btn--small",
+        {
+          onclick: () =>
+            openEditor(
+              editor,
+              editorForm({
+                title: "New process",
+                lede:
+                  "A state machine's transitions are the only moves its records may make. A \`saga\` has steps rather than transitions and is never offered as a move.",
+                fields: workflowFields(entities),
+                values: { kind: "state", definition: EMPTY_WORKFLOW },
+                saveLabel: "Create process",
+                onSave: async (values) => {
+                  await api.post("/workflows/definitions", toWorkflowBody(values));
+                  toast("Process created", "success");
+                  await reload();
+                },
+                onCancel: () => mount(editor),
+              })
+            ),
+        },
+        "New process"
+      )
+    : null;
 
   mount(
     root,
@@ -18767,11 +23834,25 @@ export async function processesView(root) {
       "State machines and sagas the model declared. A record moves through one by being updated — there is no side door.",
       el(
         "div",
+        newButton,
+        editor,
         definitions.length
           ? el(
               "div.cards",
               definitions.map((definition) => {
-                const parsed = typeof definition.definition === "string" ? JSON.parse(definition.definition) : definition.definition;
+                /* A definition an administrator has edited may not parse — the
+                   route validates the shape it understands, not every key a
+                   reader might add. One unreadable definition should cost its
+                   own card rather than the whole screen. */
+                let parsed;
+                try {
+                  parsed =
+                    typeof definition.definition === "string"
+                      ? JSON.parse(definition.definition)
+                      : definition.definition;
+                } catch {
+                  parsed = null;
+                }
                 return el(
                   "article.rule",
                   el(
@@ -18779,27 +23860,72 @@ export async function processesView(root) {
                     el("h3.rule__name", definition.name),
                     el("span.badge", \`\${definition.entity_name} · \${definition.kind}\`)
                   ),
-                  parsed.states
+                  parsed === null
+                    ? el("p.rule__meta", "This definition is not readable JSON — edit it to repair it.")
+                    : null,
+                  parsed?.states
                     ? el(
                         "div.states",
-                        parsed.states.map((state) =>
+                        parsed?.states.map((state) =>
                           el(
-                            \`span.state\${state === parsed.initial ? ".state--initial" : ""}\`,
+                            \`span.state\${state === parsed?.initial ? ".state--initial" : ""}\`,
                             typeof state === "string" ? state : state.name
                           )
                         )
                       )
                     : null,
-                  parsed.transitions
+                  parsed?.transitions
                     ? el(
                         "ul.transitions",
-                        parsed.transitions.map((transition) =>
+                        parsed?.transitions.map((transition) =>
                           el("li", \`\${transition.from} → \${transition.to}\`, transition.trigger ? el("span.badge.badge--soft", transition.trigger) : null)
                         )
                       )
                     : null,
-                  parsed.steps
-                    ? el("ol.transitions", parsed.steps.map((step) => el("li", \`\${step.name} (\${step.type})\`)))
+                  parsed?.steps
+                    ? el("ol.transitions", parsed?.steps.map((step) => el("li", \`\${step.name} (\${step.type})\`)))
+                    : null,
+                  user?.isAdmin
+                    ? el(
+                        "div.rule__actions",
+                        el(
+                          "button.btn.btn--small",
+                          {
+                            onclick: () =>
+                              openEditor(
+                                editor,
+                                editorForm({
+                                  title: \`Edit \${definition.name}\`,
+                                  fields: workflowFields(entities),
+                                  values: {
+                                    ...definition,
+                                    definition:
+                                      typeof definition.definition === "string"
+                                        ? prettyJson(definition.definition)
+                                        : JSON.stringify(definition.definition, null, 2),
+                                  },
+                                  onSave: async (values) => {
+                                    await api.patch(
+                                      \`/workflows/definitions/\${definition.sys_workflow_definition_id}\`,
+                                      toWorkflowBody(values)
+                                    );
+                                    toast("Process saved", "success");
+                                    await reload();
+                                  },
+                                  onCancel: () => mount(editor),
+                                })
+                              ),
+                          },
+                          "Edit"
+                        ),
+                        deleteButton("Delete", \`Delete \${definition.name}?\`, async () => {
+                          await api.delete(
+                            \`/workflows/definitions/\${definition.sys_workflow_definition_id}\`
+                          );
+                          toast(\`\${definition.name} deleted — its runs are kept\`, "success");
+                          await reload();
+                        })
+                      )
                     : null
                 );
               })
@@ -18940,6 +24066,74 @@ function statRow(entries) {
     entries.map(([label, value]) => el("div.stat", el("span.stat__value", String(value)), el("span.stat__label", label)))
   );
 }
+
+/**
+ * The fields a workflow definition has.
+ *
+ * \`definition\` is raw JSON on purpose. A form with a row-per-transition would
+ * be friendlier and would also be a second, partial model of what a workflow
+ * is — one that quietly drops the keys it has no widget for. The route
+ * validates the shape it understands (\`state\` needs transitions, each with a
+ * \`from\` and a \`to\`) and preserves everything else, so the textarea is the
+ * honest control: it can express whatever the model could.
+ */
+function workflowFields(entities) {
+  return [
+    { name: "name", label: "Name", required: true },
+    { name: "entity_name", label: "Entity", type: "select", options: entities, required: true },
+    {
+      name: "kind",
+      label: "Kind",
+      type: "select",
+      options: [
+        { value: "state", label: "state — a record's lifecycle" },
+        { value: "saga", label: "saga — a multi-step process" },
+      ],
+    },
+    { name: "is_active", label: "Active", type: "checkbox" },
+    {
+      name: "definition",
+      label: "Definition (JSON)",
+      type: "textarea",
+      rows: 14,
+      required: true,
+      hint: "A \`state\` workflow needs a \`transitions\` array, each entry with a \`from\` and a \`to\`. A \`saga\` has \`steps\`.",
+    },
+  ];
+}
+
+/**
+ * Send \`definition\` as an object, not as a string.
+ *
+ * The route accepts either, but parsing here means a typo is reported as "not
+ * readable JSON" against the field the reader is looking at rather than as a
+ * shape complaint about a string the server could not read either.
+ */
+function toWorkflowBody(values) {
+  let definition;
+  try {
+    definition = JSON.parse(values.definition);
+  } catch (error) {
+    throw new Error(\`Definition is not readable JSON: \${error.message}\`);
+  }
+  return { ...values, definition };
+}
+
+/** Re-indent stored JSON so a textarea shows it readably. */
+function prettyJson(text) {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/** A state machine with one drawn edge — the smallest thing the route accepts. */
+const EMPTY_WORKFLOW = JSON.stringify(
+  { initial: "draft", states: ["draft", "active"], transitions: [{ from: "draft", to: "active" }] },
+  null,
+  2
+);
 `,
   "ui/views/dashboard.js": `/**
  * The dashboard — entities grouped by the categories the model declared.
@@ -19274,6 +24468,7 @@ function purgeSection(project, navigate) {
 import { el, helpToast, mount, spinner, toast, displayValue } from "../dom.js";
 import { api } from "../api.js";
 import { setActions, childEntitiesOf } from "../main.js";
+import { fieldLogicState } from "../../server/lib/field-logic.js";
 
 const referenceCache = new Map();
 const lookupCache = new Map();
@@ -19358,17 +24553,31 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
 
   let fields;
   let record = {};
+  /* The state field, when the entity has a state machine. It is never among
+     the form fields — no person changes it — so it is read from the grid
+     fields, which always carry it, and shown in the header. */
+  let stateField = null;
   try {
     fields = await api.get(\`/bus/\${entity.routeName}/fields/form\`);
     if (!isNew) record = await api.get(\`/bus/\${entity.routeName}/\${id}\`);
+    try {
+      const grid = await api.get(\`/bus/\${entity.routeName}/fields/grid\`);
+      stateField = grid.find((field) => field.is_state_field) ?? null;
+    } catch {
+      stateField = null;
+    }
   } catch (error) {
     mount(root, el("div.empty", el("h3", "Could not open this record"), el("p", error.message)));
     return;
   }
 
-  const editable = fields.filter((field) => !["id", "version"].includes(field.column_name));
-  const requiredCount = editable.filter((field) => field.is_mandatory).length;
-
+  const editable = fields.filter(
+    (field) => !["id", "version"].includes(field.column_name) && !field.is_state_field
+  );
+  // Optimistic locking: the version this form opened the record at. A save
+  // sends it as If-Match and the server refuses it with 409 if someone has
+  // saved since; "Overwrite" moves it to the version that conflict reported.
+  let openedVersion = record.version;
   const inputs = new Map();
   const violationBox = el("div.violations", { hidden: true });
 
@@ -19376,11 +24585,85 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     editable.map((field) => control(field, record, entity, inputs))
   );
 
+  /*
+   * Field logic — Compiere's Display, Read Only and Mandatory Logic.
+   *
+   * Each field may carry \`@column@=value\` conditions over the record being
+   * edited (\`%%field … display: | readonly: | mandatory:\`). They are evaluated
+   * against what the form holds now, not what was loaded, and again on every
+   * change, so a field appears, locks or becomes required as the record is
+   * edited — the dependency refresh Compiere's GridField does. The server
+   * judges the same logic on save (bus.routes.js \`enforceFieldLogic\`); this is
+   * what lets a person see the rule before they break it.
+   */
+  const requiredLabel = el("span.record__required");
+  const currentValues = () => {
+    const values = { ...record };
+    for (const [column, input] of inputs) {
+      values[column] = input.type === "checkbox" ? input.checked : input.value;
+    }
+    return values;
+  };
+  const applyLogic = () => {
+    const values = currentValues();
+    let required = 0;
+    for (const [field, node] of controls) {
+      const state = fieldLogicState(field, values);
+      const input = inputs.get(field.column_name);
+      node.hidden = !state.displayed;
+      if (input) {
+        input.disabled = input.dataset.baseDisabled === "true" || state.readOnly;
+        // \`required\` only on a field that is shown: a hidden required input
+        // stops the browser submitting a form nobody can see the fault in.
+        if (input.type !== "checkbox") input.required = state.mandatory && !input.disabled;
+      }
+      /* The marker exists exactly while the field is required — added and
+         removed, never hidden — so \`.field:has(.field__required)\` keeps
+         naming the required fields and nothing else. */
+      const marker = node.querySelector(".field__required");
+      if (state.mandatory && !marker) {
+        node.querySelector(".field__label")?.after(requiredMarker());
+      } else if (!state.mandatory && marker) {
+        marker.remove();
+      }
+      node.classList.toggle("field--logic-locked", state.readOnly && !field.is_read_only);
+      if (state.mandatory) required += 1;
+    }
+    requiredLabel.textContent = required ? \`\${required} required\` : "";
+    requiredLabel.hidden = !required;
+  };
+  applyLogic();
+  for (const input of inputs.values()) {
+    input.addEventListener("input", applyLogic);
+    input.addEventListener("change", applyLogic);
+  }
+
+  /* Which fields the person has changed since the record opened. A button press
+     saves these first (see the transition route) — so what was typed is kept
+     even when a workflow bound to the next status refuses the move. */
+  const touched = new Set();
+  for (const [column, input] of inputs) {
+    const mark = () => touched.add(column);
+    input.addEventListener("input", mark);
+    input.addEventListener("change", mark);
+  }
+
+  /* \`%%section\`: the model's own headings, in its order, each a two-column
+     grid in which a field alone on its row spans both columns. A model with
+     no sections has one ungrouped "General" list, as it always did. */
   const grouped = new Map();
   for (const [field, node] of controls) {
-    const group = field.group_name || "General";
-    if (!grouped.has(group)) grouped.set(group, []);
-    grouped.get(group).push(node);
+    const name = field.group_name || "General";
+    if (!grouped.has(name)) {
+      grouped.set(name, {
+        description: field.group_name ? field.group_description : null,
+        columns: field.group_columns || 0,
+        collapsed: !!field.group_collapsed,
+        nodes: [],
+      });
+    }
+    if (field.col_span > 1) node.classList.add("field--wide");
+    grouped.get(name).nodes.push(node);
   }
 
   const submit = async () => {
@@ -19395,7 +24678,11 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     try {
       const saved = isNew
         ? await api.post(\`/bus/\${entity.routeName}\`, payload)
-        : await api.put(\`/bus/\${entity.routeName}/\${id}\`, payload);
+        : await api.put(
+            \`/bus/\${entity.routeName}/\${id}\`,
+            payload,
+            openedVersion == null ? {} : { "If-Match": \`"\${openedVersion}"\` }
+          );
       toast(isNew ? \`\${entity.singularName} created\` : "Saved", "success");
       /* This row may be what some other entity's lookup is missing, and its
          label may be what an existing option now reads as. Neither is worth a
@@ -19404,7 +24691,22 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
       await onSaved(saved);
       if (isNew) navigate(\`/entity/\${entity.routeName}/\${saved.id}\`, { replace: true });
     } catch (error) {
-      showProblem(violationBox, error);
+      if (error.status === 409 && error.details?.code === "VERSION_CONFLICT") {
+        await showConflict(violationBox, {
+          entity,
+          id,
+          fields: editable,
+          base: record,
+          mine: payload,
+          onReload: () => recordPanel(root, { entity, id, onClose, onSaved, navigate }),
+          onOverwrite: (theirs) => {
+            openedVersion = theirs.version;
+            submit();
+          },
+        });
+      } else {
+        showProblem(violationBox, error);
+      }
     } finally {
       setActions({ ...currentActions, busy: false });
     }
@@ -19435,20 +24737,29 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     el(
       "div.record__meta",
       \`\${editable.length} field\${editable.length === 1 ? "" : "s"}\`,
-      requiredCount ? el("span.record__required", \`\${requiredCount} required\`) : null,
+      requiredLabel,
       el("button.btn.btn--primary.btn--small", { type: "submit" }, isNew ? "Create" : "Save")
     ),
     violationBox,
     el(
       "div.record__body",
-      [...grouped.entries()].map(([group, nodes]) =>
-        el(
-          "section",
-          el("h3.group__name", group),
-          el("p.group__desc", \`\${group} information fields\`),
-          el("div.group__fields", nodes)
-        )
-      )
+      [...grouped.entries()].map(([group, section]) => {
+        const fieldsGrid = el(
+          section.columns === 2 ? "div.group__fields.group__fields--2" : "div.group__fields",
+          section.nodes
+        );
+        const description = section.description || \`\${group} information fields\`;
+        /* A collapsed section is a <details>: closed until opened, and a
+           browser's own control rather than one more thing to wire. */
+        return section.collapsed
+          ? el(
+              "details.group",
+              el("summary.group__name", group),
+              el("p.group__desc", description),
+              fieldsGrid
+            )
+          : el("section", el("h3.group__name", group), el("p.group__desc", description), fieldsGrid);
+      })
     ),
     el(
       "div.record__actions",
@@ -19504,6 +24815,15 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     void renderAudit(auditSlot, entity, id);
   }
 
+  form.touchedValues = () => {
+    const values = {};
+    for (const column of touched) {
+      const input = inputs.get(column);
+      if (input) values[column] = input.type === "checkbox" ? input.checked : input.value;
+    }
+    return values;
+  };
+
   mount(
     root,
     el(
@@ -19511,6 +24831,7 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
       el(
         "header.record__head",
         el("h2.record__title", isNew ? \`New \${entity.singularName}\` : recordTitle(record, editable, entity)),
+        stateBadge(stateField, record, entity, isNew),
         el("button.record__close", { title: "Close", "aria-label": "Close", onclick: onClose }, "✕")
       ),
       form,
@@ -19518,7 +24839,7 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
       notesSlot,
       auditSlot
     ),
-    isNew ? null : el("div.split", el("div"), el("aside.side", await sidePanels(entity, id, record, onSaved)))
+    isNew ? null : el("div.split", el("div"), el("aside.side", await sidePanels(entity, id, record, onSaved, form, () => recordPanel(root, { entity, id, onClose, onSaved, navigate }))))
   );
 }
 
@@ -19759,46 +25080,116 @@ async function renderDetails(slot, entity, id, navigate) {
   if (sections.length) mount(slot, ...sections);
 }
 
-async function sidePanels(entity, id, record, onSaved) {
+/* What the last press of a record's button came to, kept until the next press:
+   the panel is drawn again after every press, and a refusal has to survive that. */
+const pressNotices = new Map();
+
+function pressNotice(notice) {
+  return el(
+    "div.side__notice",
+    { role: "alert", "data-testid": "press-refused" },
+    el("strong", \`\${notice.label} did not go through\`),
+    el(
+      "p",
+      \`\${notice.saved ? "Your changes were saved. " : ""}\` +
+        \`\${notice.workflow ? \`Workflow "\${notice.workflow}" failed: \` : ""}\${notice.message}. \` +
+        "The status did not change. Fix it and press the button again."
+    )
+  );
+}
+
+async function sidePanels(entity, id, record, onSaved, form, reload) {
   const panels = [];
 
   try {
     const workflow = await api.get(\`/workflows/entity/\${entity.routeName}/\${id}/transitions\`);
     if (workflow.workflow) {
+      /* The record's action buttons: the moves this person may press from
+         where it is, from the server, which judges every press again. One
+         move or several, each a button; Reopen apart, at a locked end. */
+      let actions = [];
+      try {
+        actions = await api.get(\`/bus/\${entity.routeName}/\${id}/actions\`);
+      } catch {
+        actions = [];
+      }
+      const noticeKey = \`\${entity.routeName}:\${id}\`;
+      const press = async (action, button) => {
+        button.disabled = true;
+        pressNotices.delete(noticeKey);
+        /* A move saves what was typed first, then runs the sagas bound to the
+           status it reaches; Reopen is not a save and leaves the form alone. */
+        const typed = action.kind === "move" && form?.touchedValues ? form.touchedValues() : {};
+        const data = Object.keys(typed).length ? typed : undefined;
+        try {
+          await api.post(
+            \`/bus/\${entity.routeName}/\${id}/transition\`,
+            { event: action.event || undefined, to: action.to, ...(data ? { data } : {}) },
+            record.version == null ? {} : { "If-Match": \`"\${record.version}"\` }
+          );
+          toast(action.kind === "reopen" ? "Reopened — the record is a draft again." : \`\${action.label} — done.\`, "success");
+        } catch (error) {
+          /* The refusal stays on the record, beside the buttons: the person has
+             to act on it, and a toast is gone before they have read it. */
+          const details = error.details || {};
+          pressNotices.set(noticeKey, {
+            label: action.label,
+            saved: details.phase === "workflow" && !!data,
+            workflow: details.workflow || null,
+            message: details.workflow ? details.reason || error.message : error.message || "The move was refused.",
+          });
+        }
+        /* The list beside it, and this panel: the record has moved (or was
+           read afresh after a refusal), so its buttons are drawn again. */
+        await onSaved(null);
+        if (reload) await reload();
+      };
+      const moves = actions.filter((action) => action.kind === "move");
+      const reopen = actions.find((action) => action.kind === "reopen");
+      const button = (action, tone) => {
+        const node = el(
+          \`button.btn.btn--small\${tone}\`,
+          { type: "button", "data-testid": \`record-action-\${action.event || action.to}\` },
+          action.label
+        );
+        node.onclick = () => press(action, node);
+        return node;
+      };
+
+      if (workflow.locked && form) {
+        /* The end of a flow is Final and locked: nothing on the form can be
+           changed until the record is reopened. */
+        for (const control of form.querySelectorAll("input, select, textarea, button")) control.disabled = true;
+      }
+
       panels.push(
         el(
           "div.side__card",
+          { "data-testid": "record-actions" },
           el("h3.side__title", "Process"),
-          el("p.side__meta", \`\${workflow.workflow} — currently \${workflow.current ?? "unset"}\`),
-          workflow.transitions.length
+          el(
+            "p.side__meta",
+            { "data-testid": "record-lifecycle", "data-phase": workflow.phase ?? "" },
+            workflow.locked
+              ? \`Final — \${title(workflow.current ?? "")}. Locked; reopen it to change it.\`
+              : \`\${workflow.workflow} — currently \${title(workflow.current ?? "unset")}\`
+          ),
+          pressNotices.has(noticeKey) ? pressNotice(pressNotices.get(noticeKey)) : null,
+          moves.length || reopen
             ? el(
-                "div.side__transitions",
-                workflow.transitions.map((transition) =>
-                  el(
-                    "button.btn",
-                    {
-                      disabled: !transition.permitted,
-                      title: transition.permitted
-                        ? \`Move to \${transition.to}\`
-                        : \`Requires \${transition.requiredRoles.join(" or ")}\`,
-                      onclick: async () => {
-                        try {
-                          await api.put(\`/bus/\${entity.routeName}/\${id}\`, {
-                            [workflow.column]: transition.to,
-                          });
-                          toast(\`Moved to \${transition.to}\`, "success");
-                          await onSaved(null);
-                          window.location.reload();
-                        } catch (error) {
-                          toast(error.message, "error");
-                        }
-                      },
-                    },
-                    transition.trigger || \`→ \${transition.to}\`
-                  )
-                )
+                "div.side__actions",
+                moves.length > 1 ? el("p.side__meta", "Choose where this record goes next:") : null,
+                ...moves.map((move) => button(move, ".btn--primary")),
+                reopen ? button(reopen, "") : null
               )
-            : el("p.side__empty", "No transitions available from here.")
+            : el(
+                "p.side__empty",
+                workflow.locked
+                  ? "Only an administrator, or a role allowed to reopen it, can reopen this record."
+                  : workflow.transitions.length
+                    ? "Its next moves belong to another role."
+                    : "This is a final state."
+              )
         )
       );
     }
@@ -19916,6 +25307,9 @@ async function control(field, record, entity, inputs) {
   }
 
   if (field.is_read_only || (record.id && field.is_updateable === false)) input.disabled = true;
+  /* What the dictionary fixes, kept apart from what read-only logic decides
+     from moment to moment — \`applyLogic\` re-derives \`disabled\` from both. */
+  input.dataset.baseDisabled = input.disabled ? "true" : "false";
   inputs.set(field.column_name, input);
 
   return [
@@ -19925,7 +25319,7 @@ async function control(field, record, entity, inputs) {
       el(
         "div.field__head",
         el("label.field__label", { for: id }, field.name),
-        field.is_mandatory ? el("span.field__required", { title: "Required" }, "*") : null,
+        field.is_mandatory ? requiredMarker() : null,
         el(\`span.chip.chip--\${chipKind}\`, chipLabel),
         el(
           "button.field__help",
@@ -19941,6 +25335,10 @@ async function control(field, record, entity, inputs) {
       input
     ),
   ];
+}
+
+function requiredMarker() {
+  return el("span.field__required", { title: "Required" }, "*");
 }
 
 /**
@@ -19961,6 +25359,11 @@ function fieldHelpBody(field, attribute) {
   if (attribute.maxLength) facts.push(\`Up to \${attribute.maxLength} characters\`);
   if (field.is_mandatory) facts.push("Required");
   if (field.is_read_only) facts.push("Read-only");
+  /* The dictionary's logic, as written — what makes the field appear, lock or
+     become required, which is otherwise invisible from the form. */
+  if (field.display_logic) facts.push(\`Shown when \${field.display_logic}\`);
+  if (field.read_only_logic) facts.push(\`Read-only when \${field.read_only_logic}\`);
+  if (field.mandatory_logic) facts.push(\`Required when \${field.mandatory_logic}\`);
   if (attribute.enumValues?.length) facts.push(\`One of: \${attribute.enumValues.join(", ")}\`);
   if (attribute.refTable) facts.push(\`References \${attribute.refTable}\`);
 
@@ -19981,6 +25384,88 @@ function normalizeForInput(value, type) {
   return String(value);
 }
 
+/** Same value across the shapes a field takes: a NUMERIC string and a number. */
+function sameValue(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null || a === "" || b === "") return (a ?? "") === (b ?? "");
+  if (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && Number(a) === Number(b)) return true;
+  return String(a) === String(b);
+}
+
+/**
+ * Someone else saved this record after the form opened it.
+ *
+ * Inline, not a modal: this application runs in an iframe on the page that
+ * generated it, where \`confirm()\` is not guaranteed to appear — the same reason
+ * the delete and purge controls are two-step. Lists the fields the other save
+ * changed (marking the ones this user changed too), then offers the two ways
+ * out: reload their version, or overwrite it with this one. Overwrite is still
+ * checked, against the version just read, so a third save is caught again.
+ */
+async function showConflict(box, { entity, id, fields, base, mine, onReload, onOverwrite }) {
+  let theirs;
+  try {
+    theirs = await api.get(\`/bus/\${entity.routeName}/\${id}\`);
+  } catch (error) {
+    showProblem(box, error);
+    return;
+  }
+  const rows = fields
+    .map((field) => {
+      const column = field.column_name;
+      if (sameValue(base[column], theirs[column])) return null;
+      const mineValue = column in mine ? mine[column] : base[column];
+      const clash = !sameValue(base[column], mineValue) && !sameValue(mineValue, theirs[column]);
+      return { field, theirs: theirs[column], mine: mineValue, clash };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(b.clash) - Number(a.clash));
+  const shown = (value) => (value == null || value === "" ? "—" : displayValue(value));
+  const clashes = rows.filter((row) => row.clash).length;
+
+  mount(
+    box,
+    el("h4.violations__title", \`This \${entity.singularName.toLowerCase()} was changed while you were editing\`),
+    el(
+      "p",
+      \`Someone else saved it first (it is now at version \${theirs.version ?? "?"}). \` +
+        (rows.length === 0
+          ? "None of the fields on this form differ."
+          : clashes
+            ? \`\${clashes} of the fields below were changed by both of you.\`
+            : "They changed the fields below; you did not.")
+    ),
+    rows.length
+      ? el(
+          "table.conflict",
+          el("thead", el("tr", el("th", "Field"), el("th", "Their saved value"), el("th", "Your value"))),
+          el(
+            "tbody",
+            rows.map((row) =>
+              el(
+                row.clash ? "tr.conflict__clash" : "tr",
+                el("td", row.field.name || row.field.column_name, row.clash ? el("small", " · both changed") : null),
+                el("td", shown(row.theirs)),
+                el("td", shown(row.mine))
+              )
+            )
+          )
+        )
+      : null,
+    el(
+      "div.conflict__actions",
+      el("button.btn", { type: "button", "data-action": "conflict-reload", onclick: () => onReload() }, "Reload their version"),
+      el(
+        "button.btn.btn--primary",
+        { type: "button", "data-action": "conflict-overwrite", onclick: () => onOverwrite(theirs) },
+        "Overwrite with mine"
+      )
+    )
+  );
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function showProblem(box, error) {
   const items = error.violations?.length
     ? error.violations.map((violation) =>
@@ -19997,6 +25482,28 @@ function showProblem(box, error) {
   );
   box.hidden = false;
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/**
+ * The record's state, read-only, in the form's header.
+ *
+ * A state field is changed only by the application's background workflows, so
+ * it is never an input: it is shown here beside the title, and as a column of
+ * the list. A new record shows the state it will start in.
+ */
+function stateBadge(field, record, entity, isNew) {
+  if (!field) return null;
+  const value = isNew ? null : record[field.column_name];
+  const label = value == null || value === "" ? null : title(value);
+  return el(
+    "span.record__state",
+    {
+      "data-testid": "record-state",
+      title: \`\${field.name} — changed only by the application's workflows, never by hand\`,
+      "aria-label": \`\${field.name}: \${label ?? "set when saved"}\`,
+    },
+    label ?? "Set when saved"
+  );
 }
 
 function recordTitle(record, fields, entity) {
@@ -20544,6 +26051,327 @@ function debounce(fn, delay) {
   };
 }
 `,
+  "ui/views/er-kit.js": `/**
+ * The Enterprise Reporting platform's components, as plain DOM.
+ *
+ * The deployed platform (\`businessappwithai/enterprise_reporting_tanstack\`) is
+ * React, shadcn/ui and the Tremor design tokens. This runtime has no build step
+ * and no dependencies, so it cannot run those components — but it can draw the
+ * same ones: the same card, table, button, badge and input, in the same sizes,
+ * on the same tokens (\`.er\` in styles.css carries them, value for value from
+ * the platform's \`src/styles/globals.css\`).
+ *
+ * Each helper names the platform component it stands for. Keep it that way:
+ * when the platform changes a component, this file is where the preview
+ * follows it, and a helper nobody can map back to a component is one that
+ * drifts without anyone noticing.
+ */
+
+import { el, formatNumeric } from "../dom.js";
+
+/*
+ * Lucide icons — the set the platform imports from \`lucide-react\` — as their
+ * published path data, drawn at the same 24-unit box and 2px stroke.
+ */
+const ICONS = {
+  barChart3: '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+  terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+  database:
+    '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+  fileText:
+    '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  layoutDashboard:
+    '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  messageSquare: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  layers:
+    '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+  squareTerminal:
+    '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
+  users:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  shield:
+    '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  settings:
+    '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  helpCircle:
+    '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  chevronLeft: '<path d="m15 18-6-6 6-6"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  logOut:
+    '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+  menu: '<line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>',
+  arrowLeft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  refresh:
+    '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  download:
+    '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  lineChart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+  pieChart: '<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
+  areaChart: '<path d="M3 3v18h18"/><path d="M7 12v5h12V8l-5 5-4-4Z"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+};
+
+/** One Lucide icon, \`h-4 w-4\` unless told otherwise. */
+export function icon(name, className = "er-icon") {
+  const span = document.createElement("span");
+  span.className = \`er-iconwrap \${className}\`;
+  span.setAttribute("aria-hidden", "true");
+  span.innerHTML = \`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\${ICONS[name] ?? ""}</svg>\`;
+  return span;
+}
+
+/** \`components/ui/button.tsx\` — variant: default | outline | secondary | ghost | link. */
+export function button(label, { variant = "default", size = "default", iconName, ...props } = {}) {
+  return el(
+    \`button.er-btn.er-btn--\${variant}.er-btn--size-\${size}\`,
+    { type: "button", ...props },
+    iconName ? icon(iconName) : null,
+    label
+  );
+}
+
+/** \`components/ui/badge.tsx\` — variant: default | secondary | outline | neutral | warning | destructive. */
+export function badge(label, variant = "default") {
+  return el(\`span.er-badge.er-badge--\${variant}\`, label);
+}
+
+/** \`components/ui/card.tsx\`: Card, CardHeader, CardTitle, CardDescription, CardContent. */
+export function card(...children) {
+  return el("div.er-card", ...children);
+}
+export function cardHeader(title, description, extra) {
+  return el(
+    "div.er-card__header",
+    el(
+      "div.er-card__heading",
+      el("div", el("h3.er-card__title", title), description ? el("p.er-card__description", description) : null),
+      extra ?? null
+    )
+  );
+}
+export function cardContent(...children) {
+  return el("div.er-card__content", ...children);
+}
+
+/** \`components/layout/page-header.tsx\`. */
+export function pageHeader(title, description, { actions, badge: badgeNode, back } = {}) {
+  return el(
+    "div.er-pageheader",
+    el(
+      "div.er-pageheader__lead",
+      back ? el("a.er-btn.er-btn--ghost.er-btn--size-icon", { href: back, "aria-label": "Back" }, icon("arrowLeft", "er-icon--lg")) : null,
+      el(
+        "div.er-pageheader__text",
+        el("div.er-pageheader__titlerow", el("h1.er-pageheader__title", title), badgeNode ?? null),
+        description ? el("p.er-pageheader__description", description) : null
+      )
+    ),
+    actions ? el("div.er-pageheader__actions", ...[actions].flat()) : null
+  );
+}
+
+/** \`components/layout/breadcrumb.tsx\`. */
+export function breadcrumb(items) {
+  return el(
+    "nav.er-breadcrumb",
+    { "aria-label": "Breadcrumb" },
+    ...items.flatMap((item, index) => [
+      index > 0 ? icon("chevronRight", "er-icon--sm") : null,
+      item.href ? el("a", { href: item.href }, item.label) : el("span.is-current", item.label),
+    ])
+  );
+}
+
+/**
+ * \`components/ui/table.tsx\`. \`rows\` are arrays of cells; a cell may be a node.
+ * \`onRow\` makes the whole row a link, the way the platform's list screens open
+ * a definition.
+ */
+export function table(headers, rows, { onRow } = {}) {
+  return el(
+    "div.er-table-wrap",
+    el(
+      "table.er-table",
+      el("thead", el("tr", ...headers.map((header) => el("th", header)))),
+      el(
+        "tbody",
+        ...rows.map((cells, index) =>
+          el(
+            "tr",
+            onRow ? { class: "is-link", onclick: (event) => onRow(index, event) } : null,
+            ...cells.map((cellValue) => el("td", cellValue ?? "—"))
+          )
+        )
+      )
+    )
+  );
+}
+
+/** \`components/ui/kpi-card.tsx\`. */
+export function kpiCard(label, value, iconName, href) {
+  return el(
+    "a.er-card.er-kpi",
+    { href },
+    el("div.er-kpi__label", icon(iconName, "er-icon--md er-subtle"), el("span", label)),
+    el("p.er-kpi__metric", Number(value).toLocaleString())
+  );
+}
+
+/** \`components/ui/alert.tsx\`. */
+export function alert(title, body, variant = "default") {
+  return el(
+    \`div.er-alert.er-alert--\${variant}\`,
+    { role: variant === "destructive" ? "alert" : "note" },
+    icon(variant === "destructive" ? "lock" : "info"),
+    el("div", el("p.er-alert__title", title), body ? el("div.er-alert__body", body) : null)
+  );
+}
+
+/** The platform's loading state: a spinner in the middle of the card. */
+export function loading(label = "Loading") {
+  return el("div.er-loading", el("span.er-spinner", { "aria-hidden": "true" }), el("span", label));
+}
+
+/** An empty table body, the way the platform's list screens say it. */
+export function emptyState(title, detail) {
+  return el("div.er-empty", el("p.er-empty__title", title), detail ? el("p.er-empty__detail", detail) : null);
+}
+
+/**
+ * One SQL scalar as text. \`numeric\` says the column is a Postgres NUMERIC —
+ * the run endpoints name those columns, because a string of digits in a text
+ * column (a code, a phone number) must not be regrouped.
+ */
+export function cellText(value, numeric = false) {
+  if (value === null || value === undefined) return "—";
+  if (value instanceof Date) return value.toLocaleDateString();
+  if (numeric) return formatNumeric(value);
+  if (typeof value === "number") return value.toLocaleString();
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+/**
+ * A chart from the rows its query returned, in the platform's brand blue.
+ *
+ * The platform draws with Recharts; this draws the same four shapes the pack
+ * asks for — bar, line, area and pie — as SVG, with the axis labels and the
+ * gridlines Recharts puts there, so a tile reads the same at a glance.
+ */
+export function chart(kind, xField, yField, rows) {
+  const points = rows
+    .map((row) => ({ label: cellText(row[xField]), value: Number(row[yField]) }))
+    .filter((point) => Number.isFinite(point.value))
+    .slice(0, 30);
+  if (points.length === 0) return null;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const make = (tag, attrs, text) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const short = (text) => (text.length > 12 ? \`\${text.slice(0, 11)}…\` : text);
+
+  const svg = make("svg", {
+    class: "er-chart",
+    role: "img",
+    "aria-label": \`\${yField} by \${xField}\`,
+    viewBox: "0 0 720 260",
+    preserveAspectRatio: "xMidYMid meet",
+  });
+
+  if (kind === "pie") {
+    const total = points.reduce((sum, point) => sum + Math.max(point.value, 0), 0) || 1;
+    let angle = -Math.PI / 2;
+    const palette = ["#3b82f6", "#06b6d4", "#6366f1", "#8b5cf6", "#d946ef", "#f59e0b", "#10b981", "#f43f5e"];
+    points.slice(0, 8).forEach((point, index) => {
+      const share = Math.max(point.value, 0) / total;
+      const next = angle + share * Math.PI * 2;
+      const large = share > 0.5 ? 1 : 0;
+      const [cx, cy, r] = [180, 130, 110];
+      const path =
+        share >= 0.999
+          ? \`M \${cx} \${cy - r} A \${r} \${r} 0 1 1 \${cx - 0.01} \${cy - r} Z\`
+          : \`M \${cx} \${cy} L \${cx + r * Math.cos(angle)} \${cy + r * Math.sin(angle)} A \${r} \${r} 0 \${large} 1 \${cx + r * Math.cos(next)} \${cy + r * Math.sin(next)} Z\`;
+      svg.appendChild(make("path", { d: path, fill: palette[index % palette.length] }));
+      svg.appendChild(make("rect", { x: 340, y: 40 + index * 24, width: 10, height: 10, rx: 2, fill: palette[index % palette.length] }));
+      svg.appendChild(
+        make("text", { x: 358, y: 49 + index * 24, class: "er-chart__legend" }, \`\${short(point.label)} · \${point.value.toLocaleString()}\`)
+      );
+      angle = next;
+    });
+    return svg;
+  }
+
+  const [left, top, width, height] = [48, 12, 660, 200];
+  // A round axis maximum, as Recharts picks: 1, 2, 2.5 or 5 times a power of
+  // ten, so four ticks land on numbers a reader would write down. An unrounded
+  // maximum of 3 gave ticks of 0.75, 1.5, 2.25 — shown rounded, as 1, 2, 2.
+  const raw = Math.max(...points.map((point) => point.value), 0) || 1;
+  const magnitude = 10 ** Math.floor(Math.log10(raw / 4));
+  const tickStep =
+    [1, 2, 2.5, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate * 4 >= raw) ??
+    10 * magnitude;
+  const max = tickStep * 4;
+  const step = width / points.length;
+  const y = (value) => top + height - (value / max) * height;
+
+  for (let tick = 0; tick <= 4; tick++) {
+    const value = tickStep * tick;
+    svg.appendChild(make("line", { x1: left, x2: left + width, y1: y(value), y2: y(value), class: "er-chart__grid" }));
+    svg.appendChild(
+      make("text", { x: left - 8, y: y(value) + 4, "text-anchor": "end", class: "er-chart__tick" }, value.toLocaleString(undefined, { maximumFractionDigits: 2 }))
+    );
+  }
+
+  if (kind === "line" || kind === "area") {
+    const coords = points.map((point, index) => [left + index * step + step / 2, y(point.value)]);
+    if (kind === "area") {
+      const first = coords[0];
+      const last = coords[coords.length - 1];
+      svg.appendChild(
+        make("path", {
+          d: \`M \${first[0]} \${top + height} \${coords.map(([cx, cy]) => \`L \${cx} \${cy}\`).join(" ")} L \${last[0]} \${top + height} Z\`,
+          class: "er-chart__area",
+        })
+      );
+    }
+    svg.appendChild(make("polyline", { points: coords.map((pair) => pair.join(",")).join(" "), class: "er-chart__line" }));
+  } else {
+    points.forEach((point, index) => {
+      const barTop = y(Math.max(point.value, 0));
+      svg.appendChild(
+        make("rect", {
+          x: left + index * step + step * 0.15,
+          y: barTop,
+          width: step * 0.7,
+          height: top + height - barTop,
+          rx: 3,
+          class: "er-chart__bar",
+        })
+      );
+    });
+  }
+
+  points.forEach((point, index) => {
+    svg.appendChild(
+      make("text", { x: left + index * step + step / 2, y: top + height + 20, "text-anchor": "middle", class: "er-chart__tick" }, short(point.label))
+    );
+  });
+
+  return svg;
+}
+`,
   "ui/views/login.js": `/**
  * The sign-in screen.
  *
@@ -20710,6 +26538,31 @@ export async function loginView(root, { project, onSignedIn }) {
           el("li", el("strong", "The application server"), " on a Worker with a Node-API runtime"),
           el("li", el("strong", "A Service Worker"), " answering this page's own /api requests"),
           el("li", el("strong", "No network"), " after load, and no data leaves the browser")
+        ),
+        /*
+         * The other application, named on the first screen rather than behind
+         * this one's sign-in.
+         *
+         * One model generates two applications, and the reporting one keeps its
+         * own accounts — \`render()\` in main.js matches \`#/report\` *before* the
+         * sign-in gate for exactly that reason, so it has never needed a session
+         * in this application. Until now the only way to it was the dashboard
+         * card, which is on the far side of a sign-in the reporting platform does
+         * not share: a reader who stopped at this screen was never told the
+         * second application existed. A plain anchor, because \`hashchange\` is
+         * already wired to the router.
+         */
+        el(
+          "div.login__other",
+          el("h2", "The reporting application"),
+          el(
+            "p.login__aside-note",
+            "The same model also generated an Enterprise Reporting application — its reports, " +
+              "charts and dashboard over this application's data, with one reporting role per " +
+              "role the model declares. It has its own accounts and its own sign-in, so you do " +
+              "not need to sign in here first."
+          ),
+          el("a.btn.btn--report", { href: "#/report" }, "Open Enterprise Reporting →")
         )
       ),
       el(
@@ -20731,401 +26584,1517 @@ const initials = (name) =>
     .map((word) => word[0].toUpperCase())
     .join("") || "AP";
 `,
-  "ui/views/report-app.js": `/**
- * The reporting application — its own shell, inside the same tab.
+  "ui/views/report-admin.js": `/**
+ * Enterprise Reporting's Administration section, in the browser preview.
  *
- * Two applications are generated from one model and this is the second of
- * them. Deployed, it is the Enterprise Reporting platform: a separate service,
- * a separate database (\`enterprise_config\`), a separate user table, reached at
- * \`/report\` behind the same proxy. A browser tab cannot run a second server, so
- * here it is a second shell over the same runtime — and everything a reader
- * meets is still separate: its own sign-in, its own accounts, its own roles,
- * and reports scoped to what each role may read.
+ * Users, Roles, Permissions, Data Sources and System Logs — the five of the
+ * platform's seven administration screens that a browser tab can honestly
+ * offer, because the data behind them is here: \`rpt_user\`, \`rpt_role\`,
+ * \`rpt_role_tables\` (enforced on every reporting request) and
+ * \`rpt_activity_log\`. Each is drawn after the platform's own page — its title,
+ * its description, its columns — and each writes through \`/report-admin\`,
+ * which refuses anyone who is not a reporting administrator.
  *
- * What it deliberately does not pretend to be: there is no SQL editor, no
- * report designer, no natural-language query and no scheduled delivery. Those
- * need the platform's servers. A read-only mirror of what the platform would
- * hold is worth more than buttons that answer "not in the browser build".
+ * Trigger Board and Settings are the two that are not here. One is the
+ * platform's job queue and the other its server configuration, and neither
+ * exists in a tab; they open the page that says where the real ones are.
+ *
+ * No \`confirm()\` and no \`prompt()\`: this application runs in an iframe on the
+ * page that generated it, where a modal dialog is not guaranteed to appear. A
+ * delete is two clicks on the same button, and a form is a dialog drawn here.
  */
 
-import { el, empty, mount, spinner, toast } from "../dom.js";
-import { themeControl } from "../theme.js";
+import { el, mount, toast } from "../dom.js";
+import { reportApi } from "../api.js";
+import {
+  alert,
+  badge,
+  button,
+  card,
+  cardContent,
+  cardHeader,
+  emptyState,
+  icon,
+  loading,
+  pageHeader,
+  table,
+} from "./er-kit.js";
+
+const when = (value) => (value ? new Date(value).toLocaleString() : "—");
+const day = (value) => (value ? new Date(value).toLocaleDateString() : "—");
+
+/** A delete that asks twice by changing its own label, then reverts. */
+function deleteButton(onConfirm) {
+  let armed = false;
+  let timer = null;
+  const node = button("Delete", { variant: "ghost", size: "sm" });
+  node.classList.add("er-btn--danger");
+  node.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (!armed) {
+      armed = true;
+      node.textContent = "Confirm delete";
+      node.classList.add("is-armed");
+      timer = setTimeout(() => {
+        armed = false;
+        node.textContent = "Delete";
+        node.classList.remove("is-armed");
+      }, 4000);
+      return;
+    }
+    clearTimeout(timer);
+    node.disabled = true;
+    await onConfirm();
+  });
+  return node;
+}
+
+/**
+ * \`components/ui/dialog.tsx\`, as a panel over the page. Returns a closer.
+ * \`fields\` is [{ name, label, type, value, options }]; \`onSubmit\` gets the
+ * values and throws to keep the dialog open with the server's refusal in it.
+ */
+function dialog({ title, description, fields, submitLabel, onSubmit }) {
+  const inputs = new Map();
+  const errorSlot = el("div");
+  const submit = el("button.er-btn.er-btn--default.er-btn--size-default", { type: "submit" }, submitLabel);
+
+  const body = fields.map((field) => {
+    let input;
+    if (field.type === "select") {
+      input = el(
+        "select.er-select",
+        { id: \`erf-\${field.name}\` },
+        ...field.options.map((option) => el("option", { value: option.value }, option.label))
+      );
+      input.value = field.value ?? "";
+    } else {
+      input = el("input.er-input", {
+        id: \`erf-\${field.name}\`,
+        type: field.type || "text",
+        value: field.value ?? "",
+        placeholder: field.placeholder ?? null,
+        autocomplete: field.type === "password" ? "new-password" : "off",
+      });
+    }
+    inputs.set(field.name, input);
+    return el(
+      "div.er-field",
+      el("label.er-label-strong", { for: \`erf-\${field.name}\` }, field.label),
+      input,
+      field.hint ? el("p.er-label", field.hint) : null
+    );
+  });
+
+  const overlay = el("div.er-dialog-overlay");
+  const close = () => overlay.remove();
+  const form = el(
+    "form.er-card.er-dialog",
+    {
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": title,
+      onsubmit: async (event) => {
+        event.preventDefault();
+        submit.disabled = true;
+        mount(errorSlot);
+        const values = Object.fromEntries([...inputs].map(([name, input]) => [name, input.value]));
+        try {
+          await onSubmit(values);
+          close();
+        } catch (error) {
+          mount(errorSlot, alert(error.message || String(error), null, "destructive"));
+          submit.disabled = false;
+        }
+      },
+    },
+    el(
+      "div.er-card__header",
+      el("h2.er-card__title", title),
+      description ? el("p.er-card__description", description) : null
+    ),
+    el("div.er-card__content.er-dialog__body", errorSlot, ...body),
+    el(
+      "div.er-card__footer.er-dialog__footer",
+      button("Cancel", { variant: "outline", onclick: close }),
+      submit
+    )
+  );
+  overlay.appendChild(form);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  (document.querySelector(".er") ?? document.body).appendChild(overlay);
+  inputs.values().next().value?.focus();
+  return close;
+}
+
+function titled(iconName, text) {
+  return el("span.er-titled", icon(iconName, "er-icon--md"), text);
+}
+
+// ─── Users — admin/users/index.tsx ───────────────────────────────────────────
+
+export async function usersPage(main, { me, rerender }) {
+  mount(main, el("div.er-stack", pageHeader("User Management", "Manage user accounts and assign roles"), card(loading())));
+  const [users, roles] = await Promise.all([reportApi.get("/report-admin/users"), reportApi.get("/report-admin/roles")]);
+  const roleOptions = [{ value: "", label: "No role — reads nothing" }, ...roles.map((role) => ({ value: role.id, label: role.name }))];
+
+  const addUser = () =>
+    dialog({
+      title: "Add User",
+      description: "A reporting account. It signs into this reporting application only, never the application it reports on.",
+      submitLabel: "Create User",
+      fields: [
+        { name: "name", label: "Name", placeholder: "Jane Doe" },
+        { name: "email", label: "Email", type: "email", placeholder: "name@example.com" },
+        { name: "password", label: "Password", type: "password", hint: "At least five characters." },
+        { name: "roleId", label: "Role", type: "select", options: roleOptions, value: "" },
+      ],
+      onSubmit: async (values) => {
+        await reportApi.post("/report-admin/users", { ...values, roleId: values.roleId || null });
+        toast("User created", "success");
+        await rerender();
+      },
+    });
+
+  const editUser = (user) =>
+    dialog({
+      title: \`Edit \${user.name}\`,
+      description: user.email,
+      submitLabel: "Save Changes",
+      fields: [
+        { name: "name", label: "Name", value: user.name },
+        { name: "roleId", label: "Role", type: "select", options: roleOptions, value: user.roleId ?? "" },
+        { name: "password", label: "New password", type: "password", hint: "Leave empty to keep the current one." },
+      ],
+      onSubmit: async (values) => {
+        const changes = { name: values.name };
+        if ((values.roleId || null) !== (user.roleId ?? null)) changes.roleId = values.roleId || null;
+        if (values.password) changes.password = values.password;
+        await reportApi.patch(\`/report-admin/users/\${user.id}\`, changes);
+        toast("User updated", "success");
+        await rerender();
+      },
+    });
+
+  const toggleActive = async (user) => {
+    try {
+      await reportApi.patch(\`/report-admin/users/\${user.id}\`, { isActive: !user.isActive });
+      toast(user.isActive ? "User deactivated" : "User activated", "success");
+      await rerender();
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  };
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("User Management", "Manage user accounts and assign roles", {
+        actions: button("Add User", { iconName: "users", onclick: addUser }),
+      }),
+      card(
+        cardHeader(titled("users", \`Users (\${users.length})\`)),
+        el(
+          "div.er-card__flush",
+          table(
+            ["Name", "Email", "Status", "Roles", "Last sign-in", "Created", "Actions"],
+            users.map((user) => [
+              el("span.er-strong", user.name, user.id === me.id ? el("span.er-label", " (you)") : null),
+              user.email,
+              user.isActive ? badge("Active", "default") : badge("Inactive", "neutral"),
+              user.role ? badge(user.role, user.isAdmin ? "default" : "secondary") : badge("No role", "outline"),
+              when(user.lastSignIn),
+              day(user.createdAt),
+              el(
+                "div.er-rowactions",
+                button("Edit", { variant: "ghost", size: "sm", onclick: () => editUser(user) }),
+                user.id === me.id
+                  ? null
+                  : button(user.isActive ? "Deactivate" : "Activate", {
+                      variant: "ghost",
+                      size: "sm",
+                      onclick: () => toggleActive(user),
+                    }),
+                user.id === me.id
+                  ? null
+                  : deleteButton(async () => {
+                      try {
+                        await reportApi.delete(\`/report-admin/users/\${user.id}\`);
+                        toast("User deleted", "success");
+                      } catch (error) {
+                        toast(error.message, "error");
+                      }
+                      await rerender();
+                    })
+              ),
+            ])
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── Roles — admin/roles/index.tsx ───────────────────────────────────────────
+
+export async function rolesPage(main, { rerender, href, tableTotal }) {
+  mount(main, el("div.er-stack", pageHeader("Role Management", "Manage roles and their granular permissions"), card(loading())));
+  const roles = await reportApi.get("/report-admin/roles");
+
+  const roleForm = (role) =>
+    dialog({
+      title: role ? \`Edit \${role.name}\` : "Create Role",
+      description: role
+        ? null
+        : "A new reporting role reads nothing until it is granted tables under Permissions.",
+      submitLabel: role ? "Save Changes" : "Create Role",
+      fields: [
+        { name: "name", label: "Role Name", value: role?.name ?? "" },
+        { name: "description", label: "Description", value: role?.description ?? "" },
+      ],
+      onSubmit: async (values) => {
+        if (role) await reportApi.patch(\`/report-admin/roles/\${role.id}\`, values);
+        else await reportApi.post("/report-admin/roles", values);
+        toast(role ? "Role updated" : "Role created", "success");
+        await rerender();
+      },
+    });
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("Role Management", "Manage roles and their granular permissions", {
+        actions: button("Create Role", { iconName: "shield", onclick: () => roleForm(null) }),
+      }),
+      alert(
+        "Roles mirror the model",
+        "Each seeded role is one %%rbac role of the application, with the same name. A reporting role decides " +
+          "which of the application's tables its queries may read — change that under Permissions, and it " +
+          "applies to the next query."
+      ),
+      card(
+        cardHeader(titled("shield", \`Roles (\${roles.length})\`)),
+        el(
+          "div.er-card__flush",
+          table(
+            ["Role Name", "Description", "Permissions", "Users", "Actions"],
+            roles.map((role) => [
+              el(
+                "div",
+                el("span.er-strong", role.name),
+                role.declaredAs ? el("div.er-label", \`%%rbac \${role.declaredAs}\`) : null
+              ),
+              el("span.er-clamp", role.description || "-"),
+              role.isAdmin
+                ? badge("All tables · admin:*", "default")
+                : el(
+                    "a.er-badge.er-badge--secondary",
+                    { href: href("permissions", role.id) },
+                    \`\${role.tables.length} of \${tableTotal} tables\`
+                  ),
+              String(role.users),
+              el(
+                "div.er-rowactions",
+                button("Edit", { variant: "ghost", size: "sm", onclick: () => roleForm(role) }),
+                role.isAdmin
+                  ? null
+                  : el("a.er-btn.er-btn--ghost.er-btn--size-sm", { href: href("permissions", role.id) }, "Permissions"),
+                role.isAdmin
+                  ? null
+                  : deleteButton(async () => {
+                      try {
+                        await reportApi.delete(\`/report-admin/roles/\${role.id}\`);
+                        toast("Role deleted — its users now hold no role", "success");
+                      } catch (error) {
+                        toast(error.message, "error");
+                      }
+                      await rerender();
+                    })
+              ),
+            ])
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── Permissions — admin/permissions/index.tsx ───────────────────────────────
+
+export async function permissionsPage(main, { rerender, href, selectedRoleId }) {
+  mount(main, el("div.er-stack", pageHeader("Permission Management", "Manage resource-level permissions for roles"), card(loading())));
+  const [roles, sources] = await Promise.all([
+    reportApi.get("/report-admin/roles"),
+    reportApi.get("/report-admin/data-sources"),
+  ]);
+  const tables = sources[0]?.tables ?? [];
+  const scoped = roles.filter((role) => !role.isAdmin);
+  const role = scoped.find((candidate) => candidate.id === selectedRoleId) ?? scoped[0] ?? null;
+
+  const header = pageHeader("Permission Management", "Manage resource-level permissions for roles");
+  if (!role) {
+    return void mount(main, el("div.er-stack", header, card(cardContent(emptyState("No scoped roles", "Create a role first.")))));
+  }
+
+  const picker = el(
+    "select.er-select.er-select--inline",
+    {
+      "aria-label": "Role",
+      onchange: (event) => {
+        window.location.hash = href("permissions", event.currentTarget.value);
+      },
+    },
+    ...scoped.map((candidate) => el("option", { value: candidate.id }, candidate.name))
+  );
+  picker.value = role.id;
+
+  const granted = new Set(role.tables);
+  const boxes = new Map();
+  const counter = el("span.er-label");
+  const recount = () => {
+    const count = [...boxes.values()].filter((box) => box.checked).length;
+    counter.textContent = \`\${count} of \${tables.length} tables selected\`;
+  };
+
+  // Grouped by the model's categories, which is how the application's own
+  // dashboard groups the same entities.
+  const groups = new Map();
+  for (const tableInfo of tables) {
+    const key = tableInfo.category || "Other";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(tableInfo);
+  }
+
+  const save = button("Save Permissions", {
+    onclick: async () => {
+      save.disabled = true;
+      try {
+        const chosen = [...boxes].filter(([, box]) => box.checked).map(([name]) => name);
+        await reportApi.put(\`/report-admin/roles/\${role.id}/tables\`, { tables: chosen });
+        toast(\`\${role.name} may now read \${chosen.length} table\${chosen.length === 1 ? "" : "s"}\`, "success");
+        await rerender();
+      } catch (error) {
+        toast(error.message, "error");
+        save.disabled = false;
+      }
+    },
+  });
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      header,
+      card(
+        cardHeader(
+          titled("shield", "Table access"),
+          "Which of the application's tables this role's queries may read — permission level select. " +
+            "A report, chart or dashboard tile whose query names any other table is not offered to the role, " +
+            "and is refused if asked for.",
+          el("div.er-inline", el("span.er-label", "Role"), picker)
+        ),
+        cardContent(
+          ...[...groups].map(([group, members]) =>
+            el(
+              "fieldset.er-grantgroup",
+              el("legend.er-nav__heading", group),
+              el(
+                "div.er-grantgrid",
+                ...members.map((tableInfo) => {
+                  const box = el("input", { type: "checkbox", checked: granted.has(tableInfo.table), onchange: recount });
+                  boxes.set(tableInfo.table, box);
+                  return el(
+                    "label.er-grant",
+                    box,
+                    el(
+                      "span",
+                      el("span.er-strong", tableInfo.displayName),
+                      el("span.er-label.er-block", \`\${tableInfo.table} · \${tableInfo.rows ?? "?"} rows\`)
+                    )
+                  );
+                })
+              )
+            )
+          ),
+          el("div.er-toolbar.er-mt", save, counter)
+        )
+      )
+    )
+  );
+  recount();
+}
+
+// ─── Data Sources — data-sources/index.tsx ───────────────────────────────────
+
+export async function dataSourcesPage(main) {
+  const title = "Data Sources";
+  const description = "Manage database connections for reports and queries";
+  mount(main, el("div.er-stack", pageHeader(title, description), card(loading())));
+  const sources = await reportApi.get("/report-admin/data-sources");
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader(title, description),
+      card(
+        el(
+          "div.er-card__flush",
+          table(
+            ["Name", "Type", "Description", "Status", "Tables"],
+            sources.map((source) => [
+              el("span.er-strong", source.name),
+              badge("PostgreSQL", "outline"),
+              el("span.er-clamp", source.description || "-"),
+              badge("Connected", "default"),
+              String(source.tables.length),
+            ])
+          )
+        )
+      ),
+      ...sources.map((source) =>
+        card(
+          cardHeader(
+            titled("database", \`\${source.name} — entities\`),
+            \`\${source.engine}. The platform registers this same database as its data source, with its \` +
+              "connection details encrypted; here it is the database in this tab."
+          ),
+          el(
+            "div.er-card__flush",
+            table(
+              ["Entity", "Table", "Category", "Rows", "Description"],
+              source.tables.map((tableInfo) => [
+                el("span.er-strong", tableInfo.displayName),
+                el("code", tableInfo.table),
+                tableInfo.category || "-",
+                tableInfo.rows === null ? "—" : tableInfo.rows.toLocaleString(),
+                el("span.er-clamp", tableInfo.description || "-"),
+              ])
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── System Logs — logs.tsx ──────────────────────────────────────────────────
+
+const OUTCOME_BADGE = { ok: ["OK", "default"], refused: ["Refused", "warning"], failed: ["Failed", "destructive"] };
+
+export async function logsPage(main, { rerender }) {
+  const title = "System Logs";
+  const description = "View system logs and debugging information";
+  mount(main, el("div.er-stack", pageHeader(title, description), card(loading())));
+  const filter = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("outcome") ?? "";
+  const logs = await reportApi.get(\`/report-admin/logs\${filter ? \`?outcome=\${encodeURIComponent(filter)}\` : ""}\`);
+
+  const picker = el(
+    "select.er-select.er-select--inline",
+    {
+      "aria-label": "Outcome",
+      onchange: (event) => {
+        const value = event.currentTarget.value;
+        window.location.hash = \`#/report/logs\${value ? \`?outcome=\${value}\` : ""}\`;
+      },
+    },
+    el("option", { value: "" }, "All outcomes"),
+    el("option", { value: "ok" }, "OK"),
+    el("option", { value: "refused" }, "Refused"),
+    el("option", { value: "failed" }, "Failed")
+  );
+  picker.value = filter;
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader(title, description, {
+        actions: [picker, button("Refresh", { variant: "outline", size: "sm", iconName: "refresh", onclick: () => rerender() })],
+      }),
+      card(
+        cardHeader(
+          titled("squareTerminal", \`Reporting activity (\${logs.length})\`),
+          "Sign-ins, report and chart runs — refusals included — and every change made under Administration. " +
+            "The deployed platform's log also carries its server's own messages; this one records what this tab did."
+        ),
+        el(
+          "div.er-card__flush",
+          logs.length === 0
+            ? emptyState("No activity yet")
+            : table(
+                ["Level", "Timestamp", "User", "Action", "Message"],
+                logs.map((entry) => {
+                  const [label, variant] = OUTCOME_BADGE[entry.outcome] ?? [entry.outcome, "secondary"];
+                  return [
+                    badge(label, variant),
+                    when(entry.at),
+                    entry.email || "—",
+                    el("span.er-strong", entry.action),
+                    [entry.target, entry.detail, entry.durationMs != null ? \`\${entry.durationMs}ms\` : null]
+                      .filter(Boolean)
+                      .join(" · ") || "—",
+                  ];
+                })
+              )
+        )
+      )
+    )
+  );
+}
+`,
+  "ui/views/report-app.js": `/**
+ * Enterprise Reporting — the browser preview.
+ *
+ * Two applications are generated from one model and this is the second. Deployed
+ * — from the downloadable archive, or by the orchestrator — it is the real
+ * Enterprise Reporting platform (\`businessappwithai/enterprise_reporting_tanstack\`),
+ * built from its own source and not modified: a separate service, a separate
+ * database, a separate user table.
+ *
+ * A browser tab cannot run that platform. It is a TanStack Start server over
+ * PostgreSQL, and every screen it has calls that server. So this is a preview of
+ * it, and it is built to look like it: the platform's sidebar, header, page
+ * headers, cards, tables and badges, on the platform's own Tremor tokens (see
+ * \`er-kit.js\` and the \`.er\` block in styles.css), over the same reporting pack
+ * the platform is seeded with — the same saved queries, reports, charts,
+ * dashboard and one reporting role per \`%%rbac\` role.
+ *
+ * Its administration is real: an administrator manages reporting users, roles,
+ * each role's table permissions, and reads the data source and the activity
+ * log (\`report-admin.js\`), and a permission changed there applies to the next
+ * query. What it is not, and says so: the SQL editor, NL query, jobs,
+ * monitoring, filters, the report generator, the trigger board and settings
+ * need the platform's servers. They are in the sidebar where the platform puts
+ * them, and each opens a page naming where the real one is, rather than a
+ * button that fails.
+ */
+
+import { el, mount } from "../dom.js";
+import { applyTheme, storedTheme } from "../theme.js";
+import { downloadCsv, toCsv } from "../csv.js";
 import { reportApi, setReportToken } from "../api.js";
 import { reportLoginView } from "./report-login.js";
+import { dataSourcesPage, logsPage, permissionsPage, rolesPage, usersPage } from "./report-admin.js";
+import {
+  alert,
+  badge,
+  breadcrumb,
+  button,
+  card,
+  cardContent,
+  cardHeader,
+  cellText,
+  chart,
+  emptyState,
+  icon,
+  kpiCard,
+  loading,
+  pageHeader,
+  table,
+} from "./er-kit.js";
 
 const state = {
   user: null,
   overview: null,
-  /** Which section is showing: dashboard | reports | charts | queries | access. */
-  section: "dashboard",
+  sidebarCollapsed: false,
+  mobileMenuOpen: false,
+  /** Which header menu is open: null | "user" | "notifications". */
+  menu: null,
 };
 
-/**
- * Repaint the shell.
+/*
+ * The platform's sidebar, item for item (\`src/components/layout/sidebar.tsx\`),
+ * with the permission each one needs. A reporting role seeded from the model
+ * holds \`report:view\`, \`chart:view\`, \`dashboard:view\` and \`nl_query:*\` — that is
+ * what \`scripts/seed-reporting-pack.ts\` grants — so it sees the same six items
+ * here that it sees there, and the administrator sees all of them.
  *
- * Held here rather than threaded through every screen: the shell is a single
- * function and the screens below it only ever want "show the section I just
- * set". Assigned by \`reportAppView\`, which is the only thing that can build it.
+ * \`route\` is the screen the preview has. An item without one is a screen that
+ * needs the platform's servers; it still appears, and opens a page saying so.
  */
-let rerender = async () => {};
+const MAIN_NAV = [
+  { slug: "dashboard", label: "Dashboard", icon: "home", permission: null, route: "dashboard" },
+  { slug: "sql-editor", label: "SQL Editor", icon: "terminal", permission: "query", description: "Write and execute SQL queries" },
+  { slug: "queries", label: "Saved Queries", icon: "database", permission: "query", route: "queries" },
+  { slug: "reports", label: "Reports", icon: "fileText", permission: "report", route: "reports" },
+  { slug: "charts", label: "Charts", icon: "barChart3", permission: "chart", route: "charts" },
+  { slug: "dashboards", label: "Dashboards", icon: "layoutDashboard", permission: "dashboard", route: "dashboards" },
+  { slug: "filters", label: "Filters", icon: "filter", permission: "filter", description: "Define reusable report filters" },
+  { slug: "jobs", label: "Jobs", icon: "play", permission: "job", description: "Schedule and run background jobs" },
+  { slug: "monitoring", label: "Monitoring", icon: "activity", permission: "monitoring_rule", description: "Track thresholds and breaches" },
+  { slug: "nl-query", label: "NL Query", icon: "messageSquare", permission: "nl_query", description: "Ask questions in plain language" },
+  { slug: "report-generator", label: "Report Generator", icon: "fileText", permission: "report", description: "Generate a report from a description" },
+];
 
-/** Render one SQL scalar as a cell. */
-function cell(value) {
-  if (value === null || value === undefined) return "—";
-  if (value instanceof Date) return value.toLocaleDateString();
-  if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+const ADMIN_NAV = [
+  { slug: "data-sources", label: "Data Sources", icon: "database", permission: "data_source", route: "data-sources", description: "Manage database connections" },
+  { slug: "trigger-board", label: "Trigger Board", icon: "layers", permission: "queue", description: "Inspect the job queue" },
+  { slug: "logs", label: "System Logs", icon: "squareTerminal", permission: "log", route: "logs", description: "Review application logs" },
+  { slug: "users", label: "Users", icon: "users", permission: "user", route: "users", description: "Manage user accounts" },
+  { slug: "roles", label: "Roles", icon: "shield", permission: "role", route: "roles", description: "Manage roles and grants" },
+  { slug: "permissions", label: "Permissions", icon: "shield", permission: "user", route: "permissions", description: "Review resource-level grants" },
+  { slug: "settings", label: "Settings", icon: "settings", permission: "setting", description: "Configure the application" },
+];
+
+/**
+ * The administration screens the preview has, by route. Server-checked too:
+ * \`/report-admin\` refuses anyone who is not a reporting administrator.
+ */
+const ADMIN_ROUTES = new Map([
+  ["users", usersPage],
+  ["roles", rolesPage],
+  ["permissions", permissionsPage],
+  ["data-sources", dataSourcesPage],
+  ["logs", logsPage],
+]);
+
+/** What a seeded reporting role may view — the grant the platform's seeder writes. */
+const REPORTING_ROLE_GRANTS = new Set(["report", "chart", "dashboard", "nl_query"]);
+
+function canView(permission) {
+  if (permission === null) return true;
+  if (state.user?.isAdmin) return true;
+  return REPORTING_ROLE_GRANTS.has(permission);
 }
 
-/**
- * A chart, as SVG, from the rows the query already returned.
- *
- * No charting library, for the same reason the application's own reports screen
- * has none: this runtime has no build step and no dependencies, and the drawing
- * is two column names the pack chose plotted against each other. \`pie\` and
- * \`area\` render as bars rather than as nothing — the shape is a presentation
- * preference and refusing to draw would lose the answer.
- */
-function chartSvg(kind, xField, yField, rows) {
-  const points = rows
-    .map((row) => ({ label: cell(row[xField]), value: Number(row[yField]) }))
-    .filter((point) => Number.isFinite(point.value))
-    .slice(0, 30);
-  if (points.length === 0) return null;
-
-  const max = Math.max(...points.map((point) => point.value), 0) || 1;
-  const width = 700;
-  const height = 200;
-  const step = width / points.length;
-  const svgns = "http://www.w3.org/2000/svg";
-
-  const svg = document.createElementNS(svgns, "svg");
-  svg.setAttribute("viewBox", \`0 0 \${width} \${height + 34}\`);
-  svg.setAttribute("class", "report-chart");
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", \`\${yField} by \${xField}\`);
-
-  if (kind === "line") {
-    const line = document.createElementNS(svgns, "polyline");
-    line.setAttribute("fill", "none");
-    line.setAttribute("stroke", "currentColor");
-    line.setAttribute("stroke-width", "2");
-    line.setAttribute(
-      "points",
-      points
-        .map((p, i) => \`\${i * step + step / 2},\${height - (p.value / max) * (height - 16)}\`)
-        .join(" ")
-    );
-    svg.appendChild(line);
-  } else {
-    points.forEach((point, index) => {
-      const barHeight = (point.value / max) * (height - 16);
-      const rect = document.createElementNS(svgns, "rect");
-      rect.setAttribute("x", String(index * step + step * 0.15));
-      rect.setAttribute("y", String(height - barHeight));
-      rect.setAttribute("width", String(step * 0.7));
-      rect.setAttribute("height", String(barHeight));
-      rect.setAttribute("fill", "currentColor");
-      svg.appendChild(rect);
-    });
-  }
-
-  points.forEach((point, index) => {
-    const text = document.createElementNS(svgns, "text");
-    text.setAttribute("x", String(index * step + step / 2));
-    text.setAttribute("y", String(height + 14));
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("font-size", "10");
-    text.setAttribute("opacity", "0.7");
-    text.textContent = point.label.length > 12 ? \`\${point.label.slice(0, 11)}…\` : point.label;
-    svg.appendChild(text);
-  });
-
-  return svg;
+/** \`#/report/<a>/<b>\` → ["<a>", "<b>"], decoded. */
+function currentPath() {
+  const route = (window.location.hash || "").replace(/^#\\/report\\/?/, "").split("?")[0];
+  return route.split("/").filter(Boolean).map(decodeURIComponent);
 }
 
-/** Run one definition and render the answer into \`panel\`. */
-async function run(panel, kind, item) {
-  mount(panel, spinner("Running"));
+const href = (...parts) => \`#/report/\${parts.map(encodeURIComponent).join("/")}\`;
 
-  let result;
-  try {
-    result = await reportApi.get(
-      \`/reporting/\${kind}/\${encodeURIComponent(item.key)}/run\`
-    );
-  } catch (error) {
-    /* A 403 here is the reporting role working, not a failure, and it names the
-       table it refused — so it is shown as the answer rather than as an error
-       the reader is meant to do something about. */
-    return void mount(
-      panel,
-      empty(
-        error.status === 403 ? "This role may not read that" : "This report did not run",
-        error.message || String(error)
-      )
-    );
-  }
+const repaint = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
 
-  const parts = [el("h2", item.name)];
-  if (item.description) parts.push(el("p.muted", item.description));
+// ─── The shell: sidebar, header, main ────────────────────────────────────────
 
-  if (kind === "charts") {
-    const svg = chartSvg(item.chartType, item.xField, item.yField, result.rows);
-    if (svg) parts.push(el("div.report-chart-wrap", svg, el("p.muted", \`\${item.yField} by \${item.xField}\`)));
-  }
-
-  parts.push(
-    el(
-      "p.muted",
-      \`\${result.rowCount} row\${result.rowCount === 1 ? "" : "s"} in \${result.durationMs}ms\` +
-        (result.truncated ? " — capped; the query returns more" : "")
-    )
+function navItem(item, activeSlug) {
+  const active = item.slug === activeSlug;
+  return el(
+    "a.er-nav__item",
+    {
+      href: href(item.route ?? \`unavailable\`, ...(item.route ? [] : [item.slug])),
+      class: active ? "is-active" : null,
+      title: state.sidebarCollapsed ? item.label : null,
+      "aria-current": active ? "page" : null,
+      onclick: () => {
+        state.mobileMenuOpen = false;
+      },
+    },
+    icon(item.icon),
+    state.sidebarCollapsed ? null : el("span.er-nav__label", item.label)
   );
+}
 
-  if (result.rowCount === 0) {
-    parts.push(
-      el("p.muted", "No rows. The query is valid; nothing in the application's data answers it yet.")
-    );
-  } else {
-    parts.push(
+function sidebar(activeSlug, { mobile = false } = {}) {
+  const main = MAIN_NAV.filter((item) => canView(item.permission));
+  const admin = ADMIN_NAV.filter((item) => canView(item.permission));
+  const collapsed = state.sidebarCollapsed && !mobile;
+
+  return el(
+    "aside.er-sidebar",
+    { class: collapsed ? "is-collapsed" : null },
+    el(
+      "div.er-sidebar__brand",
       el(
-        "div.table-wrap",
-        el(
-          "table",
-          el("thead", el("tr", ...result.columns.map((column) => el("th", column)))),
-          el(
-            "tbody",
-            ...result.rows.map((row) =>
-              el("tr", ...result.columns.map((column) => el("td", cell(row[column]))))
-            )
+        "a.er-sidebar__logo",
+        { href: href("dashboard") },
+        icon("barChart3", "er-icon--md er-brand"),
+        collapsed ? null : el("span", "Enterprise Reports")
+      )
+    ),
+    el(
+      "div.er-sidebar__scroll",
+      el(
+        "div.er-nav__group",
+        collapsed ? null : el("h2.er-nav__heading", "Main"),
+        el("nav.er-nav", ...main.map((item) => navItem(item, activeSlug)))
+      ),
+      admin.length > 0 ? el("div.er-separator") : null,
+      admin.length > 0
+        ? el(
+            "div.er-nav__group",
+            collapsed ? null : el("h2.er-nav__heading", "Administration"),
+            el("nav.er-nav", ...admin.map((item) => navItem(item, activeSlug)))
           )
-        )
-      )
-    );
-  }
-
-  /* Where the number came from. A reporting user's next question about any
-     figure is always this one, and the platform answers it with the saved query
-     the report is built on. The SQL itself is not in this response — \`/run\`
-     returns the definition without it, so that a client cannot become the place
-     a query is read from — and **Saved queries** is the screen that has it. */
-  parts.push(
+        : null
+    ),
     el(
-      "details.report-sql",
-      el("summary", \`Saved query — \${result.query.name}\`),
-      el("p.muted", result.query.description),
-      el("p.muted", \`Reads \${result.query.tables.join(", ") || "no business table"}.\`),
-      el(
-        "button.link",
-        {
-          onclick: async () => {
-            state.section = "queries";
-            await rerender();
-          },
-        },
-        "See its SQL under Saved queries"
-      )
-    )
-  );
-
-  parts.push(
-    el(
-      "button.btn",
+      "button.er-sidebar__collapse",
       {
+        type: "button",
+        "aria-label": mobile ? "Close navigation menu" : collapsed ? "Expand sidebar" : "Collapse sidebar",
         onclick: () => {
-          run(panel, kind, item);
-          toast("Re-running", "info");
+          if (mobile) state.mobileMenuOpen = false;
+          else state.sidebarCollapsed = !state.sidebarCollapsed;
+          repaint();
         },
       },
-      "Run again"
+      icon(collapsed ? "chevronRight" : "chevronLeft", "er-icon--xs")
     )
   );
-
-  mount(panel, ...parts);
 }
 
-/** A list of definitions on the left, the answer on the right. */
-function browser(items, kind, emptyTitle, emptyDetail) {
-  if (items.length === 0) return empty(emptyTitle, emptyDetail);
+function initials(user) {
+  const source = user.name || user.email || "U";
+  const parts = source.split(/[\\s@.]+/).filter(Boolean);
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : source[0]).toUpperCase();
+}
 
-  // Grouped by the table the query reads, because that is what a reporting
-  // role is a statement about — and on a scoped role it is the grouping that
-  // shows which half of the application it has.
-  const groups = new Map();
-  for (const item of items) {
-    const key = (item.tables || [])[0] || "Across the application";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  }
+function header({ project, onLeave, signOut }) {
+  const user = state.user;
+  const role = state.overview?.role;
 
-  const panel = el(
-    "div.report-panel",
-    empty("Choose one", "Pick a definition on the left to run it against the application's data.")
+  const themeSelect = el(
+    "select.er-select.er-themeselect",
+    {
+      "aria-label": "Theme",
+      onchange: (event) => applyTheme(event.currentTarget.value),
+    },
+    el("option", { value: "light" }, "☀  Light Theme"),
+    el("option", { value: "dark" }, "☾  Dark Theme"),
+    el("option", { value: "system" }, "◐  System")
   );
+  themeSelect.value = storedTheme();
 
-  const list = el(
-    "nav.report-list",
-    ...[...groups.entries()].map(([group, groupItems]) =>
+  const toggle = (name) => () => {
+    state.menu = state.menu === name ? null : name;
+    repaint();
+  };
+
+  const notifications =
+    state.menu === "notifications"
+      ? el(
+          "div.er-menu.er-menu--wide",
+          el("div.er-menu__label.er-menu__label--split", el("span", "Notifications")),
+          el("div.er-menu__empty", "No notifications")
+        )
+      : null;
+
+  const userMenu =
+    state.menu === "user"
+      ? el(
+          "div.er-menu",
+          el(
+            "div.er-menu__label",
+            el("p.er-menu__name", user.name || user.role || "Reporting user"),
+            el("p.er-menu__email", user.email)
+          ),
+          el("div.er-menu__separator"),
+          el(
+            "div.er-menu__note",
+            role
+              ? role.tables === null
+                ? \`\${role.name ?? "Administrator"} — reads every table (\${role.tableTotal})\`
+                : \`\${role.name ?? "No reporting role"} — reads \${role.tables.length} of \${role.tableTotal} tables\`
+              : null
+          ),
+          el("div.er-menu__separator"),
+          onLeave
+            ? el(
+                "button.er-menu__item",
+                { type: "button", onclick: () => onLeave() },
+                icon("arrowLeft"),
+                el("span", \`Back to \${project.name}\`)
+              )
+            : null,
+          el(
+            "button.er-menu__item.er-menu__item--danger",
+            { type: "button", onclick: signOut },
+            icon("logOut"),
+            el("span", "Log out")
+          )
+        )
+      : null;
+
+  return el(
+    "header.er-header",
+    el(
+      "div.er-header__left",
       el(
-        "section",
-        el("h3", group),
+        "button.er-btn.er-btn--ghost.er-btn--size-icon.er-mobile-only",
+        {
+          type: "button",
+          "aria-label": "Toggle menu",
+          onclick: () => {
+            state.mobileMenuOpen = !state.mobileMenuOpen;
+            repaint();
+          },
+        },
+        icon("menu", "er-icon--lg")
+      )
+    ),
+    el(
+      "div.er-header__right",
+      themeSelect,
+      el(
+        "button.er-btn.er-btn--ghost.er-btn--size-icon",
+        {
+          type: "button",
+          "aria-label": "Help",
+          title: "Help",
+          onclick: () => {
+            window.location.hash = href("about-preview");
+          },
+        },
+        icon("helpCircle", "er-icon--lg")
+      ),
+      el(
+        "div.er-menuwrap",
         el(
-          "ul",
-          ...groupItems.map((item) =>
+          "button.er-btn.er-btn--ghost.er-btn--size-icon",
+          { type: "button", "aria-label": "Notifications", onclick: toggle("notifications") },
+          icon("bell")
+        ),
+        notifications
+      ),
+      el(
+        "div.er-menuwrap",
+        el(
+          "button.er-avatar",
+          { type: "button", "aria-label": "Account", onclick: toggle("user") },
+          initials(user)
+        ),
+        userMenu
+      )
+    )
+  );
+}
+
+/**
+ * The one thing this screen has that the platform does not: a line saying what
+ * it is. Kept to a strip under the header, so the page below it is the
+ * platform's page.
+ */
+function previewStrip() {
+  return el(
+    "div.er-previewstrip",
+    icon("info", "er-icon--sm"),
+    el(
+      "span",
+      el("strong", "Browser preview of Enterprise Reporting."),
+      " The reports, charts, dashboard and roles are the ones the platform is seeded with. " +
+        "The real platform runs from the deployable archive or the orchestrator. ",
+      el("a", { href: href("about-preview") }, "What differs")
+    )
+  );
+}
+
+// ─── Pages ───────────────────────────────────────────────────────────────────
+
+/** Whether the run endpoint named \`column\` as a NUMERIC — see \`cellText\`. */
+const isNumeric = (result, column) => (result.numeric ?? []).includes(column);
+
+const plural = (count, one, many = \`\${one}s\`) => \`\${count.toLocaleString()} \${count === 1 ? one : many}\`;
+
+async function dashboardPage(main) {
+  const { counts, role } = state.overview;
+  const isAdmin = !!state.user.isAdmin;
+
+  const kpis = [
+    { label: "Reports", value: counts.reports, href: href("reports"), icon: "fileText", key: "report" },
+    { label: "Charts", value: counts.charts, href: href("charts"), icon: "barChart3", key: "chart" },
+    { label: "Dashboards", value: counts.dashboards, href: href("dashboards"), icon: "layoutDashboard", key: "dashboard" },
+    { label: "Scheduled jobs", value: 0, href: href("unavailable", "jobs"), icon: "play", key: "job" },
+  ].filter((kpi) => canView(kpi.key));
+
+  const workspace = MAIN_NAV.filter((item) => item.slug !== "dashboard");
+  const visible = workspace.filter((item) => canView(item.permission));
+  const moduleCard = (item, admin) =>
+    el(
+      "a.er-card.er-module",
+      { href: href(item.route ?? "unavailable", ...(item.route ? [] : [item.slug])) },
+      el(
+        "div.er-module__head",
+        icon(item.icon, admin ? "er-icon er-subtle" : "er-icon er-brand"),
+        el("h3.er-card__title.er-card__title--sm", item.label)
+      ),
+      el("p.er-card__description", item.description ?? moduleDescription(item.slug))
+    );
+
+  const breakdown = [
+    ["Reports", counts.reports, "fileText"],
+    ["Charts", counts.charts, "barChart3"],
+    ["Dashboards", counts.dashboards, "layoutDashboard"],
+    ...(isAdmin ? [["Saved queries", counts.queries ?? 0, "database"]] : []),
+  ];
+  const maxCount = Math.max(1, ...breakdown.map(([, value]) => value));
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader(
+        "Dashboard",
+        \`Welcome to the Enterprise Reporting System — \${state.user.email}\`,
+        { actions: badge(isAdmin ? "Administrator" : "Standard access", isAdmin ? "default" : "neutral") }
+      ),
+      kpis.length ? el("div.er-grid.er-grid--4", ...kpis.map((kpi) => kpiCard(kpi.label, kpi.value, kpi.icon, kpi.href))) : null,
+      el(
+        "div.er-grid.er-grid--2",
+        card(
+          cardHeader("Content by type", "What exists in your workspace today"),
+          cardContent(
             el(
-              "li",
-              el(
-                "button.link",
-                {
-                  onclick: (event) => {
-                    for (const active of list.querySelectorAll(".is-active")) {
-                      active.classList.remove("is-active");
-                    }
-                    event.currentTarget.classList.add("is-active");
-                    run(panel, kind, item);
-                  },
-                },
-                item.name
+              "ul.er-barlist",
+              ...breakdown.map(([name, value, iconName]) =>
+                el(
+                  "li",
+                  el("div.er-barlist__bar", { style: { width: \`\${Math.max(4, (value / maxCount) * 100)}%\` } }),
+                  el("span.er-barlist__name", icon(iconName, "er-icon--sm er-subtle"), name),
+                  el("span.er-barlist__value", value.toLocaleString())
+                )
               )
             )
           )
+        ),
+        card(
+          cardHeader(
+            "Data access",
+            role.tables === null
+              ? \`\${role.name ?? "This role"} reads every table of \${state.overview.dataSource?.name ?? "the data source"}\`
+              : \`\${role.name ?? "This role"} reads \${role.tables.length} of \${role.tableTotal} tables of \${state.overview.dataSource?.name ?? "the data source"}\`
+          ),
+          cardContent(
+            role.tables === null
+              ? el("p.er-text", "Every report, chart and dashboard tile is offered.")
+              : el(
+                  "div",
+                  el("div.er-taglist", ...role.tables.map((tableName) => badge(tableName, "secondary"))),
+                  counts.reports < counts.reportsTotal
+                    ? el(
+                        "p.er-text.er-mt",
+                        \`\${counts.reports} of \${counts.reportsTotal} reports are offered to this role — \` +
+                          "a report whose query names any other table is not."
+                      )
+                    : null
+                )
+          )
         )
+      ),
+      el(
+        "div",
+        el(
+          "div.er-sectionhead",
+          el("h2.er-sectiontitle", "Your workspace"),
+          el("span.er-label", \`\${visible.length} of \${workspace.length} modules available\`)
+        ),
+        el("div.er-grid.er-grid--3", ...visible.map((item) => moduleCard(item, false)))
+      ),
+      isAdmin
+        ? el(
+            "div",
+            el(
+              "div.er-sectionhead",
+              el("h2.er-sectiontitle", "Administration"),
+              el("span.er-label", \`\${ADMIN_NAV.length} modules\`)
+            ),
+            el("div.er-grid.er-grid--3", ...ADMIN_NAV.map((item) => moduleCard(item, true)))
+          )
+        : null
+    )
+  );
+}
+
+function moduleDescription(slug) {
+  return {
+    queries: "Reuse queries you have saved",
+    reports: "View and manage reports",
+    charts: "Create data visualisations",
+    dashboards: "Build interactive dashboards",
+  }[slug];
+}
+
+function listCard(content) {
+  return card(el("div.er-card__flush", content));
+}
+
+async function queriesPage(main) {
+  mount(main, el("div.er-stack", pageHeader("Saved Queries", "Manage your saved SQL queries"), card(loading())));
+  const queries = await reportApi.get("/reporting/queries");
+  const source = state.overview.dataSource?.name ?? "—";
+  let term = "";
+
+  const body = el("div");
+  const draw = () => {
+    const needle = term.toLowerCase();
+    const shown = queries.filter(
+      (query) => !needle || \`\${query.name} \${query.description} \${source}\`.toLowerCase().includes(needle)
+    );
+    mount(
+      body,
+      shown.length === 0
+        ? emptyState("No queries found", term ? "Nothing matches that search." : "No saved queries this role may run.")
+        : table(
+            ["Name", "Description", "Data Source", "Created", "Modified", "Actions"],
+            shown.map((query) => [
+              el("span.er-strong", query.name),
+              query.description || "-",
+              badge(source, "outline"),
+              generatedOn(),
+              generatedOn(),
+              button("View", { variant: "ghost", size: "sm", iconName: "eye" }),
+            ]),
+            { onRow: (index) => (window.location.hash = href("queries", shown[index].key)) }
+          )
+    );
+  };
+
+  const search = el("input.er-input.er-input--search", {
+    type: "search",
+    placeholder: "Search by name, description, or data source...",
+    oninput: (event) => {
+      term = event.currentTarget.value;
+      draw();
+    },
+  });
+
+  draw();
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("Saved Queries", "Manage your saved SQL queries"),
+      el(
+        "div.er-toolbar",
+        el("div.er-searchwrap", icon("search", "er-icon er-searchicon"), search),
+        badge(plural(queries.length, "query", "queries"), "secondary")
+      ),
+      listCard(body)
+    )
+  );
+}
+
+async function queryDetailPage(main, key) {
+  const queries = await reportApi.get("/reporting/queries");
+  const query = queries.find((candidate) => candidate.key === key);
+  if (!query) return notFoundPage(main, "Saved Queries", href("queries"));
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      breadcrumb([{ label: "Saved Queries", href: href("queries") }, { label: query.name }]),
+      pageHeader(query.name, query.description, { back: href("queries") }),
+      card(
+        cardHeader("SQL", \`Reads \${query.tables.join(", ") || "no business table"}\`),
+        cardContent(el("pre.er-code", el("code", query.sql)))
       )
     )
   );
-
-  return el("div.report-layout", list, panel);
 }
 
-async function dashboardSection(outlet) {
-  mount(outlet, spinner("Loading the dashboard"));
-  const [dashboards, charts] = await Promise.all([
+function generatedOn() {
+  const at = state.overview.application?.generatedAt;
+  return at ? new Date(at).toLocaleDateString() : "—";
+}
+
+async function reportsPage(main) {
+  mount(main, el("div.er-stack", pageHeader("Reports", "Create and manage tabular reports"), card(loading())));
+  const [reports, queries] = await Promise.all([
+    reportApi.get("/reporting/reports"),
+    state.user.isAdmin ? reportApi.get("/reporting/queries") : Promise.resolve([]),
+  ]);
+  const queryName = new Map(queries.map((query) => [query.key, query.name]));
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("Reports", "Create and manage tabular reports"),
+      hiddenNote(state.overview.counts.reports, state.overview.counts.reportsTotal, "reports"),
+      listCard(
+        reports.length === 0
+          ? emptyState("No reports yet", "Every report reads a table this reporting role may not.")
+          : table(
+              ["Name", "Description", "Query", "Created", "Modified", "Actions"],
+              reports.map((report) => [
+                el("span.er-strong", report.name),
+                el("span.er-clamp", report.description || "-"),
+                queryName.has(report.queryKey)
+                  ? badge(queryName.get(report.queryKey), "secondary")
+                  : badge("Linked", "secondary"),
+                generatedOn(),
+                generatedOn(),
+                button("View", { variant: "ghost", size: "sm", iconName: "eye" }),
+              ]),
+              { onRow: (index) => (window.location.hash = href("reports", reports[index].key)) }
+            )
+      )
+    )
+  );
+}
+
+function hiddenNote(shown, total, noun) {
+  if (shown >= total) return null;
+  return alert(
+    \`\${total - shown} \${noun} hidden\`,
+    \`\${state.user.role ?? "This role"} may not read the tables behind them. \${shown} of \${total} are offered.\`
+  );
+}
+
+async function run(kind, key) {
+  return reportApi.get(\`/reporting/\${kind}/\${encodeURIComponent(key)}/run\`);
+}
+
+function refusal(error) {
+  return alert(
+    error.status === 403 ? "Access denied" : "This query did not run",
+    error.message || String(error),
+    "destructive"
+  );
+}
+
+async function reportViewerPage(main, key) {
+  const reports = await reportApi.get("/reporting/reports");
+  const report = reports.find((candidate) => candidate.key === key);
+  if (!report) return notFoundPage(main, "Reports", href("reports"));
+
+  const data = card(cardHeader("Report Data"), cardContent(loading("Running the report")));
+  let result = null;
+
+  const exportCsv = () => {
+    if (!result) return;
+    downloadCsv(
+      report.key,
+      toCsv(result.columns, result.rows.map((row) => result.columns.map((column) => cellText(row[column]))))
+    );
+  };
+
+  const draw = async () => {
+    mount(data, cardHeader("Report Data"), cardContent(loading("Running the report")));
+    try {
+      result = await run("reports", report.key);
+    } catch (error) {
+      result = null;
+      return void mount(data, cardHeader("Report Data"), cardContent(refusal(error)));
+    }
+    const labels = new Map((report.columns ?? []).map((column) => [column.field, column.label]));
+    mount(
+      data,
+      cardHeader(
+        "Report Data",
+        \`\${plural(result.rowCount, "row")} in \${result.durationMs}ms\` +
+          (result.truncated ? " — capped; the query returns more" : ""),
+        badge(result.query.name, "outline")
+      ),
+      el(
+        "div.er-card__flush",
+        result.rowCount === 0
+          ? emptyState("No data", "The query is valid; nothing in the application's data answers it yet.")
+          : table(
+              result.columns.map((column) => labels.get(column) ?? column),
+              result.rows.map((row) => result.columns.map((column) => cellText(row[column], isNumeric(result, column))))
+            )
+      )
+    );
+  };
+
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      breadcrumb([{ label: "Reports", href: href("reports") }, { label: report.name }]),
+      pageHeader(report.name, report.description, {
+        back: href("reports"),
+        actions: [
+          button("Refresh", { variant: "outline", size: "sm", iconName: "refresh", onclick: () => draw() }),
+          button("CSV", { variant: "outline", size: "sm", iconName: "download", onclick: exportCsv }),
+        ],
+      }),
+      data
+    )
+  );
+  await draw();
+}
+
+const CHART_ICON = { bar: "barChart3", line: "lineChart", area: "areaChart", pie: "pieChart" };
+
+async function chartsPage(main) {
+  mount(main, el("div.er-stack", pageHeader("Charts", "Create and manage data visualizations"), card(loading())));
+  const charts = await reportApi.get("/reporting/charts");
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("Charts", "Create and manage data visualizations"),
+      hiddenNote(state.overview.counts.charts, state.overview.counts.chartsTotal, "charts"),
+      listCard(
+        charts.length === 0
+          ? emptyState("No charts yet", "Every chart reads a table this reporting role may not.")
+          : table(
+              ["Name", "Type", "Query", "Created", "Actions"],
+              charts.map((item) => [
+                el("span.er-strong", item.name),
+                el("span.er-badge.er-badge--outline.er-badge--icon", icon(CHART_ICON[item.chartType] ?? "barChart3", "er-icon--xs"), item.chartType),
+                badge("Linked", "secondary"),
+                generatedOn(),
+                button("View", { variant: "ghost", size: "sm", iconName: "eye" }),
+              ]),
+              { onRow: (index) => (window.location.hash = href("charts", charts[index].key)) }
+            )
+      )
+    )
+  );
+}
+
+async function chartViewerPage(main, key) {
+  const charts = await reportApi.get("/reporting/charts");
+  const item = charts.find((candidate) => candidate.key === key);
+  if (!item) return notFoundPage(main, "Charts", href("charts"));
+
+  const body = card(cardContent(loading("Running the chart")));
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      breadcrumb([{ label: "Charts", href: href("charts") }, { label: item.name }]),
+      pageHeader(item.name, item.description, { back: href("charts"), badge: badge(item.chartType, "outline") }),
+      body
+    )
+  );
+
+  try {
+    const result = await run("charts", item.key);
+    const svg = chart(item.chartType, item.xField, item.yField, result.rows);
+    mount(
+      body,
+      cardHeader(\`\${item.yField} by \${item.xField}\`, \`\${plural(result.rowCount, "row")} in \${result.durationMs}ms\`),
+      cardContent(svg ?? emptyState("No data", "Nothing in the application's data answers this chart yet."))
+    );
+  } catch (error) {
+    mount(body, cardContent(refusal(error)));
+  }
+}
+
+async function dashboardsPage(main) {
+  mount(main, el("div.er-stack", pageHeader("Dashboards", "Create and manage interactive dashboards"), card(loading())));
+  const dashboards = await reportApi.get("/reporting/dashboards");
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("Dashboards", "Create and manage interactive dashboards"),
+      listCard(
+        dashboards.length === 0
+          ? emptyState("No dashboards yet")
+          : table(
+              ["Name", "Description", "Visibility", "Created", "Modified", "Actions"],
+              dashboards.map((dashboard) => [
+                el("span.er-strong", dashboard.name),
+                el("span.er-clamp", dashboard.description || "-"),
+                el("span.er-badge.er-badge--outline.er-badge--icon", icon("lock", "er-icon--xs"), "Private"),
+                generatedOn(),
+                generatedOn(),
+                button("View", { variant: "ghost", size: "sm", iconName: "eye" }),
+              ]),
+              { onRow: (index) => (window.location.hash = href("dashboards", dashboards[index].key)) }
+            )
+      )
+    )
+  );
+}
+
+async function dashboardViewerPage(main, key) {
+  const [dashboards, charts, reports] = await Promise.all([
     reportApi.get("/reporting/dashboards"),
     reportApi.get("/reporting/charts"),
+    reportApi.get("/reporting/reports"),
   ]);
+  const dashboard = dashboards.find((candidate) => candidate.key === key);
+  if (!dashboard) return notFoundPage(main, "Dashboards", href("dashboards"));
 
-  const byKey = new Map(charts.map((chart) => [chart.key, chart]));
-  const parts = [];
+  const chartOf = new Map(charts.map((item) => [item.key, item]));
+  const reportOf = new Map(reports.map((item) => [item.key, item]));
 
-  for (const dashboard of dashboards) {
-    parts.push(el("h2", dashboard.name));
-    if (dashboard.description) parts.push(el("p.muted", dashboard.description));
-    if (dashboard.hiddenWidgets > 0) {
-      /* Said rather than left as a gap: a role that may not read a table gets a
-         shorter dashboard, and a shorter dashboard with no explanation looks
-         like a build that half-worked. */
-      parts.push(
-        el(
-          "p.muted",
-          \`\${dashboard.hiddenWidgets} tile\${dashboard.hiddenWidgets === 1 ? "" : "s"} hidden — \` +
-            \`\${state.user.role ?? "this role"} may not read the tables behind them.\`
-        )
-      );
-    }
+  /* The platform lays a dashboard out on react-grid-layout's twelve columns
+     with 100px rows; the pack writes each widget's x, y, w and h in those
+     units, so the same numbers place it here. */
+  const tiles = compact(dashboard.widgets).map((widget) => {
+    const body = el("div.er-tile__body", loading());
+    const tile = el(
+      "div.er-card.er-tile",
+      {
+        style: {
+          gridColumn: \`\${(widget.x ?? 0) + 1} / span \${widget.w ?? 6}\`,
+          gridRow: \`\${(widget.y ?? 0) + 1} / span \${widget.h ?? 3}\`,
+        },
+      },
+      el("div.er-tile__head", el("h3.er-card__title.er-card__title--sm", widget.title)),
+      body
+    );
 
-    if (dashboard.widgets.length === 0) {
-      parts.push(empty("Nothing on this dashboard", "Every tile reads a table this role may not."));
-      continue;
-    }
-
-    const tiles = [];
-    for (const widget of dashboard.widgets) {
-      const chart = widget.chartKey ? byKey.get(widget.chartKey) : null;
-      const tile = el("div.report-tile", el("h3", widget.title), spinner("Loading"));
-      tiles.push(tile);
-      if (!chart) continue;
-
-      /* Each tile runs its own query. Sequential rather than parallel would be
-         tidier to read and slower to watch: six queries against a database in
-         this tab finish in well under a second each, and the reader sees the
-         grid fill in. */
-      reportApi
-        .get(\`/reporting/charts/\${encodeURIComponent(chart.key)}/run\`)
+    const chartSpec = widget.chartKey ? chartOf.get(widget.chartKey) : null;
+    const reportSpec = widget.reportKey ? reportOf.get(widget.reportKey) : null;
+    if (chartSpec) {
+      run("charts", chartSpec.key)
         .then((result) => {
-          const svg = chartSvg(chart.chartType, chart.xField, chart.yField, result.rows);
-          mount(
-            tile,
-            el("h3", widget.title),
-            svg ?? el("p.muted", "No rows yet."),
-            el("p.muted", \`\${result.rowCount} row\${result.rowCount === 1 ? "" : "s"}\`)
-          );
+          const svg = chart(chartSpec.chartType, chartSpec.xField, chartSpec.yField, result.rows);
+          mount(body, svg ?? emptyState("No data"));
         })
-        .catch((error) => {
-          mount(tile, el("h3", widget.title), el("p.muted", error.message || String(error)));
-        });
+        .catch((error) => mount(body, refusal(error)));
+    } else if (reportSpec) {
+      run("reports", reportSpec.key)
+        .then((result) =>
+          mount(
+            body,
+            result.rowCount === 0
+              ? emptyState("No data")
+              : table(result.columns, result.rows.slice(0, 20).map((row) => result.columns.map((column) => cellText(row[column], isNumeric(result, column)))))
+          )
+        )
+        .catch((error) => mount(body, refusal(error)));
+    } else {
+      mount(body, emptyState("Nothing to show"));
     }
-    parts.push(el("div.report-grid", ...tiles));
-  }
-
-  mount(outlet, ...parts);
-}
-
-async function accessSection(outlet) {
-  const role = state.overview.role;
-  const tables = role.tables;
+    return tile;
+  });
 
   mount(
-    outlet,
-    el("h2", "What this reporting role may read"),
+    main,
     el(
-      "p.muted",
-      tables === null
-        ? \`\${role.name ?? "This role"} reads every table of the attached application — all \${role.tableTotal}.\`
-        : \`\${role.name ?? "This role"} reads \${tables.length} of the application's \${role.tableTotal} tables. \` +
-            "A report whose query names any other table is not offered, and is refused if asked for."
-    ),
-    el(
-      "p.muted",
-      "This role mirrors a %%rbac role in the model, and only its read rules: the directive also " +
-        "restricts create, update and delete, and none of that means anything to somebody who " +
-        "cannot write through the reporting application at all."
-    ),
-    tables === null
-      ? null
-      : el("ul.report-tables", ...tables.map((table) => el("li", el("code", table)))),
-    el("h3", "This is a mirror, not a shared system"),
-    el(
-      "p.muted",
-      "The application and the reporting application keep their own accounts, and neither " +
-        "password works on the other side. Deployed, they are two services with two databases; " +
-        "the role names line up so an administrator can see which is which, and nothing else is shared."
-    )
-  );
-}
-
-async function queriesSection(outlet) {
-  mount(outlet, spinner("Loading the saved queries"));
-  const queries = await reportApi.get("/reporting/queries");
-  mount(
-    outlet,
-    el("h2", \`\${queries.length} saved quer\${queries.length === 1 ? "y" : "ies"}\`),
-    el(
-      "p.muted",
-      "Every report and chart is a definition over one of these. Only the queries this role may " +
-        "run are listed."
-    ),
-    ...queries.map((query) =>
-      el(
-        "details.report-sql",
-        el("summary", query.name),
-        el("p.muted", query.description),
-        el("p.muted", \`Reads \${query.tables.join(", ") || "no business table"}.\`),
-        el("pre", el("code", query.sql))
-      )
+      "div.er-stack",
+      breadcrumb([{ label: "Dashboards", href: href("dashboards") }, { label: dashboard.name }]),
+      pageHeader(dashboard.name, dashboard.description, { back: href("dashboards") }),
+      dashboard.hiddenWidgets > 0
+        ? alert(
+            \`\${dashboard.hiddenWidgets} tile\${dashboard.hiddenWidgets === 1 ? "" : "s"} hidden — \` +
+              \`\${state.user.role ?? "this role"} may not read the tables behind them.\`,
+            null
+          )
+        : null,
+      tiles.length === 0
+        ? card(cardContent(emptyState("Nothing on this dashboard", "Every tile reads a table this role may not.")))
+        : el("div.er-dashgrid", ...tiles)
     )
   );
 }
 
 /**
- * The reporting application's shell.
- *
- * \`onLeave\` goes back to the application it reports on. It is a link rather
- * than a shared header because the two are not one product with two tabs: a
- * reader leaving here keeps their reporting session, and arriving at the
- * application still has to be signed into *that*.
+ * react-grid-layout's vertical compaction: each tile, in reading order, moves
+ * up until it would overlap one already placed. The platform's grid does this
+ * on every render, which is why a role that may not read some tiles gets a
+ * shorter dashboard rather than one with holes where they were.
+ */
+function compact(widgets) {
+  const placed = [];
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const ordered = [...widgets]
+    .map((widget) => ({ ...widget, x: widget.x ?? 0, y: widget.y ?? 0, w: widget.w ?? 6, h: widget.h ?? 3 }))
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const widget of ordered) {
+    let y = widget.y;
+    while (y > 0 && !placed.some((other) => overlaps({ ...widget, y: y - 1 }, other))) y -= 1;
+    placed.push({ ...widget, y });
+  }
+  return placed;
+}
+
+function unavailablePage(main, slug) {
+  const item = [...MAIN_NAV, ...ADMIN_NAV].find((candidate) => candidate.slug === slug);
+  if (!item) return notFoundPage(main, "Dashboard", href("dashboard"));
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader(item.label, item.description),
+      card(
+        cardContent(
+          el(
+            "div.er-unavailable",
+            icon(item.icon, "er-icon--xl er-subtle"),
+            el("h2.er-sectiontitle", \`\${item.label} runs on the platform's server\`),
+            el(
+              "p.er-text",
+              \`This is a browser preview, and \${item.label} needs the Enterprise Reporting platform's own \` +
+                "server — its database, its job runner and its AI services — which a browser tab cannot run."
+            ),
+            el(
+              "p.er-text",
+              "The real platform comes up beside this application from the deployable archive " +
+                "(docker compose up --build, then port 3100), or under /report when the orchestrator runs it. " +
+                "It is built from the platform's own source, unmodified, and seeded with this same pack."
+            ),
+            el("a.er-btn.er-btn--outline.er-btn--size-sm", { href: href("dashboard") }, icon("arrowLeft"), "Back to Dashboard")
+          )
+        )
+      )
+    )
+  );
+}
+
+function aboutPreviewPage(main) {
+  const row = (label, here, deployed) => [el("span.er-strong", label), here, deployed];
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("About this preview", "What the browser build of Enterprise Reporting is, and what it is not"),
+      card(
+        cardContent(
+          el(
+            "p.er-text",
+            "One model generates two applications. The second is the Enterprise Reporting platform — ",
+            el("code", "businessappwithai/enterprise_reporting_tanstack"),
+            " — and it is a server application over PostgreSQL. Deployed, it runs unmodified beside the " +
+              "application: the downloadable archive builds it from its own source, and the orchestrator " +
+              "does the same under /report. A browser tab cannot run it, so this is a preview drawn in its " +
+              "layout, over the same reporting pack it is seeded with."
+          )
+        )
+      ),
+      listCard(
+        table(
+          ["", "This preview", "The platform, deployed"],
+          [
+            row("Saved queries, reports, charts, dashboard", "The same pack, run against this tab's database", "The same pack, seeded into its own database"),
+            row("Reporting roles and sign-in", "One account per %%rbac role, separate from the application's", "The same accounts, in its own users table"),
+            row("Table-level access", "Enforced on every run", "Enforced on every run"),
+            row("SQL editor, NL query, report generator", "Not available", "Available"),
+            row("Jobs, monitoring, filters, delivery", "Not available", "Available"),
+            row("Users, roles, table permissions", "Available to the administrator — enforced on the next query", "Available to administrators"),
+            row("Data sources, system logs", "The application's database, and this tab's reporting activity", "Every registered source, and the server's logs"),
+            row("Trigger board, settings", "Not available", "Available to administrators"),
+            row("Creating or editing definitions", "Read-only", "Available"),
+          ]
+        )
+      )
+    )
+  );
+}
+
+function notFoundPage(main, label, back) {
+  mount(
+    main,
+    el(
+      "div.er-stack",
+      pageHeader("Not found", "This definition is not in the reporting pack, or this role may not read it."),
+      el("a.er-btn.er-btn--default.er-btn--size-default.er-selfstart", { href: back }, \`Back to \${label}\`)
+    )
+  );
+}
+
+// ─── Entry ───────────────────────────────────────────────────────────────────
+
+/**
+ * The reporting application's shell. \`onLeave\` goes back to the application it
+ * reports on; nothing is signed out, because the two keep separate sessions.
  */
 export async function reportAppView(root, { project, onLeave }) {
+  const signOut = async () => {
+    await reportApi.post("/report-auth/logout").catch(() => {});
+    setReportToken(null);
+    state.user = null;
+    state.overview = null;
+    state.menu = null;
+    await render();
+  };
+
   const render = async () => {
     if (!state.user) {
       await reportLoginView(root, {
@@ -21134,133 +28103,77 @@ export async function reportAppView(root, { project, onLeave }) {
         onSignedIn: async (user) => {
           state.user = user;
           state.overview = null;
-          await render();
+          // The platform lands every sign-in on its dashboard. Staying on the
+          // screen the previous account had open would put a non-administrator
+          // on an administration page it cannot see.
+          if (window.location.hash !== href("dashboard")) window.location.hash = href("dashboard");
+          else await render();
         },
       });
       return;
     }
 
     if (!state.overview) {
-      mount(root, spinner("Loading the reporting layer"));
+      mount(root, el("div.er", loading("Loading Enterprise Reporting")));
       state.overview = await reportApi.get("/reporting");
     }
 
-    const outlet = el("main.outlet");
-    const sections = [
-      ["dashboard", "Dashboard"],
-      ["reports", \`Reports (\${state.overview.counts.reports})\`],
-      ["charts", \`Charts (\${state.overview.counts.charts})\`],
-      ["queries", "Saved queries"],
-      ["access", "Access"],
-    ];
+    const path = currentPath();
+    const [section = "dashboard", key] = path;
+    const activeSlug = section === "unavailable" ? key : section;
 
+    const main = el("main.er-main");
     mount(
       root,
       el(
-        "div.shell.shell--report",
+        "div.er",
+        { onclick: (event) => closeMenus(event) },
+        el("div.er-sidebar-desktop", sidebar(activeSlug)),
         el(
-          "header.masthead.masthead--report",
-          el("span.masthead__badge", "Enterprise Reporting"),
-          el("span.masthead__name", state.overview.application?.name ?? project.name),
-          el("div.masthead__spacer"),
-          // The reporting application is a second sign-in over the same data,
-          // and the theme is one attribute on the shared document — so the
-          // control belongs in both mastheads rather than only the one.
-          themeControl(),
-          el(
-            "div.masthead__user",
-            el("span.avatar.avatar--report", "ER"),
-            el(
-              "div",
-              el("div.masthead__who", state.user.email),
-              el(
-                "div.masthead__roles",
-                state.user.role
-                  ? state.overview.role.tables === null
-                    ? \`\${state.user.role} — every table\`
-                    : \`\${state.user.role} — \${state.overview.role.tables.length} of \${state.overview.role.tableTotal} tables\`
-                  : "no reporting role"
-              )
-            ),
-            el(
-              "button.btn.btn--ghost.btn--icon",
-              {
-                title: "Sign out of reporting",
-                "aria-label": "Sign out of reporting",
-                onclick: async () => {
-                  await reportApi.post("/report-auth/logout").catch(() => {});
-                  setReportToken(null);
-                  state.user = null;
-                  state.overview = null;
-                  await render();
-                },
-              },
-              "⇥"
-            )
-          )
+          "div.er-mobile-overlay",
+          { class: state.mobileMenuOpen ? "is-open" : null, onclick: () => ((state.mobileMenuOpen = false), repaint()) }
         ),
+        el("div.er-sidebar-mobile", { class: state.mobileMenuOpen ? "is-open" : null }, sidebar(activeSlug, { mobile: true })),
         el(
-          "div.actionbar",
-          ...sections.map(([key, label]) =>
-            el(
-              "button.btn",
-              {
-                class: state.section === key ? "is-active" : "",
-                onclick: async () => {
-                  state.section = key;
-                  await render();
-                },
-              },
-              label
-            )
-          ),
-          el("div.actionbar__spacer"),
-          el(
-            "button.btn.btn--ghost",
-            { onclick: () => onLeave() },
-            \`← \${project.name}\`
-          )
-        ),
-        el(
-          "nav.crumbs",
-          el(
-            "span.crumbs__current",
-            \`Reporting on \${state.overview.dataSource?.name ?? project.name}\`
-          ),
-          state.overview.counts.reports < state.overview.counts.reportsTotal
-            ? el(
-                "span.crumbs__note",
-                \` · \${state.overview.counts.reports} of \${state.overview.counts.reportsTotal} reports visible to this role\`
-              )
-            : null
-        ),
-        outlet
+          "div.er-content",
+          { class: state.sidebarCollapsed ? "is-collapsed" : null },
+          header({ project, onLeave, signOut }),
+          previewStrip(),
+          main
+        )
       )
     );
 
     try {
-      if (state.section === "dashboard") await dashboardSection(outlet);
-      else if (state.section === "access") await accessSection(outlet);
-      else if (state.section === "queries") await queriesSection(outlet);
-      else {
-        mount(outlet, spinner("Loading"));
-        const items = await reportApi.get(\`/reporting/\${state.section}\`);
-        mount(
-          outlet,
-          browser(
-            items,
-            state.section,
-            \`No \${state.section} for this role\`,
-            "Every definition reads a table this reporting role may not."
-          )
-        );
-      }
+      if (section === "dashboard") await dashboardPage(main);
+      else if (section === "queries" && canView("query")) {
+        if (key) await queryDetailPage(main, key);
+        else await queriesPage(main);
+      } else if (section === "reports") {
+        if (key) await reportViewerPage(main, key);
+        else await reportsPage(main);
+      } else if (section === "charts") {
+        if (key) await chartViewerPage(main, key);
+        else await chartsPage(main);
+      } else if (section === "dashboards") {
+        if (key) await dashboardViewerPage(main, key);
+        else await dashboardsPage(main);
+      } else if (ADMIN_ROUTES.has(section) && state.user.isAdmin) {
+        const context = {
+          me: state.user,
+          rerender: render,
+          href,
+          tableTotal: state.overview.role.tableTotal,
+          selectedRoleId: key,
+        };
+        await ADMIN_ROUTES.get(section)(main, context);
+      } else if (section === "unavailable") unavailablePage(main, key);
+      else if (section === "about-preview") aboutPreviewPage(main);
+      else notFoundPage(main, "Dashboard", href("dashboard"));
     } catch (error) {
-      mount(outlet, empty("Something went wrong", error.message || String(error)));
+      mount(main, el("div.er-stack", refusal(error)));
     }
   };
-
-  rerender = render;
 
   /* Reattach to a session the reader already has: they may have signed in,
      gone back to the application and returned, and being asked for a password
@@ -21277,9 +28190,19 @@ export async function reportAppView(root, { project, onLeave }) {
   await render();
 }
 
+/** A click anywhere outside an open header menu closes it, as the platform's dropdowns do. */
+function closeMenus(event) {
+  if (!state.menu) return;
+  if (event.target.closest?.(".er-menuwrap")) return;
+  state.menu = null;
+  repaint();
+}
+
 /** Forget the reporting session in memory, without ending it on the server. */
 export function resetReportView() {
   state.overview = null;
+  state.menu = null;
+  state.mobileMenuOpen = false;
 }
 
 /**
@@ -21289,8 +28212,7 @@ export function resetReportView() {
  * \`/report-auth/me\` on every entry to find out whether the reader is already
  * signed in, and a "no" to that probe is an ordinary 401 — not an expired
  * session. Treating the two alike produced a toast per probe *and* a repaint
- * per toast, and the repaint probed again: a reporting sign-in screen buried
- * under an endless column of "your reporting session ended".
+ * per toast, and the repaint probed again.
  *
  * Returns true only when a session really ended, which is the only case worth
  * telling the reader about.
@@ -21305,22 +28227,23 @@ export function reportSessionEnded() {
   "ui/views/report-login.js": `/**
  * The reporting application's sign-in — the second login.
  *
- * It looks like the application's on purpose and is not the same screen: the
- * accounts are different accounts, in different tables, with a different
- * password, and what the numbers beside them count is different too. The
- * application's screen says how many *entities* a role can open; this one says
- * how many *tables* a role's queries may read. That is the whole difference
- * between the two products' idea of a role, stated in the one place a reader
- * meets both.
+ * Drawn as the Enterprise Reporting platform draws its own (\`src/routes/login.tsx\`):
+ * a centred card, the chart mark in a brand circle, "Welcome back", email and
+ * password, one full-width button. The accounts are different accounts from
+ * the application's, in different tables, with a different password.
  *
- * Every seeded account is listed for the same reason the application lists
- * every one of its own: the administrator reads every table, so a reporting
- * platform you can only sign into as the administrator is one whose access
- * control you cannot see. \`support.agent@… — 5 of 17 tables\` is the invitation.
+ * Two things sit below the card that the platform's screen does not have, and
+ * both are there because this is a preview. Every seeded account is listed —
+ * the administrator reads every table, so a reporting platform you can only
+ * sign into as the administrator is one whose access control you cannot see;
+ * \`support.agent@… — 5 of 17 tables\` is the invitation. And a line says what
+ * this is: the platform's reports and roles in the platform's layout, served
+ * from this tab, with the real platform one download away.
  */
 
 import { el, mount, toast } from "../dom.js";
 import { reportApi, setReportToken } from "../api.js";
+import { alert, icon } from "./er-kit.js";
 
 export async function reportLoginView(root, { project, onSignedIn, onLeave }) {
   let config = null;
@@ -21334,15 +28257,16 @@ export async function reportLoginView(root, { project, onSignedIn, onLeave }) {
   const password = config?.password ?? "admin";
   const administrator = accounts.find((account) => account.isAdmin) ?? accounts[0] ?? null;
 
-  const emailInput = el("input.field__input", {
-    type: "text",
+  const emailInput = el("input.er-input", {
+    type: "email",
     id: "report-email",
     name: "email",
-    autocomplete: "username",
+    placeholder: "name@example.com",
+    autocomplete: "email",
     value: administrator?.email ?? "",
     required: true,
   });
-  const passwordInput = el("input.field__input", {
+  const passwordInput = el("input.er-input", {
     type: "password",
     id: "report-password",
     name: "password",
@@ -21350,15 +28274,17 @@ export async function reportLoginView(root, { project, onSignedIn, onLeave }) {
     value: password,
     required: true,
   });
-  const submit = el("button.btn.btn--primary", { type: "submit" }, "Sign in to reporting");
+  const errorSlot = el("div");
+  const submit = el("button.er-btn.er-btn--default.er-btn--size-default.er-btn--block", { type: "submit" }, "Sign In");
 
   const form = el(
-    "form.login__form",
+    "form.er-card.er-login__card",
     {
       onsubmit: async (event) => {
         event.preventDefault();
         submit.disabled = true;
-        submit.textContent = "Signing in…";
+        mount(submit, el("span.er-spinner.er-spinner--inline", { "aria-hidden": "true" }), "Sign In");
+        mount(errorSlot);
         try {
           const result = await reportApi.post("/report-auth/login", {
             email: emailInput.value.trim(),
@@ -21370,137 +28296,107 @@ export async function reportLoginView(root, { project, onSignedIn, onLeave }) {
           setReportToken(result.token);
           onSignedIn(result.user);
         } catch (error) {
+          mount(errorSlot, alert(error.message || "Invalid credentials", null, "destructive"));
           toast(error.message, "error");
           submit.disabled = false;
-          submit.textContent = "Sign in to reporting";
+          mount(submit, "Sign In");
           passwordInput.focus();
         }
       },
     },
     el(
-      "div.field",
-      el(
-        "div.field__head",
-        el("label.field__label", { for: "report-email" }, "Reporting account"),
-        el("span.chip.chip--text", "Text")
-      ),
-      emailInput
+      "div.er-card__header.er-login__header",
+      el("div.er-login__mark", icon("barChart3", "er-icon--lg")),
+      el("h1.er-login__title", "Welcome back"),
+      el("p.er-card__description", "Sign in to your Enterprise Reporting account")
     ),
     el(
-      "div.field",
-      el(
-        "div.field__head",
-        el("label.field__label", { for: "report-password" }, "Password"),
-        el("span.chip.chip--text", "Password")
-      ),
-      passwordInput
+      "div.er-card__content.er-login__fields",
+      errorSlot,
+      el("div.er-field", el("label.er-label-strong", { for: "report-email" }, "Email"), emailInput),
+      el("div.er-field", el("label.er-label-strong", { for: "report-password" }, "Password"), passwordInput)
     ),
-    submit
+    el("div.er-card__footer", submit)
   );
 
-  const counts = config?.counts ?? {};
-
-  mount(
-    root,
-    el(
-      "div.login.login--report",
-      el(
-        "div.login__panel",
-        el("div.login__mark.login__mark--report", "ER"),
-        el("h1.login__title", "Enterprise Reporting"),
-        el(
-          "p.login__subtitle",
-          \`Reporting on \${config?.application?.name ?? project.name}. A separate application, with its own accounts.\`
-        ),
-        form,
-        accounts.length > 0
-          ? el(
-              "div.accounts",
+  const accountList =
+    accounts.length > 0
+      ? el(
+          "div.er-card.er-login__accounts",
+          el(
+            "p.er-text",
+            \`\${accounts.length} reporting account\${accounts.length === 1 ? "" : "s"}, password \`,
+            el("code", password),
+            config?.scoped
+              ? ". A reporting role decides which of the application's tables its queries may read — pick one to try it."
+              : ". Pick one to fill the form."
+          ),
+          el(
+            "ul.er-accounts",
+            ...accounts.map((account) =>
               el(
-                "p.accounts__head",
-                \`\${accounts.length} reporting account\${accounts.length === 1 ? "" : "s"}, password \`,
-                el("code", password),
-                config?.scoped
-                  ? ". A reporting role decides which of the application's tables its queries may read — pick one to try it."
-                  : ". Pick one to fill the form."
-              ),
-              el(
-                "ul.accounts__list",
-                ...accounts.map((account) =>
+                "li",
+                el(
+                  "button.er-accounts__row",
+                  {
+                    type: "button",
+                    onclick: () => {
+                      emailInput.value = account.email;
+                      passwordInput.value = password;
+                      passwordInput.focus();
+                    },
+                  },
+                  el("span.er-strong", account.role ?? account.name),
+                  el("span.er-accounts__email", account.email),
                   el(
-                    "li",
-                    el(
-                      "button.accounts__row",
-                      {
-                        type: "button",
-                        onclick: () => {
-                          emailInput.value = account.email;
-                          passwordInput.value = password;
-                          passwordInput.focus();
-                        },
-                      },
-                      el("span.accounts__role", account.role ?? account.name),
-                      el("span.accounts__email", account.email),
-                      el(
-                        "span.accounts__scope",
-                        account.isAdmin
-                          ? \`all \${account.total} tables\`
-                          : /* Zero is a real answer, not a missing seed: this is
-                               the account holding no functional role, so no
-                               \`read\` rule admits it and its queries may read
-                               nothing. Said plainly, because a row reading
-                               "0 of 17 tables" and nothing else looks like the
-                               generator failed. */
-                            account.tables === 0
-                            ? "no tables — signed in, holding no reporting role"
-                            : \`\${account.tables} of \${account.total} tables\`
-                      )
-                    )
+                    "span.er-label",
+                    account.isAdmin
+                      ? \`all \${account.total} tables\`
+                      : /* Zero is a real answer, not a missing seed: this is
+                           the account holding no functional role, so no
+                           \`read\` rule admits it and its queries may read
+                           nothing. Said plainly, because a row reading
+                           "0 of 17 tables" and nothing else looks like the
+                           generator failed. */
+                        account.tables === 0
+                        ? "no tables — signed in, holding no reporting role"
+                        : \`\${account.tables} of \${account.total} tables\`
                   )
                 )
               )
             )
-          : el(
-              "p.login__hint",
-              "No reporting accounts were seeded, which means this model declares no %%rbac roles. ",
-              el("span.login__hint-note", "Sign in as the administrator to read every table.")
-            )
-      ),
-      el(
-        "div.login__aside",
-        el("h2", "The other half of the model"),
-        el(
-          "ul.login__facts",
-          el(
-            "li",
-            el("strong", \`\${counts.reports ?? 0} reports and \${counts.charts ?? 0} charts\`),
-            " derived from this model — its entities, its enums, its state machines and its own %%report queries"
-          ),
-          el(
-            "li",
-            el("strong", "One reporting role per %%rbac role"),
-            " — the same names, permitted to read exactly the tables that role may see"
-          ),
-          el(
-            "li",
-            el("strong", "A separate sign-in"),
-            " — two applications, two user tables, two sessions. Neither password works on the other side"
-          ),
-          el(
-            "li",
-            el("strong", "Read-only"),
-            " — a reporting role narrows what a query may read; nothing here writes to the application"
           )
-        ),
+        )
+      : el(
+          "p.er-text.er-login__note",
+          "No reporting accounts were seeded, which means this model declares no %%rbac roles. " +
+            "Sign in as the administrator to read every table."
+        );
+
+  mount(
+    root,
+    el(
+      "div.er.er-login",
+      el(
+        "div.er-login__column",
+        form,
+        accountList,
         el(
-          "p.login__aside-note",
-          "Deployed, this is the Enterprise Reporting platform running beside the application as its own service, with its own database. Here it is the same reports and the same roles, served from this tab."
+          "p.er-login__note",
+          icon("info", "er-icon--sm"),
+          el(
+            "span",
+            \`Browser preview of Enterprise Reporting, over \${config?.application?.name ?? project.name}. \` +
+              "Deployed, this is the platform itself — built unmodified from its own source beside the " +
+              "application, from the deployable archive or the orchestrator."
+          )
         ),
         onLeave
           ? el(
-              "button.btn.btn--ghost",
+              "button.er-btn.er-btn--ghost.er-btn--size-sm",
               { type: "button", onclick: () => onLeave() },
-              \`← Back to \${project.name}\`
+              icon("arrowLeft"),
+              \`Back to \${project.name}\`
             )
           : null
       )
@@ -21522,14 +28418,19 @@ export async function reportLoginView(root, { project, onSignedIn, onLeave }) {
  * help text and chart axes; \`/reports/:name/run\` is what holds the SQL.
  */
 
-import { el, mount, spinner, empty, toast } from "../dom.js";
+import { el, mount, spinner, empty, toast, formatNumeric } from "../dom.js";
 import { api } from "../api.js";
 import { setHelp } from "../main.js";
+import { deleteButton, editorForm, openEditor } from "../editor.js";
 
-/** Render one SQL scalar as a cell. */
-function cell(value) {
+/**
+ * Render one SQL scalar as a cell. \`numeric\` says the column is a Postgres
+ * NUMERIC, which arrives as a string — money read \`25955.7000\` until this.
+ */
+function cell(value, numeric = false) {
   if (value === null || value === undefined) return "—";
   if (value instanceof Date) return value.toLocaleDateString();
+  if (numeric) return formatNumeric(value);
   if (typeof value === "number") return value.toLocaleString();
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
@@ -21609,7 +28510,7 @@ function chart(result) {
 }
 
 /** The answer to one question, rendered into \`panel\`. */
-async function runReport(panel, name) {
+async function runReport(panel, name, options = {}) {
   mount(panel, spinner("Running"));
 
   let result;
@@ -21625,6 +28526,7 @@ async function runReport(panel, name) {
   }
 
   const parts = [el("h2", result.report.title)];
+  if (options.user?.isAdmin && options.entities) parts.push(reportActions(panel, result.report, options));
   if (result.report.help) parts.push(el("p.muted", result.report.help));
 
   const drawn = chart(result);
@@ -21652,7 +28554,7 @@ async function runReport(panel, name) {
           el(
             "tbody",
             ...result.rows.map((row) =>
-              el("tr", ...result.columns.map((column) => el("td", cell(row[column]))))
+              el("tr", ...result.columns.map((column) => el("td", cell(row[column], (result.numeric ?? []).includes(column)))))
             )
           )
         )
@@ -21665,7 +28567,7 @@ async function runReport(panel, name) {
       "button.btn",
       {
         onclick: () => {
-          runReport(panel, name);
+          runReport(panel, name, options);
           toast("Re-running", "info");
         },
       },
@@ -21676,22 +28578,34 @@ async function runReport(panel, name) {
   mount(panel, ...parts);
 }
 
-export async function reportsView(root) {
+export async function reportsView(root, { user } = {}) {
   mount(root, spinner("Loading reports"));
   setHelp(
     "Each of these is a question the model's author wrote into the document with %%report, " +
       "together with the query that answers it. They run against this application's own " +
-      "database, so the answers change as you use it."
+      "database, so the answers change as you use it." +
+      (user?.isAdmin
+        ? " They are rows in sys_report, so you can add a question of your own, change one, or " +
+          "retire it — a report may only ever read, and the query is refused if it does anything else."
+        : "")
   );
 
-  const reports = await api.get("/reports");
+  const [reports, model] = await Promise.all([api.get("/reports"), api.get("/model")]);
+  const entities = (model.entities || []).map((entity) => entity.name).sort();
+  const reload = () => reportsView(root, { user });
 
   if (reports.length === 0) {
     return void mount(
       root,
-      empty(
-        "This model declares no reports",
-        "Add a %%report directive to the model — a title, the entity it is about, and the SQL that answers it — and regenerate."
+      el(
+        "div",
+        user?.isAdmin ? newReportButton(root, entities, reload) : null,
+        empty(
+          "This model declares no reports",
+          user?.isAdmin
+            ? "Add a %%report directive to the model and regenerate — or write one here."
+            : "Add a %%report directive to the model — a title, the entity it is about, and the SQL that answers it — and regenerate."
+        )
       )
     );
   }
@@ -21727,7 +28641,7 @@ export async function reportsView(root) {
                       active.classList.remove("is-active");
                     }
                     event.currentTarget.classList.add("is-active");
-                    runReport(panel, report.name);
+                    runReport(panel, report.name, { user, entities, reload });
                   },
                 },
                 report.title
@@ -21739,11 +28653,149 @@ export async function reportsView(root) {
     )
   );
 
-  mount(root, el("div.report-layout", list, panel));
+  mount(
+    root,
+    el(
+      "div",
+      user?.isAdmin ? newReportButton(root, entities, reload) : null,
+      el("div.report-layout", list, panel)
+    )
+  );
+}
+
+/**
+ * Write a question the model's author did not.
+ *
+ * The form opens in the results panel rather than above the list, because on a
+ * model with a hundred and eighty reports a form at the top is a form the
+ * reader scrolls away from.
+ */
+function newReportButton(root, entities, reload) {
+  return el(
+    "button.btn.btn--primary.btn--small",
+    {
+      onclick: () => {
+        const host = root.querySelector(".report-panel") ?? root;
+        openEditor(
+          host,
+          editorForm({
+            title: "New report",
+            lede:
+              "A report may only read. A statement that writes, or a second statement behind a semicolon, is refused here and again every time the report runs.",
+            fields: reportFields(entities),
+            values: { sql: "SELECT 1 AS example" },
+            saveLabel: "Create report",
+            onSave: async (values) => {
+              await api.post("/reports", values);
+              toast("Report created", "success");
+              await reload();
+            },
+            onCancel: () => reload(),
+          })
+        );
+      },
+    },
+    "New report"
+  );
+}
+
+/**
+ * The fields a report has.
+ *
+ * \`chart\` offers an empty option because most reports are tables — and because
+ * the route refuses a chart without both axes, so "bar" with nothing else
+ * filled in is a refusal rather than a default.
+ */
+function reportFields(entities) {
+  return [
+    {
+      name: "name",
+      label: "Name",
+      required: true,
+      hint: "The report's handle in a URL — letters, digits and hyphens.",
+    },
+    { name: "title", label: "Title", required: true, hint: "The question, as somebody would ask it." },
+    { name: "entity", label: "About", type: "select", options: ["", ...entities], hint: "Which entity this is a question about. Leave empty for a cross-cutting one." },
+    { name: "help", label: "Why it is asked", hint: "Who asks this and what they do with the answer." },
+    {
+      name: "chart",
+      label: "Chart",
+      type: "select",
+      options: [
+        { value: "", label: "None — show a table" },
+        "bar",
+        "line",
+        "pie",
+        "area",
+      ],
+    },
+    { name: "x", label: "Chart: x axis", hint: "A column the query returns." },
+    { name: "y", label: "Chart: y axis", hint: "A column the query returns." },
+    { name: "sortOrder", label: "Sort order", type: "number" },
+    { name: "isActive", label: "Active", type: "checkbox" },
+    {
+      name: "sql",
+      label: "Query",
+      type: "textarea",
+      rows: 12,
+      required: true,
+      hint: "A single SELECT or WITH statement.",
+    },
+  ];
+}
+
+/**
+ * Edit and delete, beside the answer rather than beside the title in the list.
+ *
+ * A reader decides a report is wrong by looking at what it returned, so the
+ * controls belong where they have just read it. Editing fetches the report
+ * again first: the list carries no \`sql\` — \`GET /reports/:name\` hands the
+ * statement to an administrator and the metadata to everyone else — so the form
+ * would otherwise open with an empty query and save it over a working one.
+ */
+function reportActions(panel, report, { user, entities, reload }) {
+  return el(
+    "div.report-actions",
+    el(
+      "button.btn.btn--small",
+      {
+        onclick: async () => {
+          let full;
+          try {
+            full = await api.get(\`/reports/\${encodeURIComponent(report.name)}\`);
+          } catch (error) {
+            return void toast(error.message, "error");
+          }
+          openEditor(
+            panel,
+            editorForm({
+              title: \`Edit \${report.name}\`,
+              fields: reportFields(entities),
+              values: full,
+              onSave: async (values) => {
+                await api.patch(\`/reports/\${encodeURIComponent(report.name)}\`, values);
+                toast("Report saved", "success");
+                await reload();
+              },
+              /* Cancel returns to the answer rather than to the list: the
+                 reader was reading it a moment ago. */
+              onCancel: () => runReport(panel, report.name, { user, entities, reload }),
+            })
+          );
+        },
+      },
+      "Edit"
+    ),
+    deleteButton("Delete", \`Delete \${report.name}?\`, async () => {
+      await api.delete(\`/reports/\${encodeURIComponent(report.name)}\`);
+      toast(\`\${report.name} deleted\`, "success");
+      await reload();
+    })
+  );
 }
 `
 });
-var RUNTIME_BYTES = 431343;
+var RUNTIME_BYTES = 678960;
 
 // packages/core/src/types/bus-entity.types.ts
 function attributeTypeToReferenceId(type) {
@@ -21768,11 +28820,11 @@ function entityToBusEntity(entity, declared) {
     displayName: formatDisplayName(entity.name),
     windowOwner: entity.parentEntity ?? entity.name,
     indexes: mergeIndexes(entity),
-    attributes: withIdentifiers(entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey, declared)), entity.primaryKey)
+    attributes: withIdentifiers(entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey, declared)), entity.primaryKey, entity.name)
   };
 }
-function withIdentifiers(attributes, primaryKey) {
-  const identifiers = new Set(identifierColumnNames(attributes, primaryKey));
+function withIdentifiers(attributes, primaryKey, entityName) {
+  const identifiers = new Set(identifierColumnNames(attributes, primaryKey, entityName));
   return attributes.map((attribute) => ({
     ...attribute,
     isIdentifier: identifiers.has(attribute.name)
@@ -21798,24 +28850,49 @@ var SEMANTIC_REFERENCE = {
   password: ReferenceType.PASSWORD,
   color: ReferenceType.COLOR
 };
-function identifierColumnNames(attributes, primaryKey) {
-  const names = new Set(attributes.map((attribute) => attribute.name));
-  const has = (name) => names.has(name);
+function identifierColumnNames(attributes, primaryKey, entityName) {
+  const byName = new Map(attributes.map((attribute) => [attribute.name, attribute]));
+  const has = (name) => byName.has(name);
+  const prefixes = [
+    primaryKey?.endsWith("_id") ? primaryKey.slice(0, -3) : undefined,
+    entityName ? entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() : undefined
+  ].filter((prefix, i, all) => !!prefix && all.indexOf(prefix) === i);
+  const prefixed = (...suffixes) => {
+    for (const prefix of prefixes) {
+      for (const suffix of suffixes) {
+        const attribute = byName.get(`${prefix}_${suffix}`);
+        if (attribute && !attribute.isForeignKey && !attribute.enumReferenceId) {
+          return attribute.name;
+        }
+      }
+    }
+    return;
+  };
   for (const candidate of ["name", "full_name", "display_name", "title", "label", "subject"]) {
     if (has(candidate))
       return [candidate];
   }
+  const ownName = prefixed("name", "title", "label");
+  if (ownName)
+    return [ownName];
   if (has("first_name") && has("last_name"))
     return ["first_name", "last_name"];
   for (const candidate of ["code", "reference", "number"]) {
     if (has(candidate))
       return [candidate];
   }
+  const ownCode = prefixed("code", "reference", "number");
+  if (ownCode)
+    return [ownCode];
   const references = attributes.filter((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName2(attribute.name));
   if (references.length >= 2)
     return references.slice(0, 2).map((attribute) => attribute.name);
-  const readable = attributes.find((attribute) => attribute.name !== primaryKey && !attribute.isForeignKey && !attribute.name.endsWith("_id") && (attribute.type === "string" || attribute.type === "text"));
-  return readable ? [readable.name] : [];
+  const readable = attributes.find((attribute) => attribute.name !== primaryKey && !attribute.isForeignKey && !attribute.enumReferenceId && !attribute.name.endsWith("_id") && (attribute.type === "string" || attribute.type === "text"));
+  if (readable)
+    return [readable.name];
+  const parent = attributes.find((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName2(attribute.name));
+  const when = attributes.find((attribute) => attribute.type === "date" || attribute.type === "datetime");
+  return parent && when ? [parent.name, when.name] : [];
 }
 function attributeReferenceId(attr, entityPrimaryKey) {
   if (attr.name === "id")
@@ -22056,8 +29133,6 @@ function generateSysFields(tabId, columns, config = defaultDictionaryConfig) {
     seq_no: seqNumbers[index] ?? (index + 1) * 10,
     seq_no_grid: (index + 1) * 10,
     display_length: undefined,
-    x_position: undefined,
-    y_position: undefined,
     column_span: undefined,
     num_lines: undefined,
     is_displayed: true,
@@ -22124,50 +29199,329 @@ function shuffleArray(array) {
     array[j] = temp;
   }
 }
-var BusEntitySchema = exports_external.object({
-  name: exports_external.string(),
-  tableName: exports_external.string().regex(/^bus_/, "Table name must start with bus_"),
-  originalName: exports_external.string(),
-  displayName: exports_external.string(),
-  description: exports_external.string().optional(),
-  attributes: exports_external.array(exports_external.any()),
-  primaryKey: exports_external.string(),
-  timestamps: exports_external.boolean()
+var BusEntitySchema = objectType({
+  name: stringType(),
+  tableName: stringType().regex(/^bus_/, "Table name must start with bus_"),
+  originalName: stringType(),
+  displayName: stringType(),
+  description: stringType().optional(),
+  attributes: arrayType(anyType()),
+  primaryKey: stringType(),
+  timestamps: booleanType()
 });
-var DictionaryGenerationConfigSchema = exports_external.object({
-  defaultEntityType: exports_external.string(),
-  createdBy: exports_external.string(),
-  randomizeFieldOrder: exports_external.boolean(),
-  includeFieldGroups: exports_external.boolean(),
-  defaultAccessLevel: exports_external.enum(["S", "C", "O", "CO", "A"])
+var DictionaryGenerationConfigSchema = objectType({
+  defaultEntityType: stringType(),
+  createdBy: stringType(),
+  randomizeFieldOrder: booleanType(),
+  includeFieldGroups: booleanType(),
+  defaultAccessLevel: enumType(["S", "C", "O", "CO", "A"])
 });
 // packages/core/src/types/entity.types.ts
-var EntityAttributeSchema = exports_external.object({
-  name: exports_external.string(),
-  type: exports_external.enum(["string", "integer", "decimal", "boolean", "date", "datetime", "text", "json"]),
-  required: exports_external.boolean(),
-  description: exports_external.string().optional(),
-  semanticType: exports_external.enum(["email", "url", "phone", "password", "color"]).optional(),
-  unique: exports_external.boolean().optional(),
-  default: exports_external.any().optional(),
-  maxLength: exports_external.number().optional(),
-  minLength: exports_external.number().optional(),
-  pattern: exports_external.string().optional()
+var EntityAttributeSchema = objectType({
+  name: stringType(),
+  type: enumType(["string", "integer", "decimal", "boolean", "date", "datetime", "text", "json"]),
+  required: booleanType(),
+  description: stringType().optional(),
+  semanticType: enumType(["email", "url", "phone", "password", "color"]).optional(),
+  unique: booleanType().optional(),
+  default: anyType().optional(),
+  maxLength: numberType().optional(),
+  minLength: numberType().optional(),
+  pattern: stringType().optional()
 });
-var EntitySchema = exports_external.object({
-  name: exports_external.string(),
-  tableName: exports_external.string(),
-  description: exports_external.string().optional(),
-  attributes: exports_external.array(EntityAttributeSchema),
-  primaryKey: exports_external.string(),
-  timestamps: exports_external.boolean(),
-  icon: exports_external.string().optional()
+var EntitySchema = objectType({
+  name: stringType(),
+  tableName: stringType(),
+  description: stringType().optional(),
+  attributes: arrayType(EntityAttributeSchema),
+  primaryKey: stringType(),
+  timestamps: booleanType(),
+  icon: stringType().optional()
 });
+// packages/generator/src/generators/dictionary.generator.ts
+class DictionaryGenerator {
+  config;
+  constructor(options) {
+    this.config = {
+      ...defaultDictionaryConfig,
+      randomizeFieldOrder: options.randomizeFieldOrder
+    };
+  }
+  generateDictionaryContext(entities, relationships) {
+    const busEntities = [];
+    const busAttributesMap = new Map;
+    const sysTables = [];
+    const sysColumns = [];
+    const sysWindows = [];
+    const sysTabs = [];
+    const sysFields = [];
+    const sysFieldGroups = [];
+    let tableCounter = 0;
+    let columnCounter = 0;
+    let windowCounter = 0;
+    let tabCounter = 0;
+    let fieldCounter = 0;
+    let fieldGroupCounter = 0;
+    const windowByEntity = new Map;
+    const childTabs = [];
+    const declared = declaredEntityNames(entities);
+    for (const entity of entities) {
+      const busEntity = entityToBusEntity(entity, declared);
+      busEntities.push(busEntity);
+      const busAttrs = entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index));
+      busAttributesMap.set(busEntity.tableName, busAttrs);
+      const tableId = `table_${++tableCounter}`;
+      const sysTable = {
+        ...generateSysTable(busEntity, this.config),
+        _tempId: tableId
+      };
+      sysTables.push(sysTable);
+      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey, entity.name));
+      const columnEntries = busAttrs.map((attr, _index) => {
+        const colId = `col_${++columnCounter}`;
+        return {
+          sys_table_id: tableId,
+          column_name: attr.columnName,
+          name: attr.displayName,
+          description: attr.description,
+          sys_reference_id: attr.referenceId,
+          sys_val_rule_id: undefined,
+          field_length: attr.maxLength,
+          default_value: attr.default?.toString(),
+          value_min: undefined,
+          value_max: undefined,
+          is_key: attr.name === entity.primaryKey,
+          is_parent: false,
+          is_mandatory: attr.required,
+          is_updateable: attr.name !== entity.primaryKey,
+          is_identifier: identifiers.has(attr.name),
+          is_selection_column: ["name", "email", "title", "description", "status"].includes(attr.name) || attr.unique === true,
+          is_translated: false,
+          is_encrypted: false,
+          is_allow_logging: true,
+          is_allow_copy: attr.name !== entity.primaryKey,
+          seq_no: attr.seqNo,
+          callout: undefined,
+          read_only_logic: attr.readOnlyLogic,
+          mandatory_logic: attr.mandatoryLogic,
+          format_pattern: undefined,
+          entity_type: this.config.defaultEntityType,
+          is_active: true,
+          created_by: this.config.createdBy,
+          updated_by: this.config.createdBy,
+          _tempId: colId,
+          _tableRef: tableId
+        };
+      });
+      sysColumns.push(...columnEntries);
+      const isChild = !!entity.parentEntity;
+      const windowId = `win_${++windowCounter}`;
+      if (!isChild) {
+        sysWindows.push({
+          ...generateSysWindow(busEntity, this.config),
+          _tempId: windowId,
+          _tableRef: tableId
+        });
+      }
+      const tabId = `tab_${++tabCounter}`;
+      const sysTab = {
+        ...generateSysTab(windowId, tableId, busEntity, isChild ? 1 : 0, this.config),
+        _tempId: tabId,
+        _windowRef: windowId,
+        _tableRef: tableId
+      };
+      sysTabs.push(sysTab);
+      if (isChild) {
+        const link = columnEntries.find((col) => col.column_name === entity.parentLinkColumn);
+        if (link)
+          link.is_parent = true;
+        childTabs.push({
+          tab: sysTab,
+          table: sysTable,
+          parentEntity: entity.parentEntity,
+          linkColumnRef: link?._tempId
+        });
+      } else {
+        windowByEntity.set(entity.name, windowId);
+      }
+      const groups = generateSysFieldGroups(busEntity.displayName, this.config);
+      const groupEntries = groups.map((group) => ({
+        ...group,
+        _tempId: `fg_${++fieldGroupCounter}`
+      }));
+      sysFieldGroups.push(...groupEntries);
+      const columnRefs = columnEntries.map((col) => ({
+        sys_column_id: col._tempId,
+        column_name: col.column_name,
+        name: col.name,
+        description: col.description
+      }));
+      const fields = generateSysFields(tabId, columnRefs, this.config);
+      const fieldEntries = fields.map((field, idx) => ({
+        ...field,
+        _tempId: `field_${++fieldCounter}`,
+        _tabRef: tabId,
+        _columnRef: columnEntries[idx]?._tempId ?? "",
+        display_logic: busAttrs[idx]?.displayLogic,
+        read_only_logic: busAttrs[idx]?.readOnlyLogic,
+        mandatory_logic: busAttrs[idx]?.mandatoryLogic
+      }));
+      const layout = formLayoutFor(entity);
+      if (layout) {
+        const groupIds = new Map;
+        for (const group of layout.groups) {
+          const groupId = `fg_${++fieldGroupCounter}`;
+          groupIds.set(group.name, groupId);
+          sysFieldGroups.push({
+            name: group.name,
+            description: group.description,
+            field_group_type: "C",
+            is_collapsed_by_default: group.collapsed,
+            entity_type: this.config.defaultEntityType,
+            is_active: true,
+            created_by: this.config.createdBy,
+            updated_by: this.config.createdBy,
+            _tempId: groupId,
+            _tabRef: tabId,
+            columns: group.columns,
+            seq_no: group.seqNo
+          });
+        }
+        const keyed = new Map(busAttrs.map((attr, idx) => [attr.columnName, fieldEntries[idx]]));
+        for (const [column, place] of layout.fields) {
+          const field = keyed.get(column);
+          if (!field)
+            continue;
+          field._groupRef = groupIds.get(place.group);
+          field.seq_no = place.seqNo;
+          field.is_same_line = place.sameLine;
+          field.column_span = place.columnSpan;
+        }
+        const key = keyed.get(entity.primaryKey);
+        if (key)
+          key.seq_no = 0;
+      }
+      sysFields.push(...fieldEntries);
+    }
+    let childSeq = 20;
+    for (const child of childTabs) {
+      const parentWindow = windowByEntity.get(child.parentEntity);
+      if (!parentWindow)
+        continue;
+      child.tab._windowRef = parentWindow;
+      child.tab.sys_window_id = parentWindow;
+      child.tab.seq_no = childSeq;
+      childSeq += 10;
+      if (child.linkColumnRef)
+        child.tab.link_column_id = child.linkColumnRef;
+      child.table.sys_window_id = parentWindow;
+    }
+    return {
+      entities: busEntities,
+      busAttributes: busAttributesMap,
+      sysTables,
+      sysColumns,
+      sysWindows,
+      sysTabs,
+      sysFields,
+      sysFieldGroups,
+      references: ReferenceType,
+      relationships
+    };
+  }
+  getSystemTableNames() {
+    return [
+      "sys_table",
+      "sys_column",
+      "sys_window",
+      "sys_tab",
+      "sys_field",
+      "sys_field_group",
+      "sys_reference",
+      "sys_ref_list",
+      "sys_ref_table",
+      "sys_val_rule",
+      "sys_user",
+      "sys_role",
+      "sys_user_roles",
+      "sys_access"
+    ];
+  }
+  getStandardReferences() {
+    return [
+      { id: ReferenceType.STRING, name: "String", description: "String/Varchar field" },
+      { id: ReferenceType.INTEGER, name: "Integer", description: "Integer number" },
+      { id: ReferenceType.AMOUNT, name: "Amount", description: "Decimal/Amount" },
+      { id: ReferenceType.ID, name: "ID", description: "Identifier (UUID)" },
+      { id: ReferenceType.TEXT, name: "Text", description: "Long text/memo" },
+      { id: ReferenceType.DATE, name: "Date", description: "Date only" },
+      { id: ReferenceType.DATETIME, name: "DateTime", description: "Date and time" },
+      { id: ReferenceType.LIST, name: "List", description: "Dropdown list" },
+      { id: ReferenceType.TABLE, name: "Table", description: "Table reference" },
+      {
+        id: ReferenceType.TABLE_DIRECT,
+        name: "Table Direct",
+        description: "Direct table reference"
+      },
+      { id: ReferenceType.YES_NO, name: "Yes-No", description: "Boolean (Yes/No)" },
+      { id: ReferenceType.LOCATION, name: "Location", description: "Location/Address" },
+      { id: ReferenceType.LOCATOR, name: "Locator", description: "Warehouse locator" },
+      { id: ReferenceType.ACCOUNT, name: "Account", description: "Account reference" },
+      { id: ReferenceType.URL, name: "URL", description: "URL/Web address" },
+      { id: ReferenceType.IMAGE, name: "Image", description: "Image file" },
+      { id: ReferenceType.FILE, name: "File", description: "File attachment" },
+      { id: ReferenceType.COLOR, name: "Color", description: "Color picker" },
+      { id: ReferenceType.JSON, name: "JSON", description: "JSON data" },
+      { id: ReferenceType.PASSWORD, name: "Password", description: "Masked password" },
+      { id: ReferenceType.EMAIL, name: "Email", description: "Email address" },
+      { id: ReferenceType.PHONE, name: "Phone", description: "Phone number" }
+    ];
+  }
+}
+
 // packages/generator/src/naming/tables.ts
 var snake = (value) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase();
-function tableNameFor(entity2) {
-  const base = snake(entity2.tableName || entity2.name);
+function tableNameFor(entity) {
+  const base = snake(entity.tableName || entity.name);
   return base.startsWith("bus_") || base.startsWith("sys_") ? base : `bus_${base}`;
+}
+
+// packages/generator/src/generators/tanstack-start-nestjs/lifecycle-module.ts
+function lifecycleTable(entities, workflows) {
+  const machineOf = (name) => name ? workflows.find((workflow) => workflow.entity === name) : undefined;
+  const table = {};
+  for (const entity of entities) {
+    const machine = machineOf(entity.name) ?? machineOf(entity.className);
+    if (!machine) {
+      table[entity.tableName] = {
+        column: DOC_STATUS_COLUMN,
+        hasMachine: false,
+        draft: LIFECYCLE_DRAFT,
+        afterDraft: LIFECYCLE_FINAL,
+        terminal: [LIFECYCLE_FINAL],
+        edges: [],
+        values: [LIFECYCLE_DRAFT, LIFECYCLE_FINAL, LIFECYCLE_ERROR]
+      };
+      continue;
+    }
+    const columns = (entity.attributes ?? []).map((attribute) => attribute.columnName ?? attribute.name).filter((name) => !!name);
+    const draft = draftValueFor(machine);
+    table[entity.tableName] = {
+      column: stateFieldOf(columns) ?? "workflow_status",
+      hasMachine: true,
+      draft,
+      afterDraft: machine.initial ?? draft,
+      terminal: [...machine.terminal],
+      edges: machine.transitions.filter((edge) => edge.from !== "[*]" && edge.to !== "[*]").map((edge) => ({
+        from: edge.from,
+        to: edge.to,
+        event: edge.trigger ? normalizeEvent(edge.trigger) : "",
+        label: moveLabel(edge.trigger, edge.to)
+      })),
+      values: [...machine.lifecycleValues]
+    };
+  }
+  return table;
 }
 
 // packages/generator/src/rbac/roles.ts
@@ -22201,11 +29555,11 @@ function deriveAccess(compiled, options) {
     if (!declared.has(key))
       declared.set(key, role);
   };
-  for (const rule2 of compiled.operations)
-    for (const role of rule2.roles)
+  for (const rule of compiled.operations)
+    for (const role of rule.roles)
       remember(role);
-  for (const rule2 of compiled.transitions)
-    for (const role of rule2.roles)
+  for (const rule of compiled.transitions)
+    for (const role of rule.roles)
       remember(role);
   const roles = BUILT_IN.map((role) => ({ ...role }));
   const taken = new Set(roles.map((role) => role.name.toLowerCase()));
@@ -22239,18 +29593,18 @@ function deriveAccess(compiled, options) {
     isAdmin: false
   });
   const entityVisibility = {};
-  for (const rule2 of compiled.operations) {
-    if (rule2.operation !== "read")
+  for (const rule of compiled.operations) {
+    if (rule.operation !== "read")
       continue;
-    const existing = entityVisibility[rule2.entity] ?? [];
-    entityVisibility[rule2.entity] = [...new Set([...existing, ...rule2.roles])].sort();
+    const existing = entityVisibility[rule.entity] ?? [];
+    entityVisibility[rule.entity] = [...new Set([...existing, ...rule.roles])].sort();
   }
   const allEntities = options.entities && options.entities.length > 0 ? options.entities : Object.keys(entityVisibility);
   const normalize = (value) => value.trim().toLowerCase().replace(/[\s-]+/g, "_");
   const entityCounts = {};
   for (const role of roles) {
-    entityCounts[role.name] = role.isAdmin ? allEntities.length : allEntities.filter((entity2) => {
-      const allowed = entityVisibility[entity2];
+    entityCounts[role.name] = role.isAdmin ? allEntities.length : allEntities.filter((entity) => {
+      const allowed = entityVisibility[entity];
       if (!allowed || allowed.length === 0)
         return true;
       return allowed.some((name) => normalize(name) === normalize(role.declaredAs));
@@ -22362,8 +29716,75 @@ function linkColumn(parent, child, relForeignKey) {
   const expected = `${tableNameFor(parent).replace(/^bus_/, "")}_id`;
   return child.attributes.find((a) => a.name === expected) ?? (relForeignKey ? child.attributes.find((a) => a.name === relForeignKey) : undefined);
 }
+var RESERVED_ALIASES = [
+  "all",
+  "analyse",
+  "analyze",
+  "and",
+  "any",
+  "array",
+  "asc",
+  "both",
+  "case",
+  "cast",
+  "check",
+  "collate",
+  "column",
+  "constraint",
+  "create",
+  "default",
+  "desc",
+  "distinct",
+  "do",
+  "else",
+  "end",
+  "except",
+  "false",
+  "fetch",
+  "for",
+  "foreign",
+  "from",
+  "grant",
+  "group",
+  "having",
+  "in",
+  "initially",
+  "intersect",
+  "into",
+  "leading",
+  "limit",
+  "not",
+  "null",
+  "offset",
+  "on",
+  "only",
+  "or",
+  "order",
+  "primary",
+  "references",
+  "select",
+  "some",
+  "table",
+  "then",
+  "to",
+  "trailing",
+  "true",
+  "union",
+  "unique",
+  "user",
+  "using",
+  "when",
+  "where",
+  "window",
+  "with"
+];
+var RESERVED_ALIAS = new RegExp(`(\\bAS\\s+)(${RESERVED_ALIASES.join("|")})(?![\\w"])`, "gi");
+function quoteReservedAliases(sql) {
+  return sql.replace(RESERVED_ALIAS, (_m, as, word) => `${as}"${word}"`);
+}
 function addQuery(ctx, spec) {
-  ctx.queries.push({ ...spec, tables: tablesIn(spec.sql) });
+  const sql = quoteReservedAliases(spec.sql);
+  ctx.queries.push({ ...spec, sql, tables: tablesIn(sql) });
   return spec.key;
 }
 function deriveEntity(ctx, e) {
@@ -22457,14 +29878,15 @@ ORDER BY 1`
   if (wf && statusCol) {
     const states = declaredStates(wf);
     if (states.length > 0) {
-      const valuesList = states.map((s, i) => `(${lit(s)}, ${i})`).join(", ");
+      const valuesList = states.map((s, i) => i === 0 ? `SELECT ${lit(s)} AS state, ${i} AS position` : `SELECT ${lit(s)}, ${i}`).join(`
+  UNION ALL `);
       const key = `${slug}__lifecycle`;
       const q = addQuery(ctx, {
         key,
         name: `${titleOf(e)} lifecycle — ${wf.name}`,
         description: `Where ${pluralTitle(e).toLowerCase()} sit in the ${wf.name} state machine. Every state the model declares appears, including the ones nothing has reached.`,
-        sql: `WITH declared(state, position) AS (
-  VALUES ${valuesList}
+        sql: `WITH declared AS (
+  ${valuesList}
 )
 SELECT d.state, COALESCE(c.records, 0) AS records
 FROM declared d
@@ -22634,7 +30056,7 @@ function deriveDashboards(ctx, appName, appDescription) {
       y += 4;
     }
   };
-  for (const c of ctx.charts.filter((c2) => c2.key.startsWith("authored__")).slice(0, 4)) {
+  for (const c of ctx.charts.filter((c) => c.key.startsWith("authored__")).slice(0, 4)) {
     place(c.name, c.key);
   }
   for (const e of headline) {
@@ -22652,8 +30074,48 @@ function deriveDashboards(ctx, appName, appDescription) {
       name: `${appName} — overview`,
       description: appDescription?.trim() || `The ${headline.length} entities this model puts at the centre of ${appName}, one tile each.`,
       widgets
-    }
+    },
+    ...deriveAuthoredDashboards(ctx)
   ];
+}
+function deriveAuthoredDashboards(ctx) {
+  const charts = new Set(ctx.charts.map((c) => c.key));
+  const reports = new Set(ctx.reports.map((r) => r.key));
+  const specs = [];
+  for (const d of ctx.model.dashboards ?? []) {
+    const widgets = [];
+    let x = 0;
+    let y = 0;
+    for (const name of d.reports) {
+      const key = `authored__${name}`;
+      const title = ctx.model.reports.find((r) => r.name === name)?.title ?? name;
+      if (charts.has(key)) {
+        widgets.push({ chartKey: key, title, x, y, w: 6, h: 4 });
+        x += 6;
+        if (x >= 12) {
+          x = 0;
+          y += 4;
+        }
+      } else if (reports.has(key)) {
+        if (x !== 0) {
+          x = 0;
+          y += 4;
+        }
+        widgets.push({ reportKey: key, title, x, y, w: 12, h: 4 });
+        y += 4;
+      }
+    }
+    if (widgets.length === 0)
+      continue;
+    specs.push({
+      key: `authored__${d.name}`,
+      name: d.title,
+      description: d.help?.trim() ?? (d.role ? `${d.title} — a dashboard for the ${d.role} role, declared in the model as %%dashboard ${d.name}.` : `Declared in the model as %%dashboard ${d.name}.`),
+      ...d.role ? { role: d.role } : {},
+      widgets
+    });
+  }
+  return specs;
 }
 function dropDerivedDuplicatesOfAuthored(ctx) {
   const authoredNames = new Set([...ctx.reports, ...ctx.charts, ...ctx.queries].filter((x) => x.key.startsWith("authored__")).map((x) => x.name));
@@ -22689,6 +30151,10 @@ ${problems.join(`
 `)}`);
   }
 }
+var RESERVED_PLATFORM_ROLES = new Set(["admin", "administrator"]);
+function reportingRoleName(name) {
+  return RESERVED_PLATFORM_ROLES.has(name.trim().toLowerCase()) ? `${name} (model role)` : name;
+}
 function deriveAccessSpec(model, options) {
   const projectId = kebabName(options.projectName);
   const access = deriveAccess(model.rbac, {
@@ -22700,14 +30166,14 @@ function deriveAccessSpec(model, options) {
   const reportDomain = `${projectId || "app"}.reports.example.com`;
   const roles = access.roles.map((role) => {
     const appUser = access.users.find((u) => u.roleName === role.name);
-    const tables = role.isAdmin ? [] : model.entities.filter((entity2) => {
-      const admitted = access.entityVisibility[entity2.name];
+    const tables = role.isAdmin ? [] : model.entities.filter((entity) => {
+      const admitted = access.entityVisibility[entity.name];
       if (!admitted || admitted.length === 0)
         return true;
       return admitted.some((r) => r.toLowerCase() === role.declaredAs.toLowerCase());
-    }).map((entity2) => tableNameFor(entity2));
+    }).map((entity) => tableNameFor(entity));
     return {
-      name: role.name,
+      name: role.isAdmin ? role.name : reportingRoleName(role.name),
       declaredAs: role.declaredAs,
       description: role.isAdmin ? "Reads every table of the attached application" : `Reads what ${role.name} may see in the application`,
       isAdmin: role.isAdmin,
@@ -22719,7 +30185,8 @@ function deriveAccessSpec(model, options) {
   for (const role of roles) {
     if (role.isAdmin)
       continue;
-    const expected = access.entityCounts[role.name];
+    const appName = access.roles.find((r) => r.declaredAs === role.declaredAs)?.name ?? role.name;
+    const expected = access.entityCounts[appName];
     if (expected !== undefined && expected !== role.tables.length) {
       throw new Error(`Reporting role "${role.name}" resolved ${role.tables.length} readable tables, ` + `but the application derives ${expected} for the same role. ` + `These must agree — the reporting side is mirroring %%rbac, not reinterpreting it.`);
     }
@@ -22764,209 +30231,6 @@ function buildReportingPack(model, options) {
     dashboards,
     access: deriveAccessSpec(model, options)
   };
-}
-
-// packages/generator/src/generators/dictionary.generator.ts
-class DictionaryGenerator {
-  config;
-  constructor(options) {
-    this.config = {
-      ...defaultDictionaryConfig,
-      randomizeFieldOrder: options.randomizeFieldOrder
-    };
-  }
-  generateDictionaryContext(entities, relationships) {
-    const busEntities = [];
-    const busAttributesMap = new Map;
-    const sysTables = [];
-    const sysColumns = [];
-    const sysWindows = [];
-    const sysTabs = [];
-    const sysFields = [];
-    const sysFieldGroups = [];
-    let tableCounter = 0;
-    let columnCounter = 0;
-    let windowCounter = 0;
-    let tabCounter = 0;
-    let fieldCounter = 0;
-    let fieldGroupCounter = 0;
-    const windowByEntity = new Map;
-    const childTabs = [];
-    const declared = declaredEntityNames(entities);
-    for (const entity2 of entities) {
-      const busEntity = entityToBusEntity(entity2, declared);
-      busEntities.push(busEntity);
-      const busAttrs = entity2.attributes.map((attr, index) => attributeToBusAttribute(attr, index));
-      busAttributesMap.set(busEntity.tableName, busAttrs);
-      const tableId = `table_${++tableCounter}`;
-      const sysTable = {
-        ...generateSysTable(busEntity, this.config),
-        _tempId: tableId
-      };
-      sysTables.push(sysTable);
-      const identifiers = new Set(identifierColumnNames(busAttrs, entity2.primaryKey));
-      const columnEntries = busAttrs.map((attr, _index) => {
-        const colId = `col_${++columnCounter}`;
-        return {
-          sys_table_id: tableId,
-          column_name: attr.columnName,
-          name: attr.displayName,
-          description: attr.description,
-          sys_reference_id: attr.referenceId,
-          sys_val_rule_id: undefined,
-          field_length: attr.maxLength,
-          default_value: attr.default?.toString(),
-          value_min: undefined,
-          value_max: undefined,
-          is_key: attr.name === entity2.primaryKey,
-          is_parent: false,
-          is_mandatory: attr.required,
-          is_updateable: attr.name !== entity2.primaryKey,
-          is_identifier: identifiers.has(attr.name),
-          is_selection_column: ["name", "email", "title", "description", "status"].includes(attr.name) || attr.unique === true,
-          is_translated: false,
-          is_encrypted: false,
-          is_allow_logging: true,
-          is_allow_copy: attr.name !== entity2.primaryKey,
-          seq_no: attr.seqNo,
-          callout: undefined,
-          read_only_logic: undefined,
-          mandatory_logic: undefined,
-          format_pattern: undefined,
-          entity_type: this.config.defaultEntityType,
-          is_active: true,
-          created_by: this.config.createdBy,
-          updated_by: this.config.createdBy,
-          _tempId: colId,
-          _tableRef: tableId
-        };
-      });
-      sysColumns.push(...columnEntries);
-      const isChild = !!entity2.parentEntity;
-      const windowId = `win_${++windowCounter}`;
-      if (!isChild) {
-        sysWindows.push({
-          ...generateSysWindow(busEntity, this.config),
-          _tempId: windowId,
-          _tableRef: tableId
-        });
-      }
-      const tabId = `tab_${++tabCounter}`;
-      const sysTab = {
-        ...generateSysTab(windowId, tableId, busEntity, isChild ? 1 : 0, this.config),
-        _tempId: tabId,
-        _windowRef: windowId,
-        _tableRef: tableId
-      };
-      sysTabs.push(sysTab);
-      if (isChild) {
-        const link = columnEntries.find((col) => col.column_name === entity2.parentLinkColumn);
-        if (link)
-          link.is_parent = true;
-        childTabs.push({
-          tab: sysTab,
-          table: sysTable,
-          parentEntity: entity2.parentEntity,
-          linkColumnRef: link?._tempId
-        });
-      } else {
-        windowByEntity.set(entity2.name, windowId);
-      }
-      const groups = generateSysFieldGroups(busEntity.displayName, this.config);
-      const groupEntries = groups.map((group) => ({
-        ...group,
-        _tempId: `fg_${++fieldGroupCounter}`
-      }));
-      sysFieldGroups.push(...groupEntries);
-      const columnRefs = columnEntries.map((col) => ({
-        sys_column_id: col._tempId,
-        column_name: col.column_name,
-        name: col.name,
-        description: col.description
-      }));
-      const fields = generateSysFields(tabId, columnRefs, this.config);
-      const fieldEntries = fields.map((field, idx) => ({
-        ...field,
-        _tempId: `field_${++fieldCounter}`,
-        _tabRef: tabId,
-        _columnRef: columnEntries[idx]?._tempId ?? ""
-      }));
-      sysFields.push(...fieldEntries);
-    }
-    let childSeq = 20;
-    for (const child of childTabs) {
-      const parentWindow = windowByEntity.get(child.parentEntity);
-      if (!parentWindow)
-        continue;
-      child.tab._windowRef = parentWindow;
-      child.tab.sys_window_id = parentWindow;
-      child.tab.seq_no = childSeq;
-      childSeq += 10;
-      if (child.linkColumnRef)
-        child.tab.link_column_id = child.linkColumnRef;
-      child.table.sys_window_id = parentWindow;
-    }
-    return {
-      entities: busEntities,
-      busAttributes: busAttributesMap,
-      sysTables,
-      sysColumns,
-      sysWindows,
-      sysTabs,
-      sysFields,
-      sysFieldGroups,
-      references: ReferenceType,
-      relationships
-    };
-  }
-  getSystemTableNames() {
-    return [
-      "sys_table",
-      "sys_column",
-      "sys_window",
-      "sys_tab",
-      "sys_field",
-      "sys_field_group",
-      "sys_reference",
-      "sys_ref_list",
-      "sys_ref_table",
-      "sys_val_rule",
-      "sys_user",
-      "sys_role",
-      "sys_user_roles",
-      "sys_access"
-    ];
-  }
-  getStandardReferences() {
-    return [
-      { id: ReferenceType.STRING, name: "String", description: "String/Varchar field" },
-      { id: ReferenceType.INTEGER, name: "Integer", description: "Integer number" },
-      { id: ReferenceType.AMOUNT, name: "Amount", description: "Decimal/Amount" },
-      { id: ReferenceType.ID, name: "ID", description: "Identifier (UUID)" },
-      { id: ReferenceType.TEXT, name: "Text", description: "Long text/memo" },
-      { id: ReferenceType.DATE, name: "Date", description: "Date only" },
-      { id: ReferenceType.DATETIME, name: "DateTime", description: "Date and time" },
-      { id: ReferenceType.LIST, name: "List", description: "Dropdown list" },
-      { id: ReferenceType.TABLE, name: "Table", description: "Table reference" },
-      {
-        id: ReferenceType.TABLE_DIRECT,
-        name: "Table Direct",
-        description: "Direct table reference"
-      },
-      { id: ReferenceType.YES_NO, name: "Yes-No", description: "Boolean (Yes/No)" },
-      { id: ReferenceType.LOCATION, name: "Location", description: "Location/Address" },
-      { id: ReferenceType.LOCATOR, name: "Locator", description: "Warehouse locator" },
-      { id: ReferenceType.ACCOUNT, name: "Account", description: "Account reference" },
-      { id: ReferenceType.URL, name: "URL", description: "URL/Web address" },
-      { id: ReferenceType.IMAGE, name: "Image", description: "Image file" },
-      { id: ReferenceType.FILE, name: "File", description: "File attachment" },
-      { id: ReferenceType.COLOR, name: "Color", description: "Color picker" },
-      { id: ReferenceType.JSON, name: "JSON", description: "JSON data" },
-      { id: ReferenceType.PASSWORD, name: "Password", description: "Masked password" },
-      { id: ReferenceType.EMAIL, name: "Email", description: "Email address" },
-      { id: ReferenceType.PHONE, name: "Phone", description: "Phone number" }
-    ];
-  }
 }
 
 // packages/generator/src/generators/wasm/model-bundle.ts
@@ -23060,9 +30324,9 @@ function buildSchema(entities, relationships) {
     "-- make the order of `erDiagram` blocks decide whether the schema loads.",
     ""
   ];
-  for (const entity2 of entities) {
-    const table = tableNameFor(entity2);
-    const columns = entity2.attributes.filter((attribute) => !MANAGED_COLUMN_NAMES2.has(snake2(attribute.name))).map((attribute) => {
+  for (const entity of entities) {
+    const table = tableNameFor(entity);
+    const columns = entity.attributes.filter((attribute) => !MANAGED_COLUMN_NAMES2.has(snake2(attribute.name))).map((attribute) => {
       const nullability = attribute.required ? " NOT NULL" : "";
       const unique = attribute.unique ? " UNIQUE" : "";
       return `  ${snake2(attribute.name)} ${sqlType(attribute)}${nullability}${unique},`;
@@ -23073,7 +30337,7 @@ function buildSchema(entities, relationships) {
     lines.push(MANAGED_COLUMNS);
     lines.push(");");
     lines.push(`CREATE INDEX IF NOT EXISTS idx_${table}_deleted ON ${table}(deleted_at);`);
-    for (const index of entity2.indexes ?? []) {
+    for (const index of entity.indexes ?? []) {
       const name = `idx_${table}_${index.columns.map(snake2).join("_")}`;
       const unique = index.unique ? "UNIQUE " : "";
       lines.push(`CREATE ${unique}INDEX IF NOT EXISTS ${name} ON ${table}(${index.columns.map(snake2).join(", ")});`);
@@ -23088,13 +30352,13 @@ function buildSchema(entities, relationships) {
   lines.push("-- relationship is better than failing the whole schema load. Every reference");
   lines.push("-- column gets an index regardless, since that is what the joins need.");
   lines.push("");
-  const byName = new Map(entities.map((entity2) => [entity2.name, entity2]));
+  const byName = new Map(entities.map((entity) => [entity.name, entity]));
   const constrained = new Set;
-  for (const entity2 of entities) {
-    for (const attribute of entity2.attributes) {
+  for (const entity of entities) {
+    for (const attribute of entity.attributes) {
       if (!attribute.isForeignKey)
         continue;
-      const table = tableNameFor(entity2);
+      const table = tableNameFor(entity);
       const column = snake2(attribute.name);
       lines.push(`CREATE INDEX IF NOT EXISTS idx_${table}_${column} ON ${table}(${column});`);
     }
@@ -23139,7 +30403,7 @@ function fingerprint(value) {
 }
 function buildModelBundle(parsed, project) {
   const schema = buildSchema(parsed.entities, parsed.relationships);
-  const dictionary2 = new DictionaryGenerator({
+  const dictionary = new DictionaryGenerator({
     databaseType: "postgresql",
     includeRbac: true,
     randomizeFieldOrder: false
@@ -23155,7 +30419,7 @@ function buildModelBundle(parsed, project) {
     projectId: kebab(project.name),
     adminEmail: project.adminEmail,
     adminName: project.adminName,
-    entities: parsed.entities.map((entity2) => entity2.name)
+    entities: parsed.entities.map((entity) => entity.name)
   });
   const categoryOf = new Map;
   for (const category of parsed.categories) {
@@ -23163,23 +30427,23 @@ function buildModelBundle(parsed, project) {
       categoryOf.set(entityName, category.name);
   }
   const declared = declaredEntityNames(parsed.entities);
-  const entities = parsed.entities.map((entity2) => {
-    const table = tableNameFor(entity2);
+  const entities = parsed.entities.map((entity) => {
+    const table = tableNameFor(entity);
     return {
-      name: entity2.name,
+      name: entity.name,
       tableName: table,
-      routeName: kebab(entity2.name),
-      displayName: title(entity2.name),
-      description: entity2.description,
-      primaryKey: entity2.primaryKey,
-      category: categoryOf.get(entity2.name) ?? "General",
-      icon: entity2.icon,
-      parentEntity: entity2.parentEntity,
-      parentLinkColumn: entity2.parentLinkColumn ? snake2(entity2.parentLinkColumn) : undefined,
-      attributes: entity2.attributes.map((attribute, index) => ({
+      routeName: kebab(entity.name),
+      displayName: title(entity.name),
+      description: entity.description,
+      primaryKey: entity.primaryKey,
+      category: categoryOf.get(entity.name) ?? "General",
+      icon: entity.icon,
+      parentEntity: entity.parentEntity,
+      parentLinkColumn: entity.parentLinkColumn ? snake2(entity.parentLinkColumn) : undefined,
+      attributes: entity.attributes.map((attribute, index) => ({
         name: attribute.name,
         columnName: snake2(attribute.name),
-        displayName: attributeDisplayName(attribute, entity2.primaryKey, declared),
+        displayName: attributeDisplayName(attribute, entity.primaryKey, declared),
         type: attribute.type,
         sqlType: sqlType(attribute),
         required: !!attribute.required,
@@ -23189,17 +30453,17 @@ function buildModelBundle(parsed, project) {
         isForeignKey: !!attribute.isForeignKey,
         enumRef: attribute.enumRef,
         enumValues: attribute.enumValues,
-        referenceId: referenceIdFor(attribute, attribute.name === entity2.primaryKey),
+        referenceId: referenceIdFor(attribute, attribute.name === entity.primaryKey),
         seqNo: (index + 1) * 10
       }))
     };
   });
-  const tableByTemp = new Map(dictionary2.sysTables.map((table) => [table._tempId, table.table_name]));
-  const columnByTemp = new Map(dictionary2.sysColumns.map((column) => [
+  const tableByTemp = new Map(dictionary.sysTables.map((table) => [table._tempId, table.table_name]));
+  const columnByTemp = new Map(dictionary.sysColumns.map((column) => [
     column._tempId,
     { table: tableByTemp.get(column._tableRef) ?? "", column: column.column_name }
   ]));
-  const tabTable = new Map(dictionary2.sysTabs.map((tab) => [tab._tempId, tableByTemp.get(tab._tableRef) ?? ""]));
+  const tabTable = new Map(dictionary.sysTabs.map((tab) => [tab._tempId, tableByTemp.get(tab._tableRef) ?? ""]));
   const model = {
     project: {
       name: project.name,
@@ -23221,10 +30485,10 @@ function buildModelBundle(parsed, project) {
       seqNo: (index + 1) * 10,
       entities: category.entities
     })),
-    enums: parsed.enums.map((declared2) => ({
-      name: declared2.name,
-      referenceId: declared2.referenceId,
-      values: declared2.values
+    enums: parsed.enums.map((declared) => ({
+      name: declared.name,
+      referenceId: declared.referenceId,
+      values: declared.values
     })),
     rules: parsed.rules,
     hooks: parsed.hooks,
@@ -23234,7 +30498,7 @@ function buildModelBundle(parsed, project) {
       name: report.name,
       title: report.title,
       entity: report.entity ?? null,
-      tableName: report.entity ? entities.find((entity2) => entity2.name === report.entity)?.tableName ?? null : null,
+      tableName: report.entity ? entities.find((entity) => entity.name === report.entity)?.tableName ?? null : null,
       chart: report.chart ?? null,
       x: report.x ?? null,
       y: report.y ?? null,
@@ -23243,6 +30507,11 @@ function buildModelBundle(parsed, project) {
       seqNo: index
     })),
     rbac: parsed.rbac,
+    lifecycle: lifecycleTable(parsed.entities.map((entity) => ({
+      name: entity.name,
+      tableName: tableNameFor(entity),
+      attributes: entity.attributes.map((attribute) => ({ name: attribute.name }))
+    })), parsed.workflows),
     reporting,
     roles: access.roles,
     users: access.users,
@@ -23255,14 +30524,14 @@ function buildModelBundle(parsed, project) {
         description: `${title(name)} reference type`,
         validationType: id === ReferenceType.LIST ? "L" : id >= 18 && id <= 19 ? "T" : "S"
       })),
-      windows: dictionary2.sysWindows.map((window) => ({
+      windows: dictionary.sysWindows.map((window) => ({
         name: window.name,
         description: window.description,
         windowType: "maintain"
       })),
-      tables: dictionary2.sysTables.map((table) => {
-        const ownTab = dictionary2.sysTabs.find((tab) => tab._tableRef === table._tempId);
-        const ownWindow = ownTab ? dictionary2.sysWindows.find((window) => window._tempId === ownTab._windowRef) : undefined;
+      tables: dictionary.sysTables.map((table) => {
+        const ownTab = dictionary.sysTabs.find((tab) => tab._tableRef === table._tempId);
+        const ownWindow = ownTab ? dictionary.sysWindows.find((window) => window._tempId === ownTab._windowRef) : undefined;
         return {
           tableName: table.table_name,
           name: table.name,
@@ -23273,17 +30542,17 @@ function buildModelBundle(parsed, project) {
           category: categoryOf.get(entityNameFor(entities, table.table_name)) ?? "General"
         };
       }),
-      tabs: dictionary2.sysTabs.map((tab) => ({
+      tabs: dictionary.sysTabs.map((tab) => ({
         tableName: tableByTemp.get(tab._tableRef) ?? "",
-        window: dictionary2.sysWindows.find((window) => window._tempId === tab._windowRef)?.name ?? tab.name,
+        window: dictionary.sysWindows.find((window) => window._tempId === tab._windowRef)?.name ?? tab.name,
         name: tab.name,
         description: tab.description,
         seqNo: tab.seq_no,
         isSingleRow: false,
         tabLevel: tab.tab_level ?? 0,
-        linkColumn: tab.link_column_id ? dictionary2.sysColumns.find((column) => column._tempId === tab.link_column_id)?.column_name : undefined
+        linkColumn: tab.link_column_id ? dictionary.sysColumns.find((column) => column._tempId === tab.link_column_id)?.column_name : undefined
       })),
-      columns: dictionary2.sysColumns.map((column) => ({
+      columns: dictionary.sysColumns.map((column) => ({
         tableName: tableByTemp.get(column._tableRef) ?? "",
         columnName: column.column_name,
         name: column.name,
@@ -23298,13 +30567,22 @@ function buildModelBundle(parsed, project) {
         fieldLength: column.field_length,
         defaultValue: column.default_value,
         refTableName: refTableFor(entities, tableByTemp.get(column._tableRef) ?? "", column.column_name),
-        seqNo: column.seq_no
+        seqNo: column.seq_no,
+        readOnlyLogic: column.read_only_logic,
+        mandatoryLogic: column.mandatory_logic
       })),
-      fieldGroups: [],
-      fields: dictionary2.sysFields.map((field) => {
+      fieldGroups: dictionary.sysFieldGroups.filter((group) => group._tabRef).map((group) => ({
+        tableName: tableByTemp.get(dictionary.sysTabs.find((tab) => tab._tempId === group._tabRef)?._tableRef ?? "") ?? "",
+        name: group.name,
+        description: group.description,
+        columns: group.columns ?? 2,
+        collapsed: group.is_collapsed_by_default,
+        seqNo: group.seq_no ?? 0
+      })),
+      fields: dictionary.sysFields.map((field) => {
         const reference = columnByTemp.get(field._columnRef);
         const tableName = reference?.table ?? tabTable.get(field._tabRef) ?? "";
-        const attribute = entities.find((entity2) => entity2.tableName === tableName)?.attributes.find((item) => item.columnName === reference?.column);
+        const attribute = entities.find((entity) => entity.tableName === tableName)?.attributes.find((item) => item.columnName === reference?.column);
         return {
           tableName,
           columnName: reference?.column ?? "",
@@ -23318,20 +30596,33 @@ function buildModelBundle(parsed, project) {
           isInsertable: true,
           seqNo: field.seq_no,
           seqNoGrid: field.seq_no_grid,
+          fieldGroup: field._groupRef ? dictionary.sysFieldGroups.find((group) => group._tempId === field._groupRef)?.name : undefined,
+          isSameLine: field.is_same_line,
+          columnSpan: field.column_span,
           fieldType: attribute?.type,
           referenceId: attribute?.referenceId,
           defaultValue: attribute?.defaultValue ?? undefined,
-          isKey: attribute?.columnName === "id"
+          isKey: attribute?.columnName === "id",
+          displayLogic: field.display_logic,
+          readOnlyLogic: field.read_only_logic,
+          mandatoryLogic: field.mandatory_logic
         };
       })
     }
   };
   return { model, schema };
 }
-var NOISE = new Set(["id", "created_by", "updated_by", "deleted_by", "deleted_at", "version"]);
-var isNoise = (column) => NOISE.has(column);
+var GRID_NOISE = new Set([
+  "id",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+  "version"
+]);
+var isNoise = (column) => GRID_NOISE.has(column);
 function entityNameFor(entities, tableName) {
-  return entities.find((entity2) => entity2.tableName === tableName)?.name ?? tableName;
+  return entities.find((entity) => entity.tableName === tableName)?.name ?? tableName;
 }
 var PERSON_ROLE_COLUMNS = new Set([
   "assigned_to",
@@ -23348,17 +30639,19 @@ function isPersonRoleColumn2(columnName) {
   return columnName.endsWith("_by") || columnName.endsWith("_by_id") || PERSON_ROLE_COLUMNS.has(columnName);
 }
 function refTableFor(entities, tableName, columnName) {
-  const owner = entities.find((entity2) => entity2.tableName === tableName);
+  const owner = entities.find((entity) => entity.tableName === tableName);
   const attribute = owner?.attributes.find((item) => item.columnName === columnName);
   if (!attribute?.isForeignKey)
     return;
   if (isPersonRoleColumn2(columnName)) {
-    const user = entities.find((entity2) => entity2.tableName === "bus_user" || entity2.name === "User");
-    if (user)
-      return user.tableName;
+    for (const name of ["User", "Staff", "Employee"]) {
+      const person = entities.find((entity) => entity.name === name || entity.tableName === `bus_${name.toLowerCase()}`);
+      if (person)
+        return person.tableName;
+    }
   }
   const base = columnName.replace(/_id$/, "");
-  return entities.find((entity2) => entity2.tableName === `bus_${base}`)?.tableName;
+  return entities.find((entity) => entity.tableName === `bus_${base}`)?.tableName;
 }
 
 // packages/generator/src/manual/index.ts
@@ -23403,11 +30696,11 @@ function referenceTarget(column, declared) {
   return declared.get(stem.replace(/_/g, "")) ?? title2(stem).replace(/\s+/g, "");
 }
 function declaredNames(model) {
-  return new Map(model.entities.map((entity2) => [entity2.name.toLowerCase().replace(/_/g, ""), entity2.name]));
+  return new Map(model.entities.map((entity) => [entity.name.toLowerCase().replace(/_/g, ""), entity.name]));
 }
-function fieldRows(entity2, declared) {
-  const primaryKey = entity2.primaryKey || "id";
-  return entity2.attributes.map((attribute) => {
+function fieldRows(entity, declared) {
+  const primaryKey = entity.primaryKey || "id";
+  return entity.attributes.map((attribute) => {
     const isPrimary = attribute.name === primaryKey;
     const referenceId = referenceIdFor(attribute, isPrimary);
     const control = controlFor(attribute, referenceId);
@@ -23454,19 +30747,115 @@ function relationshipPhrase(relationship, entityName) {
       return `has one ${link}`;
   }
 }
-function relationshipsFor(model, entity2) {
-  const related = model.relationships.filter((relationship) => relationship.sourceEntity === entity2.name || relationship.targetEntity === entity2.name);
+function relationshipsFor(model, entity) {
+  const related = model.relationships.filter((relationship) => relationship.sourceEntity === entity.name || relationship.targetEntity === entity.name);
   if (related.length === 0)
     return "";
-  const items = related.map((relationship) => `<li>Each <b>${escapeHtml(title2(entity2.name))}</b> ${relationshipPhrase(relationship, entity2.name)}.</li>`).join(`
+  const items = related.map((relationship) => `<li>Each <b>${escapeHtml(title2(entity.name))}</b> ${relationshipPhrase(relationship, entity.name)}.</li>`).join(`
           `);
   return `      <h4>Related records</h4>
       <ul class="plain">
           ${items}
       </ul>`;
 }
-function workflowFor(model, entity2) {
-  const workflows = model.workflows.filter((workflow) => workflow.entity === entity2.name);
+function screensFor(dictionary, entity) {
+  const layout = dictionary.get(entity.name);
+  if (!layout)
+    return "";
+  const sectioned = layout.sections.length > 0;
+  const rows = layout.fields.map((field) => `          <tr>
+            <td><code>${escapeHtml(field.column)}</code></td>
+            <td>${escapeHtml(field.label)}</td>${sectioned ? `
+            <td>${escapeHtml(field.section ?? "—")}</td>
+            <td>${escapeHtml(field.place ?? "—")}</td>` : ""}
+            <td>${field.onForm ? "Yes" : "No"}</td>
+            <td>${field.inGrid ? "Yes" : "No"}</td>
+            <td>${field.formSeq}</td>
+            <td>${field.readOnly ? "Yes" : "No"}</td>
+          </tr>`).join(`
+`);
+  const sections = sectioned ? `
+      <p>The form is laid out in ${layout.sections.length} section${layout.sections.length === 1 ? "" : "s"}, each a grid of two columns:</p>
+      <ul class="plain">
+          ${layout.sections.map((section) => `<li><b>${escapeHtml(section.name)}</b>${section.help ? ` &mdash; ${escapeHtml(section.help)}` : ""}</li>`).join(`
+          `)}
+      </ul>` : "";
+  return `      <h4>Where it appears</h4>
+      <p>The application opens this record in the <b>${escapeHtml(layout.window)}</b> window, on the <b>${escapeHtml(layout.tab)}</b> tab. These are its ${layout.fields.length} field${layout.fields.length === 1 ? "" : "s"} &mdash; what the screen draws, in the order it draws them. An administrator can change any of this in Application Dictionary &rarr; Fields without regenerating the application.</p>${sections}
+      <table>
+        <thead><tr><th>Column</th><th>Label</th>${sectioned ? "<th>Section</th><th>Place</th>" : ""}<th>On the form</th><th>In the list</th><th>Order</th><th>Read only</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>`;
+}
+function manualDictionary(model) {
+  const context = new DictionaryGenerator({
+    databaseType: "postgresql",
+    includeRbac: true,
+    randomizeFieldOrder: false
+  }).generateDictionaryContext(model.entities, model.relationships);
+  const tableOf = new Map(context.sysTables.map((table) => [table._tempId, table.table_name]));
+  const windowOf = new Map(context.sysWindows.map((w) => [w._tempId, w.name]));
+  const columnOf = new Map(context.sysColumns.map((c) => [c._tempId, c.column_name]));
+  const tabOf = new Map(context.sysTabs.map((tab) => [
+    tab._tempId,
+    {
+      name: tab.name,
+      window: windowOf.get(tab._windowRef) ?? tab.name,
+      table: tableOf.get(tab._tableRef) ?? ""
+    }
+  ]));
+  const byTable = new Map;
+  for (const tab of tabOf.values()) {
+    if (tab.table && !byTable.has(tab.table)) {
+      byTable.set(tab.table, { window: tab.window, tab: tab.name, sections: [], fields: [] });
+    }
+  }
+  const groupOf = new Map(context.sysFieldGroups.map((group) => [group._tempId, group]));
+  for (const group of context.sysFieldGroups) {
+    const tab = group._tabRef ? tabOf.get(group._tabRef) : undefined;
+    const layout = tab?.table ? byTable.get(tab.table) : undefined;
+    layout?.sections.push({
+      name: group.name,
+      help: group.description,
+      seqNo: group.seq_no ?? 0
+    });
+  }
+  for (const field of context.sysFields) {
+    const tab = tabOf.get(field._tabRef);
+    if (!tab?.table)
+      continue;
+    const layout = byTable.get(tab.table);
+    if (!layout)
+      continue;
+    const column = columnOf.get(field._columnRef) ?? "";
+    const group = field._groupRef ? groupOf.get(field._groupRef) : undefined;
+    layout.fields.push({
+      column,
+      label: field.name,
+      section: group?.name,
+      place: group ? field.column_span === 2 ? "full width" : field.is_same_line ? "beside the field before it" : "starts a row" : undefined,
+      onForm: field.is_displayed !== false,
+      inGrid: field.is_displayed_grid !== false && !GRID_NOISE.has(column),
+      formSeq: field.seq_no ?? 0,
+      readOnly: !!field.is_read_only
+    });
+  }
+  for (const layout of byTable.values()) {
+    layout.fields.sort((a, b) => a.formSeq - b.formSeq);
+    layout.sections.sort((a, b) => a.seqNo - b.seqNo);
+  }
+  const byEntity = new Map;
+  for (const entity of model.entities) {
+    const layout = byTable.get(tableNameFor(entity));
+    if (layout)
+      byEntity.set(entity.name, layout);
+  }
+  return byEntity;
+}
+function workflowFor(model, entity) {
+  const workflows = model.workflows.filter((workflow) => workflow.entity === entity.name);
   if (workflows.length === 0)
     return "";
   return workflows.map((workflow) => {
@@ -23483,10 +30872,10 @@ ${rows}
   }).join(`
 `);
 }
-function rulesFor(model, entity2) {
-  const rules = model.rules.filter((rule2) => rule2.entity === entity2.name);
-  const hooks = model.hooks.filter((hook2) => hook2.entity === entity2.name);
-  const sagas = model.sagas.filter((saga) => saga.entity === entity2.name);
+function rulesFor(model, entity) {
+  const rules = model.rules.filter((rule) => rule.entity === entity.name);
+  const hooks = model.hooks.filter((hook) => hook.entity === entity.name);
+  const sagas = model.sagas.filter((saga) => saga.entity === entity.name);
   if (rules.length === 0 && hooks.length === 0 && sagas.length === 0)
     return "";
   const parts = ["      <h4>What happens when it is written</h4>"];
@@ -23494,13 +30883,13 @@ function rulesFor(model, entity2) {
     parts.push(`      <table>
         <thead><tr><th>Rule</th><th>Runs on</th><th>Order</th></tr></thead>
         <tbody>
-${rules.map((rule2) => `          <tr><td><code>${escapeHtml(rule2.name)}</code></td><td>${escapeHtml(rule2.event)} (${escapeHtml(rule2.operation)})</td><td>${rule2.priority}</td></tr>`).join(`
+${rules.map((rule) => `          <tr><td><code>${escapeHtml(rule.name)}</code></td><td>${escapeHtml(rule.event)} (${escapeHtml(rule.operation)})</td><td>${rule.priority}</td></tr>`).join(`
 `)}
         </tbody>
       </table>`);
   }
   if (hooks.length > 0) {
-    parts.push(`      <p><b>Handlers:</b> ${hooks.map((hook2) => `<code>${escapeHtml(hook2.type)}</code>${hook2.field ? ` on <code>${escapeHtml(hook2.field)}</code>` : ""}`).join(", ")}</p>`);
+    parts.push(`      <p><b>Handlers:</b> ${hooks.map((hook) => `<code>${escapeHtml(hook.type)}</code>${hook.field ? ` on <code>${escapeHtml(hook.field)}</code>` : ""}`).join(", ")}</p>`);
   }
   if (sagas.length > 0) {
     parts.push(`      <p><b>Processes:</b> ${sagas.map((saga) => `<a href="#process-${slug(saga.name)}">${escapeHtml(saga.name)}</a>`).join(", ")}</p>`);
@@ -23508,19 +30897,19 @@ ${rules.map((rule2) => `          <tr><td><code>${escapeHtml(rule2.name)}</code>
   return parts.join(`
 `);
 }
-function accessFor(model, entity2, visibility) {
-  const readers = visibility[entity2.name];
-  const rules = model.rbac.operations.filter((rule2) => rule2.entity === entity2.name);
+function accessFor(model, entity, visibility) {
+  const readers = visibility[entity.name];
+  const rules = model.rbac.operations.filter((rule) => rule.entity === entity.name);
   if (!readers && rules.length === 0)
     return "";
   const parts = ["      <h4>Who may use it</h4>"];
   parts.push(readers && readers.length > 0 ? `      <p>Visible to ${readers.map((role) => `<b>${escapeHtml(title2(role))}</b>`).join(", ")}, and to the Administrator. Nobody else sees it at all &mdash; it is absent from their menu rather than refused when opened.</p>` : "      <p>Visible to every signed-in user; the model places no restriction on reading it.</p>");
-  const writes = rules.filter((rule2) => rule2.operation !== "read");
+  const writes = rules.filter((rule) => rule.operation !== "read");
   if (writes.length > 0) {
     parts.push(`      <table>
         <thead><tr><th>Action</th><th>Permitted to</th></tr></thead>
         <tbody>
-${writes.map((rule2) => `          <tr><td>${escapeHtml(title2(rule2.operation))}</td><td>${rule2.roles.map((role) => escapeHtml(title2(role))).join(", ")}</td></tr>`).join(`
+${writes.map((rule) => `          <tr><td>${escapeHtml(title2(rule.operation))}</td><td>${rule.roles.map((role) => escapeHtml(title2(role))).join(", ")}</td></tr>`).join(`
 `)}
         </tbody>
       </table>`);
@@ -23533,7 +30922,7 @@ function renderManual(model, options) {
   const access = deriveAccess(model.rbac, {
     projectId: slug(options.name) || "app",
     adminEmail: options.adminEmail,
-    entities: model.entities.map((entity2) => entity2.name)
+    entities: model.entities.map((entity) => entity.name)
   });
   const categoryOf = new Map;
   for (const category of model.categories) {
@@ -23542,6 +30931,7 @@ function renderManual(model, options) {
   }
   const entities = [...model.entities].sort((a, b) => a.name.localeCompare(b.name));
   const declared = declaredNames(model);
+  const dictionary = manualDictionary(model);
   const contents = `
       <nav class="toc" aria-label="Contents">
         <h2>Contents</h2>
@@ -23550,35 +30940,37 @@ function renderManual(model, options) {
           <li><a href="#signing-in">Signing in, and what each role sees</a></li>
           <li><a href="#entities">The records it keeps</a>
             <ul>
-${entities.map((entity2) => `              <li><a href="#entity-${slug(entity2.name)}">${escapeHtml(title2(entity2.name))}</a></li>`).join(`
+${entities.map((entity) => `              <li><a href="#entity-${slug(entity.name)}">${escapeHtml(title2(entity.name))}</a></li>`).join(`
 `)}
             </ul>
           </li>
+          <li><a href="#concurrent-edits">When two people change the same record</a></li>
 ${model.rules.length ? `          <li><a href="#rules">The decisions it makes</a></li>
 ` : ""}${model.sagas.length ? `          <li><a href="#processes">The processes it runs</a></li>
 ` : ""}          <li><a href="#how-it-was-built">How this application was built</a></li>
         </ol>
       </nav>`;
-  const entitySections = entities.map((entity2) => {
-    const category = categoryOf.get(entity2.name);
-    return `    <section id="entity-${slug(entity2.name)}" class="entity">
-      <h3>${escapeHtml(title2(entity2.name))}${category ? ` <span class="group">${escapeHtml(category)}</span>` : ""}</h3>
-      <p class="lede">${entity2.description ? escapeHtml(entity2.description) : '<span class="missing">The model gives this entity no description. Add one with <code>%%entity ' + escapeHtml(entity2.name) + " help: …</code>.</span>"}</p>
-      <p class="meta">Stored as <code>${escapeHtml(tableNameFor(entity2))}</code>, keyed by <code>${escapeHtml(entity2.primaryKey || "id")}</code>.</p>
+  const entitySections = entities.map((entity) => {
+    const category = categoryOf.get(entity.name);
+    return `    <section id="entity-${slug(entity.name)}" class="entity">
+      <h3>${escapeHtml(title2(entity.name))}${category ? ` <span class="group">${escapeHtml(category)}</span>` : ""}</h3>
+      <p class="lede">${entity.description ? escapeHtml(entity.description) : '<span class="missing">The model gives this entity no description. Add one with <code>%%entity ' + escapeHtml(entity.name) + " help: …</code>.</span>"}</p>
+      <p class="meta">Stored as <code>${escapeHtml(tableNameFor(entity))}</code>, keyed by <code>${escapeHtml(entity.primaryKey || "id")}</code>.</p>
 
       <h4>Its fields</h4>
-${entity2.attributes.some((attribute) => attribute.description) ? "" : `      <p class="missing">No field here carries help text. Add it with <code>%%field ${escapeHtml(entity2.name)}.&lt;field&gt; help: …</code> and it appears in this column and in the application itself.</p>
+${entity.attributes.some((attribute) => attribute.description) ? "" : `      <p class="missing">No field here carries help text. Add it with <code>%%field ${escapeHtml(entity.name)}.&lt;field&gt; help: …</code> and it appears in this column and in the application itself.</p>
 `}      <table>
         <thead><tr><th>Field</th><th>Shown as</th><th></th><th>What it is for</th></tr></thead>
         <tbody>
-${fieldRows(entity2, declared)}
+${fieldRows(entity, declared)}
         </tbody>
       </table>
 ${[
-      relationshipsFor(model, entity2),
-      workflowFor(model, entity2),
-      rulesFor(model, entity2),
-      accessFor(model, entity2, access.entityVisibility)
+      screensFor(dictionary, entity),
+      relationshipsFor(model, entity),
+      workflowFor(model, entity),
+      rulesFor(model, entity),
+      accessFor(model, entity, access.entityVisibility)
     ].filter(Boolean).join(`
 `)}
       <p class="back"><a href="#top">Back to contents</a></p>
@@ -23592,7 +30984,7 @@ ${[
     <table>
       <thead><tr><th>Rule</th><th>Applies to</th><th>Runs on</th></tr></thead>
       <tbody>
-${model.rules.map((rule2) => `        <tr><td><code>${escapeHtml(rule2.name)}</code></td><td><a href="#entity-${slug(rule2.entity)}">${escapeHtml(title2(rule2.entity))}</a></td><td>${escapeHtml(rule2.event)}</td></tr>`).join(`
+${model.rules.map((rule) => `        <tr><td><code>${escapeHtml(rule.name)}</code></td><td><a href="#entity-${slug(rule.entity)}">${escapeHtml(title2(rule.entity))}</a></td><td>${escapeHtml(rule.event)}</td></tr>`).join(`
 `)}
       </tbody>
     </table>
@@ -23713,7 +31105,7 @@ ${contents}
 
   <section id="overview">
     <h2>What this application is</h2>
-${options.description && options.description !== "A generated full-stack application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
+${options.description && options.description !== "Generated application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
 ` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${model.categories.length ? `, grouped into ${model.categories.length} areas of the business` : ""}. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated from the same description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
 ${model.categories.length ? `    <table>
@@ -23746,6 +31138,22 @@ ${options.adminPassword ? `    <p>Every seeded account uses the password <code>$
 ${entitySections}
   </section>
 
+  <section id="concurrent-edits">
+    <h2>When two people change the same record</h2>
+    <p>Every record carries a version number, and every save raises it by one. When you open a record to edit it, the form remembers the version you opened. Saving sends that version back, and the save goes through only if nobody has saved the record since.</p>
+    <p>If somebody has, your save is not applied &mdash; neither of you loses a change without seeing it. The ${options.stack === "browser" ? "form shows a panel" : "form opens a dialog"} listing the fields the other person changed, with their value and yours side by side, and marks the fields you both changed. It offers three choices:</p>
+    <table>
+      <thead><tr><th>Choice</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Reload their version</td><td>Your unsaved edits are discarded and the form shows the record as it now stands.</td></tr>
+        <tr><td>Overwrite with mine</td><td>Your values are saved over theirs. It is checked again against the version you have just been shown, so a third person saving in the meantime is caught the same way.</td></tr>
+        <tr><td>Keep editing</td><td>Nothing is saved yet; the form stays open with your edits so you can change them first.</td></tr>
+      </tbody>
+    </table>
+    <p>Two saves of the same version arriving at the same moment cannot both win: exactly one is applied and the other is offered the same three choices.</p>
+    <p class="back"><a href="#top">Back to contents</a></p>
+  </section>
+
 ${rulesSection}
 
 ${processSection}
@@ -23774,149 +31182,149 @@ var t = Symbol(`FakerLocaleProxy`);
 var n = () => {
   throw new e(`You cannot edit the locale data on the faker instance`);
 };
-function r(e2) {
-  return typeof e2 == `object` && !!e2 && e2?.[t] === true;
+function r(e) {
+  return typeof e == `object` && !!e && e?.[t] === true;
 }
-function i(e2) {
-  if (r(e2))
-    return e2;
-  let i2 = { raw: e2 };
-  return new Proxy(e2, { has() {
+function i(e) {
+  if (r(e))
+    return e;
+  let i = { raw: e };
+  return new Proxy(e, { has() {
     return true;
-  }, get(e3, n2) {
-    return typeof n2 == `symbol` ? n2 === t || e3[n2] : n2 === `nodeType` ? e3[n2] : i2[n2] ??= o(n2, e3[n2]);
+  }, get(e, n) {
+    return typeof n == `symbol` ? n === t || e[n] : n === `nodeType` ? e[n] : i[n] ??= o(n, e[n]);
   }, set: n, deleteProperty: n });
 }
-function a(t2, ...n2) {
-  if (t2 === null)
-    throw new e(`The locale data for '${n2.join(`.`)}' aren't applicable to this locale.
+function a(t, ...n) {
+  if (t === null)
+    throw new e(`The locale data for '${n.join(`.`)}' aren't applicable to this locale.
   If you think this is a bug, please report it at: https://github.com/faker-js/faker`);
-  if (t2 === undefined)
-    throw new e(`The locale data for '${n2.join(`.`)}' are missing in this locale.
+  if (t === undefined)
+    throw new e(`The locale data for '${n.join(`.`)}' are missing in this locale.
   If this is a custom Faker instance, please make sure all required locales are used e.g. '[de_AT, de, en, base]'.
   Please contribute the missing data to the project or use a locale/Faker instance that has these data.
   For more information see https://fakerjs.dev/guide/localization.html`);
 }
-function o(e2, t2 = {}) {
-  return new Proxy(t2, { has(e3, t3) {
-    return e3[t3] != null;
-  }, get(t3, n2) {
-    let r2 = t3[n2];
-    return typeof n2 == `symbol` || n2 === `nodeType` || a(r2, e2, n2.toString()), r2;
+function o(e, t = {}) {
+  return new Proxy(t, { has(e, t) {
+    return e[t] != null;
+  }, get(t, n) {
+    let r = t[n];
+    return typeof n == `symbol` || n === `nodeType` || a(r, e, n.toString()), r;
   }, set: n, deleteProperty: n });
 }
-function s(e2) {
-  let t2 = {};
-  for (let n2 of e2)
-    for (let e3 in n2) {
-      let r2 = n2[e3];
-      t2[e3] === undefined ? t2[e3] = { ...r2 } : t2[e3] = { ...r2, ...t2[e3] };
+function s(e) {
+  let t = {};
+  for (let n of e)
+    for (let e in n) {
+      let r = n[e];
+      t[e] === undefined ? t[e] = { ...r } : t[e] = { ...r, ...t[e] };
     }
-  return t2;
+  return t;
 }
 var c = 2567483615;
 var l = 2 ** 31 - 1;
 var u = 2 ** 31;
 var { imul: d, trunc: f } = Math;
-function p(e2) {
-  return typeof e2 == `number` ? m(e2) : h(e2);
+function p(e) {
+  return typeof e == `number` ? m(e) : h(e);
 }
-function m(e2) {
-  let t2 = Array.from({ length: 624 });
-  t2[0] = e2;
-  for (let e3 = 1;e3 !== 624; ++e3) {
-    let n2 = t2[e3 - 1] ^ t2[e3 - 1] >>> 30;
-    t2[e3] = f(d(1812433253, n2) + e3);
+function m(e) {
+  let t = Array.from({ length: 624 });
+  t[0] = e;
+  for (let e = 1;e !== 624; ++e) {
+    let n = t[e - 1] ^ t[e - 1] >>> 30;
+    t[e] = f(d(1812433253, n) + e);
   }
-  return t2;
+  return t;
 }
-function h(e2) {
-  let t2 = m(19650218), n2 = 1, r2 = 0;
-  for (let i2 = Math.max(624, e2.length);i2 !== 0; --i2) {
-    let i3 = t2[n2 - 1] ^ t2[n2 - 1] >>> 30;
-    t2[n2] = f((t2[n2] ^ d(i3, 1664525)) + e2[r2] + r2), n2++, r2++, n2 >= 624 && (t2[0] = t2[623], n2 = 1), r2 >= e2.length && (r2 = 0);
+function h(e) {
+  let t = m(19650218), n = 1, r = 0;
+  for (let i = Math.max(624, e.length);i !== 0; --i) {
+    let i = t[n - 1] ^ t[n - 1] >>> 30;
+    t[n] = f((t[n] ^ d(i, 1664525)) + e[r] + r), n++, r++, n >= 624 && (t[0] = t[623], n = 1), r >= e.length && (r = 0);
   }
-  for (let e3 = 623;e3 !== 0; e3--)
-    t2[n2] = f((t2[n2] ^ d(t2[n2 - 1] ^ t2[n2 - 1] >>> 30, 1566083941)) - n2), n2++, n2 >= 624 && (t2[0] = t2[623], n2 = 1);
-  return t2[0] = 2147483648, t2;
+  for (let e = 623;e !== 0; e--)
+    t[n] = f((t[n] ^ d(t[n - 1] ^ t[n - 1] >>> 30, 1566083941)) - n), n++, n >= 624 && (t[0] = t[623], n = 1);
+  return t[0] = 2147483648, t;
 }
-function g(e2) {
-  for (let t3 = 0;t3 !== 227; ++t3) {
-    let n2 = (e2[t3] & u) + (e2[t3 + 1] & l);
-    e2[t3] = e2[t3 + 397] ^ n2 >>> 1 ^ -(n2 & 1) & c;
+function g(e) {
+  for (let t = 0;t !== 227; ++t) {
+    let n = (e[t] & u) + (e[t + 1] & l);
+    e[t] = e[t + 397] ^ n >>> 1 ^ -(n & 1) & c;
   }
-  for (let t3 = 227;t3 !== 623; ++t3) {
-    let n2 = (e2[t3] & u) + (e2[t3 + 1] & l);
-    e2[t3] = e2[t3 + 397 - 624] ^ n2 >>> 1 ^ -(n2 & 1) & c;
+  for (let t = 227;t !== 623; ++t) {
+    let n = (e[t] & u) + (e[t + 1] & l);
+    e[t] = e[t + 397 - 624] ^ n >>> 1 ^ -(n & 1) & c;
   }
-  let t2 = (e2[623] & u) + (e2[0] & l);
-  return e2[623] = e2[396] ^ t2 >>> 1 ^ -(t2 & 1) & c, e2;
+  let t = (e[623] & u) + (e[0] & l);
+  return e[623] = e[396] ^ t >>> 1 ^ -(t & 1) & c, e;
 }
 var _ = class {
   states;
   index;
-  constructor(e2 = Math.random() * (2 ** 53 - 1), t2 = g(p(e2)), n2 = 0) {
-    this.states = t2, this.index = n2;
+  constructor(e = Math.random() * (2 ** 53 - 1), t = g(p(e)), n = 0) {
+    this.states = t, this.index = n;
   }
   nextU32() {
-    let e2 = this.states[this.index];
-    return e2 ^= this.states[this.index] >>> 11, e2 ^= e2 << 7 & 2636928640, e2 ^= e2 << 15 & 4022730752, e2 ^= e2 >>> 18, ++this.index >= 624 && (this.states = g(this.states), this.index = 0), e2 >>> 0;
+    let e = this.states[this.index];
+    return e ^= this.states[this.index] >>> 11, e ^= e << 7 & 2636928640, e ^= e << 15 & 4022730752, e ^= e >>> 18, ++this.index >= 624 && (this.states = g(this.states), this.index = 0), e >>> 0;
   }
   nextF32() {
     return this.nextU32() * 0.00000000023283064365386963;
   }
   nextU53() {
-    let e2 = this.nextU32() >>> 5, t2 = this.nextU32() >>> 6;
-    return e2 * 67108864 + t2;
+    let e = this.nextU32() >>> 5, t = this.nextU32() >>> 6;
+    return e * 67108864 + t;
   }
   nextF53() {
     return this.nextU53() * 0.00000000000000011102230246251565;
   }
-  seed(e2) {
-    this.states = g(p(e2)), this.index = 0;
+  seed(e) {
+    this.states = g(p(e)), this.index = 0;
   }
 };
 function v() {
   return Math.ceil(Math.random() * (2 ** 53 - 1));
 }
-function y(e2 = v()) {
-  let t2 = new _(e2);
+function y(e = v()) {
+  let t = new _(e);
   return { next() {
-    return t2.nextF53();
-  }, seed(e3) {
-    t2.seed(e3);
+    return t.nextF53();
+  }, seed(e) {
+    t.seed(e);
   } };
 }
-function te(e2 = {}) {
-  let { locale: t2 = {}, randomizer: n2 = y(), config: r2 = {}, seed: a2 } = e2;
-  return n2 != null && a2 != null && n2.seed(a2), { locale: i(Array.isArray(t2) ? s(t2) : t2), randomizer: n2, config: r2 };
+function te(e = {}) {
+  let { locale: t = {}, randomizer: n = y(), config: r = {}, seed: a } = e;
+  return n != null && a != null && n.seed(a), { locale: i(Array.isArray(t) ? s(t) : t), randomizer: n, config: r };
 }
 function b() {
   return ne;
 }
-var ne = ({ next: e2 }) => e2();
-function re(e2) {
-  let t2 = Object.getPrototypeOf(e2);
+var ne = ({ next: e }) => e();
+function re(e) {
+  let t = Object.getPrototypeOf(e);
   do {
-    for (let n2 of Object.getOwnPropertyNames(t2))
-      typeof e2[n2] == `function` && n2 !== `constructor` && (e2[n2] = e2[n2].bind(e2));
-    t2 = Object.getPrototypeOf(t2);
-  } while (t2 !== Object.prototype);
+    for (let n of Object.getOwnPropertyNames(t))
+      typeof e[n] == `function` && n !== `constructor` && (e[n] = e[n].bind(e));
+    t = Object.getPrototypeOf(t);
+  } while (t !== Object.prototype);
 }
 var x = class {
   faker;
-  constructor(e2) {
-    this.faker = e2, re(this);
+  constructor(e) {
+    this.faker = e, re(this);
   }
 };
 var S = class extends x {
   faker;
-  constructor(e2) {
-    super(e2), this.faker = e2;
+  constructor(e) {
+    super(e), this.faker = e;
   }
 };
-var C = function(e2) {
-  return e2.Narrowbody = `narrowbody`, e2.Regional = `regional`, e2.Widebody = `widebody`, e2;
+var C = function(e) {
+  return e.Narrowbody = `narrowbody`, e.Regional = `regional`, e.Widebody = `widebody`, e;
 }({});
 var ie = [`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`];
 var ae = [`0`, `O`, `1`, `I`, `L`];
@@ -23932,20 +31340,20 @@ var ce = class extends S {
   airplane() {
     return this.faker.helpers.arrayElement(this.faker.definitions.airline.airplane);
   }
-  recordLocator(e2 = {}) {
-    let { allowNumerics: t2 = false, allowVisuallySimilarCharacters: n2 = false } = e2, r2 = [];
-    return t2 || r2.push(...ie), n2 || r2.push(...ae), this.faker.string.alphanumeric({ length: 6, casing: `upper`, exclude: r2 });
+  recordLocator(e = {}) {
+    let { allowNumerics: t = false, allowVisuallySimilarCharacters: n = false } = e, r = [];
+    return t || r.push(...ie), n || r.push(...ae), this.faker.string.alphanumeric({ length: 6, casing: `upper`, exclude: r });
   }
-  seat(e2 = {}) {
-    let { aircraftType: t2 = `narrowbody` } = e2, n2 = oe[t2], r2 = se[t2];
-    return `${this.faker.number.int({ min: 1, max: n2 })}${this.faker.helpers.arrayElement(r2)}`;
+  seat(e = {}) {
+    let { aircraftType: t = `narrowbody` } = e, n = oe[t], r = se[t];
+    return `${this.faker.number.int({ min: 1, max: n })}${this.faker.helpers.arrayElement(r)}`;
   }
   aircraftType() {
     return this.faker.helpers.enumValue(C);
   }
-  flightNumber(e2 = {}) {
-    let { length: t2 = { min: 1, max: 4 }, addLeadingZeros: n2 = false } = e2, r2 = this.faker.string.numeric({ length: t2, allowLeadingZeros: false });
-    return n2 ? r2.padStart(4, `0`) : r2;
+  flightNumber(e = {}) {
+    let { length: t = { min: 1, max: 4 }, addLeadingZeros: n = false } = e, r = this.faker.string.numeric({ length: t, allowLeadingZeros: false });
+    return n ? r.padStart(4, `0`) : r;
   }
 };
 var le = class extends S {
@@ -24018,67 +31426,67 @@ var ue = class extends S {
     return this.faker.helpers.arrayElement(this.faker.definitions.book.title);
   }
 };
-var w = function(e2) {
-  return e2.SRGB = `sRGB`, e2.DisplayP3 = `display-p3`, e2.REC2020 = `rec2020`, e2.A98RGB = `a98-rgb`, e2.ProphotoRGB = `prophoto-rgb`, e2;
+var w = function(e) {
+  return e.SRGB = `sRGB`, e.DisplayP3 = `display-p3`, e.REC2020 = `rec2020`, e.A98RGB = `a98-rgb`, e.ProphotoRGB = `prophoto-rgb`, e;
 }({});
-var T = function(e2) {
-  return e2.RGB = `rgb`, e2.RGBA = `rgba`, e2.HSL = `hsl`, e2.HSLA = `hsla`, e2.HWB = `hwb`, e2.CMYK = `cmyk`, e2.LAB = `lab`, e2.LCH = `lch`, e2.COLOR = `color`, e2;
+var T = function(e) {
+  return e.RGB = `rgb`, e.RGBA = `rgba`, e.HSL = `hsl`, e.HSLA = `hsla`, e.HWB = `hwb`, e.CMYK = `cmyk`, e.LAB = `lab`, e.LCH = `lch`, e.COLOR = `color`, e;
 }({});
-function de(e2, t2) {
-  let { prefix: n2, casing: r2 } = t2;
-  switch (r2) {
+function de(e, t) {
+  let { prefix: n, casing: r } = t;
+  switch (r) {
     case `upper`:
-      e2 = e2.toUpperCase();
+      e = e.toUpperCase();
       break;
     case `lower`:
-      e2 = e2.toLowerCase();
+      e = e.toLowerCase();
       break;
     case `mixed`:
   }
-  return n2 && (e2 = n2 + e2), e2;
+  return n && (e = n + e), e;
 }
-function E(e2) {
-  return e2.map((e3) => {
-    if (e3 % 1 != 0) {
-      let t2 = new ArrayBuffer(4);
-      return new DataView(t2).setFloat32(0, e3), E([...new Uint8Array(t2)]).replaceAll(` `, ``);
+function E(e) {
+  return e.map((e) => {
+    if (e % 1 != 0) {
+      let t = new ArrayBuffer(4);
+      return new DataView(t).setFloat32(0, e), E([...new Uint8Array(t)]).replaceAll(` `, ``);
     }
-    return (e3 >>> 0).toString(2).padStart(8, `0`);
+    return (e >>> 0).toString(2).padStart(8, `0`);
   }).join(` `);
 }
-function D(e2) {
-  return Math.round(e2 * 100);
+function D(e) {
+  return Math.round(e * 100);
 }
-function fe(e2, t2 = `rgb`, n2 = `sRGB`) {
-  switch (t2) {
+function fe(e, t = `rgb`, n = `sRGB`) {
+  switch (t) {
     case `rgba`:
-      return `rgba(${e2[0]}, ${e2[1]}, ${e2[2]}, ${e2[3]})`;
+      return `rgba(${e[0]}, ${e[1]}, ${e[2]}, ${e[3]})`;
     case `color`:
-      return `color(${n2} ${e2[0]} ${e2[1]} ${e2[2]})`;
+      return `color(${n} ${e[0]} ${e[1]} ${e[2]})`;
     case `cmyk`:
-      return `cmyk(${D(e2[0])}%, ${D(e2[1])}%, ${D(e2[2])}%, ${D(e2[3])}%)`;
+      return `cmyk(${D(e[0])}%, ${D(e[1])}%, ${D(e[2])}%, ${D(e[3])}%)`;
     case `hsl`:
-      return `hsl(${e2[0]}deg ${D(e2[1])}% ${D(e2[2])}%)`;
+      return `hsl(${e[0]}deg ${D(e[1])}% ${D(e[2])}%)`;
     case `hsla`:
-      return `hsl(${e2[0]}deg ${D(e2[1])}% ${D(e2[2])}% / ${e2[3]})`;
+      return `hsl(${e[0]}deg ${D(e[1])}% ${D(e[2])}% / ${e[3]})`;
     case `hwb`:
-      return `hwb(${e2[0]} ${D(e2[1])}% ${D(e2[2])}%)`;
+      return `hwb(${e[0]} ${D(e[1])}% ${D(e[2])}%)`;
     case `lab`:
-      return `lab(${D(e2[0])}% ${e2[1]} ${e2[2]})`;
+      return `lab(${D(e[0])}% ${e[1]} ${e[2]})`;
     case `lch`:
-      return `lch(${D(e2[0])}% ${e2[1]} ${e2[2]})`;
+      return `lch(${D(e[0])}% ${e[1]} ${e[2]})`;
     case `rgb`:
-      return `rgb(${e2[0]}, ${e2[1]}, ${e2[2]})`;
+      return `rgb(${e[0]}, ${e[1]}, ${e[2]})`;
   }
 }
-function O(e2, t2, n2 = `rgb`, r2 = `sRGB`) {
-  switch (t2) {
+function O(e, t, n = `rgb`, r = `sRGB`) {
+  switch (t) {
     case `css`:
-      return fe(e2, n2, r2);
+      return fe(e, n, r);
     case `binary`:
-      return E(e2);
+      return E(e);
     case `decimal`:
-      return e2;
+      return e;
   }
 }
 var pe = class extends S {
@@ -24094,51 +31502,51 @@ var pe = class extends S {
   cssSupportedSpace() {
     return this.faker.helpers.enumValue(w);
   }
-  rgb(e2 = {}) {
-    let { format: t2 = `hex`, includeAlpha: n2 = false, prefix: r2 = `#`, casing: i2 = `lower` } = e2, a2;
-    if (t2 === `hex`)
-      return a2 = this.faker.string.hexadecimal({ length: n2 ? 8 : 6, prefix: `` }), a2 = de(a2, { prefix: r2, casing: i2 }), a2;
-    let o2 = `rgb`;
-    return a2 = Array.from({ length: 3 }, () => this.faker.number.int(255)), n2 && (a2.push(this.faker.number.float({ multipleOf: 0.01 })), o2 = `rgba`), O(a2, t2, o2);
+  rgb(e = {}) {
+    let { format: t = `hex`, includeAlpha: n = false, prefix: r = `#`, casing: i = `lower` } = e, a;
+    if (t === `hex`)
+      return a = this.faker.string.hexadecimal({ length: n ? 8 : 6, prefix: `` }), a = de(a, { prefix: r, casing: i }), a;
+    let o = `rgb`;
+    return a = Array.from({ length: 3 }, () => this.faker.number.int(255)), n && (a.push(this.faker.number.float({ multipleOf: 0.01 })), o = `rgba`), O(a, t, o);
   }
-  cmyk(e2 = {}) {
-    let { format: t2 = `decimal` } = e2;
-    return O(Array.from({ length: 4 }, () => this.faker.number.float({ multipleOf: 0.01 })), t2, `cmyk`);
+  cmyk(e = {}) {
+    let { format: t = `decimal` } = e;
+    return O(Array.from({ length: 4 }, () => this.faker.number.float({ multipleOf: 0.01 })), t, `cmyk`);
   }
-  hsl(e2 = {}) {
-    let { format: t2 = `decimal`, includeAlpha: n2 = false } = e2, r2 = [this.faker.number.int(360)];
-    for (let t3 = 0;t3 < (e2?.includeAlpha ? 3 : 2); t3++)
-      r2.push(this.faker.number.float({ multipleOf: 0.01 }));
-    return O(r2, t2, n2 ? `hsla` : `hsl`);
+  hsl(e = {}) {
+    let { format: t = `decimal`, includeAlpha: n = false } = e, r = [this.faker.number.int(360)];
+    for (let t = 0;t < (e?.includeAlpha ? 3 : 2); t++)
+      r.push(this.faker.number.float({ multipleOf: 0.01 }));
+    return O(r, t, n ? `hsla` : `hsl`);
   }
-  hwb(e2 = {}) {
-    let { format: t2 = `decimal` } = e2, n2 = [this.faker.number.int(360)];
-    for (let e3 = 0;e3 < 2; e3++)
-      n2.push(this.faker.number.float({ multipleOf: 0.01 }));
-    return O(n2, t2, `hwb`);
+  hwb(e = {}) {
+    let { format: t = `decimal` } = e, n = [this.faker.number.int(360)];
+    for (let e = 0;e < 2; e++)
+      n.push(this.faker.number.float({ multipleOf: 0.01 }));
+    return O(n, t, `hwb`);
   }
-  lab(e2 = {}) {
-    let { format: t2 = `decimal` } = e2, n2 = [this.faker.number.float({ multipleOf: 0.000001 })];
-    for (let e3 = 0;e3 < 2; e3++)
-      n2.push(this.faker.number.float({ min: -100, max: 100, multipleOf: 0.0001 }));
-    return O(n2, t2, `lab`);
+  lab(e = {}) {
+    let { format: t = `decimal` } = e, n = [this.faker.number.float({ multipleOf: 0.000001 })];
+    for (let e = 0;e < 2; e++)
+      n.push(this.faker.number.float({ min: -100, max: 100, multipleOf: 0.0001 }));
+    return O(n, t, `lab`);
   }
-  lch(e2 = {}) {
-    let { format: t2 = `decimal` } = e2;
-    return O([this.faker.number.float({ multipleOf: 0.000001 }), this.faker.number.float({ max: 230, multipleOf: 0.1 }), this.faker.number.float({ max: 360, multipleOf: 0.1 })], t2, `lch`);
+  lch(e = {}) {
+    let { format: t = `decimal` } = e;
+    return O([this.faker.number.float({ multipleOf: 0.000001 }), this.faker.number.float({ max: 230, multipleOf: 0.1 }), this.faker.number.float({ max: 360, multipleOf: 0.1 })], t, `lch`);
   }
-  colorByCSSColorSpace(e2 = {}) {
-    let { format: t2 = `decimal`, space: n2 = `sRGB` } = e2;
-    return O(Array.from({ length: 3 }, () => this.faker.number.float({ multipleOf: 0.0001 })), t2, `color`, n2);
+  colorByCSSColorSpace(e = {}) {
+    let { format: t = `decimal`, space: n = `sRGB` } = e;
+    return O(Array.from({ length: 3 }, () => this.faker.number.float({ multipleOf: 0.0001 })), t, `color`, n);
   }
 };
-function me(t2) {
-  if (!/^\d{11}$/.test(t2))
+function me(t) {
+  if (!/^\d{11}$/.test(t))
     throw new e(`calculateUPCCheckDigit expects exactly 11 numeric digits`);
-  let n2 = 0, r2 = 0;
-  for (let e2 of t2)
-    n2 += Number.parseInt(e2, 10) * (r2 % 2 == 0 ? 3 : 1), r2++;
-  return (10 - n2 % 10) % 10;
+  let n = 0, r = 0;
+  for (let e of t)
+    n += Number.parseInt(e, 10) * (r % 2 == 0 ? 3 : 1), r++;
+  return (10 - n % 10) % 10;
 }
 var he = { 0: [[1999999, 2], [2279999, 3], [2289999, 4], [3689999, 3], [3699999, 4], [6389999, 3], [6397999, 4], [6399999, 7], [6449999, 3], [6459999, 7], [6479999, 3], [6489999, 7], [6549999, 3], [6559999, 4], [6999999, 3], [8499999, 4], [8999999, 5], [9499999, 6], [9999999, 7]], 1: [[99999, 3], [299999, 2], [349999, 3], [399999, 4], [499999, 3], [699999, 2], [999999, 4], [3979999, 3], [5499999, 4], [6499999, 5], [6799999, 4], [6859999, 5], [7139999, 4], [7169999, 3], [7319999, 4], [7399999, 7], [7749999, 5], [7753999, 7], [7763999, 5], [7764999, 7], [7769999, 5], [7782999, 7], [7899999, 5], [7999999, 4], [8004999, 5], [8049999, 5], [8379999, 5], [8384999, 7], [8671999, 5], [8675999, 4], [8697999, 5], [9159999, 6], [9165059, 7], [9168699, 6], [9169079, 7], [9195999, 6], [9196549, 7], [9729999, 6], [9877999, 4], [9911499, 6], [9911999, 7], [9989899, 6], [9999999, 7]] };
 var ge = class extends S {
@@ -24146,20 +31554,20 @@ var ge = class extends S {
     return this.faker.helpers.arrayElement(this.faker.definitions.commerce.department);
   }
   productName() {
-    let e2 = this.faker.definitions.commerce.product_name.pattern;
-    return this.faker.helpers.fake(e2);
+    let e = this.faker.definitions.commerce.product_name.pattern;
+    return this.faker.helpers.fake(e);
   }
-  price(e2 = {}) {
-    let { dec: t2 = 2, max: n2 = 1000, min: r2 = 1, symbol: i2 = `` } = e2;
-    if (r2 < 0 || n2 < 0)
-      return `${i2}0`;
-    if (r2 === n2)
-      return `${i2}${r2.toFixed(t2)}`;
-    let a2 = this.faker.number.float({ min: r2, max: n2, fractionDigits: t2 });
-    if (t2 === 0)
-      return `${i2}${a2.toFixed(t2)}`;
-    let o2 = a2 * 10 ** t2 % 10, s2 = this.faker.helpers.weightedArrayElement([{ weight: 5, value: 9 }, { weight: 3, value: 5 }, { weight: 1, value: 0 }, { weight: 1, value: this.faker.number.int({ min: 0, max: 9 }) }]), c2 = (1 / 10) ** t2, l2 = o2 * c2, u2 = s2 * c2, d2 = a2 - l2 + u2;
-    return r2 <= d2 && d2 <= n2 ? `${i2}${d2.toFixed(t2)}` : `${i2}${a2.toFixed(t2)}`;
+  price(e = {}) {
+    let { dec: t = 2, max: n = 1000, min: r = 1, symbol: i = `` } = e;
+    if (r < 0 || n < 0)
+      return `${i}0`;
+    if (r === n)
+      return `${i}${r.toFixed(t)}`;
+    let a = this.faker.number.float({ min: r, max: n, fractionDigits: t });
+    if (t === 0)
+      return `${i}${a.toFixed(t)}`;
+    let o = a * 10 ** t % 10, s = this.faker.helpers.weightedArrayElement([{ weight: 5, value: 9 }, { weight: 3, value: 5 }, { weight: 1, value: 0 }, { weight: 1, value: this.faker.number.int({ min: 0, max: 9 }) }]), c = (1 / 10) ** t, l = o * c, u = s * c, d = a - l + u;
+    return r <= d && d <= n ? `${i}${d.toFixed(t)}` : `${i}${a.toFixed(t)}`;
   }
   productAdjective() {
     return this.faker.helpers.arrayElement(this.faker.definitions.commerce.product_name.adjective);
@@ -24173,28 +31581,28 @@ var ge = class extends S {
   productDescription() {
     return this.faker.helpers.fake(this.faker.definitions.commerce.product_description);
   }
-  isbn(t2 = {}) {
-    typeof t2 == `number` && (t2 = { variant: t2 });
-    let { variant: n2 = 13, separator: r2 = `-` } = t2, [i2, a2] = this.faker.helpers.objectEntry(he), o2 = this.faker.string.numeric(8), s2 = Number.parseInt(o2.slice(0, -1)), c2 = a2.find(([e2]) => s2 <= e2)?.[1];
-    if (!c2)
-      throw new e(`Unable to find a registrant length for the group ${i2}`);
-    let l2 = [`978`, i2, o2.slice(0, c2), o2.slice(c2)];
-    n2 === 10 && l2.shift();
-    let u2 = l2.join(``), d2 = 0;
-    for (let e2 = 0;e2 < n2 - 1; e2++) {
-      let t3 = n2 === 10 ? e2 + 1 : e2 % 2 ? 3 : 1;
-      d2 += t3 * Number.parseInt(u2[e2]);
+  isbn(t = {}) {
+    typeof t == `number` && (t = { variant: t });
+    let { variant: n = 13, separator: r = `-` } = t, [i, a] = this.faker.helpers.objectEntry(he), o = this.faker.string.numeric(8), s = Number.parseInt(o.slice(0, -1)), c = a.find(([e]) => s <= e)?.[1];
+    if (!c)
+      throw new e(`Unable to find a registrant length for the group ${i}`);
+    let l = [`978`, i, o.slice(0, c), o.slice(c)];
+    n === 10 && l.shift();
+    let u = l.join(``), d = 0;
+    for (let e = 0;e < n - 1; e++) {
+      let t = n === 10 ? e + 1 : e % 2 ? 3 : 1;
+      d += t * Number.parseInt(u[e]);
     }
-    return d2 = n2 === 10 ? d2 % 11 : (10 - d2 % 10) % 10, l2.push(d2 === 10 ? `X` : d2.toString()), l2.join(r2);
+    return d = n === 10 ? d % 11 : (10 - d % 10) % 10, l.push(d === 10 ? `X` : d.toString()), l.join(r);
   }
-  upc(t2 = {}) {
-    let { prefix: n2 = `` } = t2;
-    if (n2 && /\D/.test(n2))
+  upc(t = {}) {
+    let { prefix: n = `` } = t;
+    if (n && /\D/.test(n))
       throw new e(`Prefix must contain only numeric digits`);
-    if (n2.length > 11)
+    if (n.length > 11)
       throw new e(`Prefix must be at most 11 numeric digits`);
-    let r2 = 11 - n2.length, i2 = `${n2}${this.faker.string.numeric({ length: r2, allowLeadingZeros: true })}`;
-    return `${i2}${me(i2)}`;
+    let r = 11 - n.length, i = `${n}${this.faker.string.numeric({ length: r, allowLeadingZeros: true })}`;
+    return `${i}${me(i)}`;
   }
 };
 var _e = class extends S {
@@ -24243,147 +31651,147 @@ var ve = class extends S {
     return this.faker.string.hexadecimal({ length: 24, casing: `lower`, prefix: `` });
   }
 };
-function k(t2, n2 = `refDate`) {
-  let r2 = new Date(t2);
-  if (Number.isNaN(r2.valueOf()))
-    throw new e(`Invalid ${n2} date: ${t2.toString()}`);
-  return r2;
+function k(t, n = `refDate`) {
+  let r = new Date(t);
+  if (Number.isNaN(r.valueOf()))
+    throw new e(`Invalid ${n} date: ${t.toString()}`);
+  return r;
 }
 var A = class extends x {
-  anytime(e2 = {}) {
-    let { refDate: t2 = this.faker.defaultRefDate() } = e2, n2 = k(t2).getTime();
-    return this.between({ from: n2 - 1000 * 60 * 60 * 24 * 365, to: n2 + 1000 * 60 * 60 * 24 * 365 });
+  anytime(e = {}) {
+    let { refDate: t = this.faker.defaultRefDate() } = e, n = k(t).getTime();
+    return this.between({ from: n - 1000 * 60 * 60 * 24 * 365, to: n + 1000 * 60 * 60 * 24 * 365 });
   }
-  past(t2 = {}) {
-    let { refDate: n2 = this.faker.defaultRefDate() } = t2, { years: r2 = 1 } = t2;
-    if (typeof r2 == `number` && (r2 = { min: 0, max: r2 }), r2.max <= 0)
+  past(t = {}) {
+    let { refDate: n = this.faker.defaultRefDate() } = t, { years: r = 1 } = t;
+    if (typeof r == `number` && (r = { min: 0, max: r }), r.max <= 0)
       throw new e(`Years must be greater than 0.`);
-    if (r2.min >= r2.max)
+    if (r.min >= r.max)
       throw new e(`The maximum amount of years must be greater than the minimum amount of years.`);
-    let i2 = k(n2), a2 = new Date(i2);
-    a2.setUTCFullYear(a2.getUTCFullYear() - r2.max);
-    let o2 = new Date(i2);
-    return o2.setUTCFullYear(o2.getUTCFullYear() - r2.min), this.between({ from: a2, to: o2.getTime() - 1000 });
+    let i = k(n), a = new Date(i);
+    a.setUTCFullYear(a.getUTCFullYear() - r.max);
+    let o = new Date(i);
+    return o.setUTCFullYear(o.getUTCFullYear() - r.min), this.between({ from: a, to: o.getTime() - 1000 });
   }
-  future(t2 = {}) {
-    let { refDate: n2 = this.faker.defaultRefDate() } = t2, { years: r2 = 1 } = t2;
-    if (typeof r2 == `number` && (r2 = { min: 0, max: r2 }), r2.max <= 0)
+  future(t = {}) {
+    let { refDate: n = this.faker.defaultRefDate() } = t, { years: r = 1 } = t;
+    if (typeof r == `number` && (r = { min: 0, max: r }), r.max <= 0)
       throw new e(`Years must be greater than 0.`);
-    if (r2.min >= r2.max)
+    if (r.min >= r.max)
       throw new e(`The maximum amount of years must be greater than the minimum amount of years.`);
-    let i2 = k(n2), a2 = new Date(i2);
-    a2.setUTCFullYear(a2.getUTCFullYear() + r2.min);
-    let o2 = new Date(i2);
-    return o2.setUTCFullYear(o2.getUTCFullYear() + r2.max), this.between({ from: a2.getTime() + 1000, to: o2 });
+    let i = k(n), a = new Date(i);
+    a.setUTCFullYear(a.getUTCFullYear() + r.min);
+    let o = new Date(i);
+    return o.setUTCFullYear(o.getUTCFullYear() + r.max), this.between({ from: a.getTime() + 1000, to: o });
   }
-  between(t2) {
-    let { from: n2, to: r2 } = t2, i2 = k(n2, `from`).getTime(), a2 = k(r2, `to`).getTime();
-    if (i2 > a2)
+  between(t) {
+    let { from: n, to: r } = t, i = k(n, `from`).getTime(), a = k(r, `to`).getTime();
+    if (i > a)
       throw new e("`from` date must be before `to` date.");
-    return new Date(this.faker.number.int({ min: i2, max: a2 }));
+    return new Date(this.faker.number.int({ min: i, max: a }));
   }
-  betweens(e2) {
-    let { from: t2, to: n2, count: r2 = 3 } = e2;
-    return this.faker.helpers.multiple(() => this.between({ from: t2, to: n2 }), { count: r2 }).toSorted((e3, t3) => e3.getTime() - t3.getTime());
+  betweens(e) {
+    let { from: t, to: n, count: r = 3 } = e;
+    return this.faker.helpers.multiple(() => this.between({ from: t, to: n }), { count: r }).toSorted((e, t) => e.getTime() - t.getTime());
   }
-  recent(t2 = {}) {
-    let { refDate: n2 = this.faker.defaultRefDate() } = t2, { days: r2 = 1 } = t2;
-    if (typeof r2 == `number` && (r2 = { min: 0, max: r2 }), r2.max <= 0)
+  recent(t = {}) {
+    let { refDate: n = this.faker.defaultRefDate() } = t, { days: r = 1 } = t;
+    if (typeof r == `number` && (r = { min: 0, max: r }), r.max <= 0)
       throw new e(`Days must be greater than 0.`);
-    if (r2.min >= r2.max)
+    if (r.min >= r.max)
       throw new e(`The maximum amount of days must be greater than the minimum amount of days.`);
-    let i2 = k(n2), a2 = new Date(i2);
-    a2.setUTCDate(a2.getUTCDate() - r2.max);
-    let o2 = new Date(i2);
-    return o2.setUTCDate(o2.getUTCDate() - r2.min), this.between({ from: a2, to: o2.getTime() - 1000 });
+    let i = k(n), a = new Date(i);
+    a.setUTCDate(a.getUTCDate() - r.max);
+    let o = new Date(i);
+    return o.setUTCDate(o.getUTCDate() - r.min), this.between({ from: a, to: o.getTime() - 1000 });
   }
-  soon(t2 = {}) {
-    let { refDate: n2 = this.faker.defaultRefDate() } = t2, { days: r2 = 1 } = t2;
-    if (typeof r2 == `number` && (r2 = { min: 0, max: r2 }), r2.max <= 0)
+  soon(t = {}) {
+    let { refDate: n = this.faker.defaultRefDate() } = t, { days: r = 1 } = t;
+    if (typeof r == `number` && (r = { min: 0, max: r }), r.max <= 0)
       throw new e(`Days must be greater than 0.`);
-    if (r2.min >= r2.max)
+    if (r.min >= r.max)
       throw new e(`The maximum amount of days must be greater than the minimum amount of days.`);
-    let i2 = k(n2), a2 = new Date(i2);
-    a2.setUTCDate(a2.getUTCDate() + r2.min);
-    let o2 = new Date(i2);
-    return o2.setUTCDate(o2.getUTCDate() + r2.max), this.between({ from: a2.getTime() + 1000, to: o2 });
+    let i = k(n), a = new Date(i);
+    a.setUTCDate(a.getUTCDate() + r.min);
+    let o = new Date(i);
+    return o.setUTCDate(o.getUTCDate() + r.max), this.between({ from: a.getTime() + 1000, to: o });
   }
-  birthdate(t2 = {}) {
-    let { mode: n2 = `age`, min: r2 = 18, max: i2 = 80, refDate: a2 = this.faker.defaultRefDate() } = t2, o2 = k(a2), s2 = o2.getUTCFullYear();
-    switch (n2) {
+  birthdate(t = {}) {
+    let { mode: n = `age`, min: r = 18, max: i = 80, refDate: a = this.faker.defaultRefDate() } = t, o = k(a), s = o.getUTCFullYear();
+    switch (n) {
       case `age`: {
-        let t3 = new Date(o2).setUTCFullYear(s2 - i2 - 1) + 1440 * 60 * 1000, n3 = new Date(o2).setUTCFullYear(s2 - r2);
-        if (t3 > n3)
-          throw new e(`Max age ${i2} should be greater than or equal to min age ${r2}.`);
-        return this.between({ from: t3, to: n3 });
+        let t = new Date(o).setUTCFullYear(s - i - 1) + 1440 * 60 * 1000, n = new Date(o).setUTCFullYear(s - r);
+        if (t > n)
+          throw new e(`Max age ${i} should be greater than or equal to min age ${r}.`);
+        return this.between({ from: t, to: n });
       }
       case `year`: {
-        let t3 = new Date(Date.UTC(0, 0, 2)).setUTCFullYear(r2), n3 = new Date(Date.UTC(0, 11, 30)).setUTCFullYear(i2);
-        if (t3 > n3)
-          throw new e(`Max year ${i2} should be greater than or equal to min year ${r2}.`);
-        return this.between({ from: t3, to: n3 });
+        let t = new Date(Date.UTC(0, 0, 2)).setUTCFullYear(r), n = new Date(Date.UTC(0, 11, 30)).setUTCFullYear(i);
+        if (t > n)
+          throw new e(`Max year ${i} should be greater than or equal to min year ${r}.`);
+        return this.between({ from: t, to: n });
       }
     }
   }
 };
 var ye = class extends A {
   faker;
-  constructor(e2) {
-    super(e2), this.faker = e2;
+  constructor(e) {
+    super(e), this.faker = e;
   }
-  month(e2 = {}) {
-    let { abbreviated: t2 = false, context: n2 = false } = e2, r2 = this.faker.definitions.date.month, i2;
-    i2 = t2 ? n2 && r2.abbr_context != null ? `abbr_context` : `abbr` : n2 && r2.wide_context != null ? `wide_context` : `wide`;
-    let o2 = r2[i2];
-    return a(o2, `date.month`, i2), this.faker.helpers.arrayElement(o2);
+  month(e = {}) {
+    let { abbreviated: t = false, context: n = false } = e, r = this.faker.definitions.date.month, i;
+    i = t ? n && r.abbr_context != null ? `abbr_context` : `abbr` : n && r.wide_context != null ? `wide_context` : `wide`;
+    let o = r[i];
+    return a(o, `date.month`, i), this.faker.helpers.arrayElement(o);
   }
-  weekday(e2 = {}) {
-    let { abbreviated: t2 = false, context: n2 = false } = e2, r2 = this.faker.definitions.date.weekday, i2;
-    i2 = t2 ? n2 && r2.abbr_context != null ? `abbr_context` : `abbr` : n2 && r2.wide_context != null ? `wide_context` : `wide`;
-    let o2 = r2[i2];
-    return a(o2, `date.weekday`, i2), this.faker.helpers.arrayElement(o2);
+  weekday(e = {}) {
+    let { abbreviated: t = false, context: n = false } = e, r = this.faker.definitions.date.weekday, i;
+    i = t ? n && r.abbr_context != null ? `abbr_context` : `abbr` : n && r.wide_context != null ? `wide_context` : `wide`;
+    let o = r[i];
+    return a(o, `date.weekday`, i), this.faker.helpers.arrayElement(o);
   }
   timeZone() {
     return this.faker.helpers.arrayElement(this.faker.definitions.date.time_zone);
   }
 };
-var j = function(e2) {
-  return e2.Legacy = `legacy`, e2.Segwit = `segwit`, e2.Bech32 = `bech32`, e2.Taproot = `taproot`, e2;
+var j = function(e) {
+  return e.Legacy = `legacy`, e.Segwit = `segwit`, e.Bech32 = `bech32`, e.Taproot = `taproot`, e;
 }({});
-var be = function(e2) {
-  return e2.Mainnet = `mainnet`, e2.Testnet = `testnet`, e2;
+var be = function(e) {
+  return e.Mainnet = `mainnet`, e.Testnet = `testnet`, e;
 }({});
 var xe = { legacy: { prefix: { mainnet: `1`, testnet: `m` }, length: { min: 26, max: 34 }, casing: `mixed`, exclude: `0OIl` }, segwit: { prefix: { mainnet: `3`, testnet: `2` }, length: { min: 26, max: 34 }, casing: `mixed`, exclude: `0OIl` }, bech32: { prefix: { mainnet: `bc1`, testnet: `tb1` }, length: { min: 42, max: 42 }, casing: `lower`, exclude: `1bBiIoO` }, taproot: { prefix: { mainnet: `bc1p`, testnet: `tb1p` }, length: { min: 62, max: 62 }, casing: `lower`, exclude: `1bBiIoO` } };
-var M = { alpha: `ABCDEFGHIJKLMNOPQRSTUVWXYZ`.split(``), formats: [{ country: `AL`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `c`, count: 16 }], format: `ALkk bbbs sssx cccc cccc cccc cccc` }, { country: `AD`, total: 24, bban: [{ type: `n`, count: 8 }, { type: `c`, count: 12 }], format: `ADkk bbbb ssss cccc cccc cccc` }, { country: `AT`, total: 20, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 11 }], format: `ATkk bbbb bccc cccc cccc` }, { country: `AZ`, total: 28, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 20 }], format: `AZkk bbbb cccc cccc cccc cccc cccc` }, { country: `BH`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 14 }], format: `BHkk bbbb cccc cccc cccc cc` }, { country: `BE`, total: 16, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 9 }], format: `BEkk bbbc cccc ccxx` }, { country: `BA`, total: 20, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 10 }], format: `BAkk bbbs sscc cccc ccxx` }, { country: `BR`, total: 29, bban: [{ type: `n`, count: 13 }, { type: `n`, count: 10 }, { type: `a`, count: 1 }, { type: `c`, count: 1 }], format: `BRkk bbbb bbbb ssss sccc cccc ccct n` }, { country: `BG`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 6 }, { type: `c`, count: 8 }], format: `BGkk bbbb ssss ddcc cccc cc` }, { country: `CR`, total: 22, bban: [{ type: `n`, count: 1 }, { type: `n`, count: 3 }, { type: `n`, count: 14 }], format: `CRkk xbbb cccc cccc cccc cc` }, { country: `HR`, total: 21, bban: [{ type: `n`, count: 7 }, { type: `n`, count: 10 }], format: `HRkk bbbb bbbc cccc cccc c` }, { country: `CY`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `c`, count: 16 }], format: `CYkk bbbs ssss cccc cccc cccc cccc` }, { country: `CZ`, total: 24, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 10 }], format: `CZkk bbbb ssss sscc cccc cccc` }, { country: `DK`, total: 18, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 10 }], format: `DKkk bbbb cccc cccc cc` }, { country: `DO`, total: 28, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 20 }], format: `DOkk bbbb cccc cccc cccc cccc cccc` }, { country: `TL`, total: 23, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 16 }], format: `TLkk bbbc cccc cccc cccc cxx` }, { country: `EE`, total: 20, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 12 }], format: `EEkk bbss cccc cccc cccx` }, { country: `FO`, total: 18, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 10 }], format: `FOkk bbbb cccc cccc cx` }, { country: `FI`, total: 18, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 8 }], format: `FIkk bbbb bbcc cccc cx` }, { country: `FR`, total: 27, bban: [{ type: `n`, count: 10 }, { type: `c`, count: 11 }, { type: `n`, count: 2 }], format: `FRkk bbbb bggg ggcc cccc cccc cxx` }, { country: `GE`, total: 22, bban: [{ type: `a`, count: 2 }, { type: `n`, count: 16 }], format: `GEkk bbcc cccc cccc cccc cc` }, { country: `DE`, total: 22, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 10 }], format: `DEkk bbbb bbbb cccc cccc cc` }, { country: `GI`, total: 23, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 15 }], format: `GIkk bbbb cccc cccc cccc ccc` }, { country: `GR`, total: 27, bban: [{ type: `n`, count: 7 }, { type: `c`, count: 16 }], format: `GRkk bbbs sssc cccc cccc cccc ccc` }, { country: `GL`, total: 18, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 10 }], format: `GLkk bbbb cccc cccc cc` }, { country: `GT`, total: 28, bban: [{ type: `c`, count: 4 }, { type: `c`, count: 4 }, { type: `c`, count: 16 }], format: `GTkk bbbb mmtt cccc cccc cccc cccc` }, { country: `HU`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 16 }], format: `HUkk bbbs sssk cccc cccc cccc cccx` }, { country: `IS`, total: 26, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 16 }], format: `ISkk bbbb sscc cccc iiii iiii ii` }, { country: `IE`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 6 }, { type: `n`, count: 8 }], format: `IEkk aaaa bbbb bbcc cccc cc` }, { country: `IL`, total: 23, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 13 }], format: `ILkk bbbn nncc cccc cccc ccc` }, { country: `IR`, total: 26, bban: [{ type: `n`, count: 22 }], format: `IRkk bbbb cccc cccc cccc cccc cc` }, { country: `IT`, total: 27, bban: [{ type: `a`, count: 1 }, { type: `n`, count: 10 }, { type: `c`, count: 12 }], format: `ITkk xaaa aabb bbbc cccc cccc ccc` }, { country: `JO`, total: 30, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 4 }, { type: `n`, count: 18 }], format: `JOkk bbbb nnnn cccc cccc cccc cccc cc` }, { country: `KZ`, total: 20, bban: [{ type: `n`, count: 3 }, { type: `c`, count: 13 }], format: `KZkk bbbc cccc cccc cccc` }, { country: `XK`, total: 20, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 12 }], format: `XKkk bbbb cccc cccc cccc` }, { country: `KW`, total: 30, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 22 }], format: `KWkk bbbb cccc cccc cccc cccc cccc cc` }, { country: `LV`, total: 21, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 13 }], format: `LVkk bbbb cccc cccc cccc c` }, { country: `LB`, total: 28, bban: [{ type: `n`, count: 4 }, { type: `c`, count: 20 }], format: `LBkk bbbb cccc cccc cccc cccc cccc` }, { country: `LI`, total: 21, bban: [{ type: `n`, count: 5 }, { type: `c`, count: 12 }], format: `LIkk bbbb bccc cccc cccc c` }, { country: `LT`, total: 20, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 11 }], format: `LTkk bbbb bccc cccc cccc` }, { country: `LU`, total: 20, bban: [{ type: `n`, count: 3 }, { type: `c`, count: 13 }], format: `LUkk bbbc cccc cccc cccc` }, { country: `MK`, total: 19, bban: [{ type: `n`, count: 3 }, { type: `c`, count: 10 }, { type: `n`, count: 2 }], format: `MKkk bbbc cccc cccc cxx` }, { country: `MT`, total: 31, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 5 }, { type: `c`, count: 18 }], format: `MTkk bbbb ssss sccc cccc cccc cccc ccc` }, { country: `MR`, total: 27, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 13 }], format: `MRkk bbbb bsss sscc cccc cccc cxx` }, { country: `MU`, total: 30, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 4 }, { type: `n`, count: 15 }, { type: `a`, count: 3 }], format: `MUkk bbbb bbss cccc cccc cccc 000d dd` }, { country: `MC`, total: 27, bban: [{ type: `n`, count: 10 }, { type: `c`, count: 11 }, { type: `n`, count: 2 }], format: `MCkk bbbb bsss sscc cccc cccc cxx` }, { country: `MD`, total: 24, bban: [{ type: `c`, count: 2 }, { type: `c`, count: 18 }], format: `MDkk bbcc cccc cccc cccc cccc` }, { country: `ME`, total: 22, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 15 }], format: `MEkk bbbc cccc cccc cccc xx` }, { country: `NL`, total: 18, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 10 }], format: `NLkk bbbb cccc cccc cc` }, { country: `NO`, total: 15, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 7 }], format: `NOkk bbbb cccc ccx` }, { country: `PK`, total: 24, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 16 }], format: `PKkk bbbb cccc cccc cccc cccc` }, { country: `PS`, total: 29, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 9 }, { type: `n`, count: 12 }], format: `PSkk bbbb xxxx xxxx xccc cccc cccc c` }, { country: `PL`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 16 }], format: `PLkk bbbs sssx cccc cccc cccc cccc` }, { country: `PT`, total: 25, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 13 }], format: `PTkk bbbb ssss cccc cccc cccx x` }, { country: `QA`, total: 29, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 21 }], format: `QAkk bbbb cccc cccc cccc cccc cccc c` }, { country: `RO`, total: 24, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 16 }], format: `ROkk bbbb cccc cccc cccc cccc` }, { country: `SM`, total: 27, bban: [{ type: `a`, count: 1 }, { type: `n`, count: 10 }, { type: `c`, count: 12 }], format: `SMkk xaaa aabb bbbc cccc cccc ccc` }, { country: `SA`, total: 24, bban: [{ type: `n`, count: 2 }, { type: `c`, count: 18 }], format: `SAkk bbcc cccc cccc cccc cccc` }, { country: `RS`, total: 22, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 15 }], format: `RSkk bbbc cccc cccc cccc xx` }, { country: `SK`, total: 24, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 10 }], format: `SKkk bbbb ssss sscc cccc cccc` }, { country: `SI`, total: 19, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 10 }], format: `SIkk bbss sccc cccc cxx` }, { country: `ES`, total: 24, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 10 }], format: `ESkk bbbb gggg xxcc cccc cccc` }, { country: `SE`, total: 24, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 17 }], format: `SEkk bbbc cccc cccc cccc cccc` }, { country: `CH`, total: 21, bban: [{ type: `n`, count: 5 }, { type: `c`, count: 12 }], format: `CHkk bbbb bccc cccc cccc c` }, { country: `TN`, total: 24, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 15 }], format: `TNkk bbss sccc cccc cccc cccc` }, { country: `TR`, total: 26, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 1 }, { type: `n`, count: 16 }], format: `TRkk bbbb bxcc cccc cccc cccc cc` }, { country: `AE`, total: 23, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 16 }], format: `AEkk bbbc cccc cccc cccc ccc` }, { country: `GB`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 6 }, { type: `n`, count: 8 }], format: `GBkk bbbb ssss sscc cccc cc` }, { country: `VG`, total: 24, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 16 }], format: `VGkk bbbb cccc cccc cccc cccc` }], iso3166: `AD.AE.AF.AG.AI.AL.AM.AO.AQ.AR.AS.AT.AU.AW.AX.AZ.BA.BB.BD.BE.BF.BG.BH.BI.BJ.BL.BM.BN.BO.BQ.BR.BS.BT.BV.BW.BY.BZ.CA.CC.CD.CF.CG.CH.CI.CK.CL.CM.CN.CO.CR.CU.CV.CW.CX.CY.CZ.DE.DJ.DK.DM.DO.DZ.EC.EE.EG.EH.ER.ES.ET.FI.FJ.FK.FM.FO.FR.GA.GB.GD.GE.GF.GG.GH.GI.GL.GM.GN.GP.GQ.GR.GS.GT.GU.GW.GY.HK.HM.HN.HR.HT.HU.ID.IE.IL.IM.IN.IO.IQ.IR.IS.IT.JE.JM.JO.JP.KE.KG.KH.KI.KM.KN.KP.KR.KW.KY.KZ.LA.LB.LC.LI.LK.LR.LS.LT.LU.LV.LY.MA.MC.MD.ME.MF.MG.MH.MK.ML.MM.MN.MO.MP.MQ.MR.MS.MT.MU.MV.MW.MX.MY.MZ.NA.NC.NE.NF.NG.NI.NL.NO.NP.NR.NU.NZ.OM.PA.PE.PF.PG.PH.PK.PL.PM.PN.PR.PS.PT.PW.PY.QA.RE.RO.RS.RU.RW.SA.SB.SC.SD.SE.SG.SH.SI.SJ.SK.SL.SM.SN.SO.SR.SS.ST.SV.SX.SY.SZ.TC.TD.TF.TG.TH.TJ.TK.TL.TM.TN.TO.TR.TT.TV.TW.TZ.UA.UG.UM.US.UY.UZ.VA.VC.VE.VG.VI.VN.VU.WF.WS.XK.YE.YT.ZA.ZM.ZW`.split(`.`), mod97: (e2) => {
-  let t2 = 0;
-  for (let n2 of e2)
-    t2 = (t2 * 10 + +n2) % 97;
-  return t2;
-}, pattern10: [`01`, `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`], pattern100: [`001`, `002`, `003`, `004`, `005`, `006`, `007`, `008`, `009`], toDigitString: (e2) => e2.replaceAll(/[A-Z]/gi, (e3) => String((e3.toUpperCase().codePointAt(0) ?? NaN) - 55)) };
-function Se(e2) {
-  let t2 = ``;
-  for (let n2 = 0;n2 < e2.length; n2 += 4)
-    t2 += `${e2.substring(n2, n2 + 4)} `;
-  return t2.trimEnd();
+var M = { alpha: `ABCDEFGHIJKLMNOPQRSTUVWXYZ`.split(``), formats: [{ country: `AL`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `c`, count: 16 }], format: `ALkk bbbs sssx cccc cccc cccc cccc` }, { country: `AD`, total: 24, bban: [{ type: `n`, count: 8 }, { type: `c`, count: 12 }], format: `ADkk bbbb ssss cccc cccc cccc` }, { country: `AT`, total: 20, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 11 }], format: `ATkk bbbb bccc cccc cccc` }, { country: `AZ`, total: 28, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 20 }], format: `AZkk bbbb cccc cccc cccc cccc cccc` }, { country: `BH`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 14 }], format: `BHkk bbbb cccc cccc cccc cc` }, { country: `BE`, total: 16, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 9 }], format: `BEkk bbbc cccc ccxx` }, { country: `BA`, total: 20, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 10 }], format: `BAkk bbbs sscc cccc ccxx` }, { country: `BR`, total: 29, bban: [{ type: `n`, count: 13 }, { type: `n`, count: 10 }, { type: `a`, count: 1 }, { type: `c`, count: 1 }], format: `BRkk bbbb bbbb ssss sccc cccc ccct n` }, { country: `BG`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 6 }, { type: `c`, count: 8 }], format: `BGkk bbbb ssss ddcc cccc cc` }, { country: `CR`, total: 22, bban: [{ type: `n`, count: 1 }, { type: `n`, count: 3 }, { type: `n`, count: 14 }], format: `CRkk xbbb cccc cccc cccc cc` }, { country: `HR`, total: 21, bban: [{ type: `n`, count: 7 }, { type: `n`, count: 10 }], format: `HRkk bbbb bbbc cccc cccc c` }, { country: `CY`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `c`, count: 16 }], format: `CYkk bbbs ssss cccc cccc cccc cccc` }, { country: `CZ`, total: 24, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 10 }], format: `CZkk bbbb ssss sscc cccc cccc` }, { country: `DK`, total: 18, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 10 }], format: `DKkk bbbb cccc cccc cc` }, { country: `DO`, total: 28, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 20 }], format: `DOkk bbbb cccc cccc cccc cccc cccc` }, { country: `TL`, total: 23, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 16 }], format: `TLkk bbbc cccc cccc cccc cxx` }, { country: `EE`, total: 20, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 12 }], format: `EEkk bbss cccc cccc cccx` }, { country: `FO`, total: 18, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 10 }], format: `FOkk bbbb cccc cccc cx` }, { country: `FI`, total: 18, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 8 }], format: `FIkk bbbb bbcc cccc cx` }, { country: `FR`, total: 27, bban: [{ type: `n`, count: 10 }, { type: `c`, count: 11 }, { type: `n`, count: 2 }], format: `FRkk bbbb bggg ggcc cccc cccc cxx` }, { country: `GE`, total: 22, bban: [{ type: `a`, count: 2 }, { type: `n`, count: 16 }], format: `GEkk bbcc cccc cccc cccc cc` }, { country: `DE`, total: 22, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 10 }], format: `DEkk bbbb bbbb cccc cccc cc` }, { country: `GI`, total: 23, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 15 }], format: `GIkk bbbb cccc cccc cccc ccc` }, { country: `GR`, total: 27, bban: [{ type: `n`, count: 7 }, { type: `c`, count: 16 }], format: `GRkk bbbs sssc cccc cccc cccc ccc` }, { country: `GL`, total: 18, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 10 }], format: `GLkk bbbb cccc cccc cc` }, { country: `GT`, total: 28, bban: [{ type: `c`, count: 4 }, { type: `c`, count: 4 }, { type: `c`, count: 16 }], format: `GTkk bbbb mmtt cccc cccc cccc cccc` }, { country: `HU`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 16 }], format: `HUkk bbbs sssk cccc cccc cccc cccx` }, { country: `IS`, total: 26, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 16 }], format: `ISkk bbbb sscc cccc iiii iiii ii` }, { country: `IE`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 6 }, { type: `n`, count: 8 }], format: `IEkk aaaa bbbb bbcc cccc cc` }, { country: `IL`, total: 23, bban: [{ type: `n`, count: 6 }, { type: `n`, count: 13 }], format: `ILkk bbbn nncc cccc cccc ccc` }, { country: `IR`, total: 26, bban: [{ type: `n`, count: 22 }], format: `IRkk bbbb cccc cccc cccc cccc cc` }, { country: `IT`, total: 27, bban: [{ type: `a`, count: 1 }, { type: `n`, count: 10 }, { type: `c`, count: 12 }], format: `ITkk xaaa aabb bbbc cccc cccc ccc` }, { country: `JO`, total: 30, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 4 }, { type: `n`, count: 18 }], format: `JOkk bbbb nnnn cccc cccc cccc cccc cc` }, { country: `KZ`, total: 20, bban: [{ type: `n`, count: 3 }, { type: `c`, count: 13 }], format: `KZkk bbbc cccc cccc cccc` }, { country: `XK`, total: 20, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 12 }], format: `XKkk bbbb cccc cccc cccc` }, { country: `KW`, total: 30, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 22 }], format: `KWkk bbbb cccc cccc cccc cccc cccc cc` }, { country: `LV`, total: 21, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 13 }], format: `LVkk bbbb cccc cccc cccc c` }, { country: `LB`, total: 28, bban: [{ type: `n`, count: 4 }, { type: `c`, count: 20 }], format: `LBkk bbbb cccc cccc cccc cccc cccc` }, { country: `LI`, total: 21, bban: [{ type: `n`, count: 5 }, { type: `c`, count: 12 }], format: `LIkk bbbb bccc cccc cccc c` }, { country: `LT`, total: 20, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 11 }], format: `LTkk bbbb bccc cccc cccc` }, { country: `LU`, total: 20, bban: [{ type: `n`, count: 3 }, { type: `c`, count: 13 }], format: `LUkk bbbc cccc cccc cccc` }, { country: `MK`, total: 19, bban: [{ type: `n`, count: 3 }, { type: `c`, count: 10 }, { type: `n`, count: 2 }], format: `MKkk bbbc cccc cccc cxx` }, { country: `MT`, total: 31, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 5 }, { type: `c`, count: 18 }], format: `MTkk bbbb ssss sccc cccc cccc cccc ccc` }, { country: `MR`, total: 27, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 13 }], format: `MRkk bbbb bsss sscc cccc cccc cxx` }, { country: `MU`, total: 30, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 4 }, { type: `n`, count: 15 }, { type: `a`, count: 3 }], format: `MUkk bbbb bbss cccc cccc cccc 000d dd` }, { country: `MC`, total: 27, bban: [{ type: `n`, count: 10 }, { type: `c`, count: 11 }, { type: `n`, count: 2 }], format: `MCkk bbbb bsss sscc cccc cccc cxx` }, { country: `MD`, total: 24, bban: [{ type: `c`, count: 2 }, { type: `c`, count: 18 }], format: `MDkk bbcc cccc cccc cccc cccc` }, { country: `ME`, total: 22, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 15 }], format: `MEkk bbbc cccc cccc cccc xx` }, { country: `NL`, total: 18, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 10 }], format: `NLkk bbbb cccc cccc cc` }, { country: `NO`, total: 15, bban: [{ type: `n`, count: 4 }, { type: `n`, count: 7 }], format: `NOkk bbbb cccc ccx` }, { country: `PK`, total: 24, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 16 }], format: `PKkk bbbb cccc cccc cccc cccc` }, { country: `PS`, total: 29, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 9 }, { type: `n`, count: 12 }], format: `PSkk bbbb xxxx xxxx xccc cccc cccc c` }, { country: `PL`, total: 28, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 16 }], format: `PLkk bbbs sssx cccc cccc cccc cccc` }, { country: `PT`, total: 25, bban: [{ type: `n`, count: 8 }, { type: `n`, count: 13 }], format: `PTkk bbbb ssss cccc cccc cccx x` }, { country: `QA`, total: 29, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 21 }], format: `QAkk bbbb cccc cccc cccc cccc cccc c` }, { country: `RO`, total: 24, bban: [{ type: `a`, count: 4 }, { type: `c`, count: 16 }], format: `ROkk bbbb cccc cccc cccc cccc` }, { country: `SM`, total: 27, bban: [{ type: `a`, count: 1 }, { type: `n`, count: 10 }, { type: `c`, count: 12 }], format: `SMkk xaaa aabb bbbc cccc cccc ccc` }, { country: `SA`, total: 24, bban: [{ type: `n`, count: 2 }, { type: `c`, count: 18 }], format: `SAkk bbcc cccc cccc cccc cccc` }, { country: `RS`, total: 22, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 15 }], format: `RSkk bbbc cccc cccc cccc xx` }, { country: `SK`, total: 24, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 10 }], format: `SKkk bbbb ssss sscc cccc cccc` }, { country: `SI`, total: 19, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 10 }], format: `SIkk bbss sccc cccc cxx` }, { country: `ES`, total: 24, bban: [{ type: `n`, count: 10 }, { type: `n`, count: 10 }], format: `ESkk bbbb gggg xxcc cccc cccc` }, { country: `SE`, total: 24, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 17 }], format: `SEkk bbbc cccc cccc cccc cccc` }, { country: `CH`, total: 21, bban: [{ type: `n`, count: 5 }, { type: `c`, count: 12 }], format: `CHkk bbbb bccc cccc cccc c` }, { country: `TN`, total: 24, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 15 }], format: `TNkk bbss sccc cccc cccc cccc` }, { country: `TR`, total: 26, bban: [{ type: `n`, count: 5 }, { type: `n`, count: 1 }, { type: `n`, count: 16 }], format: `TRkk bbbb bxcc cccc cccc cccc cc` }, { country: `AE`, total: 23, bban: [{ type: `n`, count: 3 }, { type: `n`, count: 16 }], format: `AEkk bbbc cccc cccc cccc ccc` }, { country: `GB`, total: 22, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 6 }, { type: `n`, count: 8 }], format: `GBkk bbbb ssss sscc cccc cc` }, { country: `VG`, total: 24, bban: [{ type: `a`, count: 4 }, { type: `n`, count: 16 }], format: `VGkk bbbb cccc cccc cccc cccc` }], iso3166: `AD.AE.AF.AG.AI.AL.AM.AO.AQ.AR.AS.AT.AU.AW.AX.AZ.BA.BB.BD.BE.BF.BG.BH.BI.BJ.BL.BM.BN.BO.BQ.BR.BS.BT.BV.BW.BY.BZ.CA.CC.CD.CF.CG.CH.CI.CK.CL.CM.CN.CO.CR.CU.CV.CW.CX.CY.CZ.DE.DJ.DK.DM.DO.DZ.EC.EE.EG.EH.ER.ES.ET.FI.FJ.FK.FM.FO.FR.GA.GB.GD.GE.GF.GG.GH.GI.GL.GM.GN.GP.GQ.GR.GS.GT.GU.GW.GY.HK.HM.HN.HR.HT.HU.ID.IE.IL.IM.IN.IO.IQ.IR.IS.IT.JE.JM.JO.JP.KE.KG.KH.KI.KM.KN.KP.KR.KW.KY.KZ.LA.LB.LC.LI.LK.LR.LS.LT.LU.LV.LY.MA.MC.MD.ME.MF.MG.MH.MK.ML.MM.MN.MO.MP.MQ.MR.MS.MT.MU.MV.MW.MX.MY.MZ.NA.NC.NE.NF.NG.NI.NL.NO.NP.NR.NU.NZ.OM.PA.PE.PF.PG.PH.PK.PL.PM.PN.PR.PS.PT.PW.PY.QA.RE.RO.RS.RU.RW.SA.SB.SC.SD.SE.SG.SH.SI.SJ.SK.SL.SM.SN.SO.SR.SS.ST.SV.SX.SY.SZ.TC.TD.TF.TG.TH.TJ.TK.TL.TM.TN.TO.TR.TT.TV.TW.TZ.UA.UG.UM.US.UY.UZ.VA.VC.VE.VG.VI.VN.VU.WF.WS.XK.YE.YT.ZA.ZM.ZW`.split(`.`), mod97: (e) => {
+  let t = 0;
+  for (let n of e)
+    t = (t * 10 + +n) % 97;
+  return t;
+}, pattern10: [`01`, `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`], pattern100: [`001`, `002`, `003`, `004`, `005`, `006`, `007`, `008`, `009`], toDigitString: (e) => e.replaceAll(/[A-Z]/gi, (e) => String((e.toUpperCase().codePointAt(0) ?? NaN) - 55)) };
+function Se(e) {
+  let t = ``;
+  for (let n = 0;n < e.length; n += 4)
+    t += `${e.substring(n, n + 4)} `;
+  return t.trimEnd();
 }
 var Ce = class extends S {
-  accountNumber(e2 = {}) {
-    typeof e2 == `number` && (e2 = { length: e2 });
-    let { length: t2 = 8 } = e2;
-    return this.faker.string.numeric({ length: t2, allowLeadingZeros: true });
+  accountNumber(e = {}) {
+    typeof e == `number` && (e = { length: e });
+    let { length: t = 8 } = e;
+    return this.faker.string.numeric({ length: t, allowLeadingZeros: true });
   }
   accountName() {
     return [this.faker.helpers.arrayElement(this.faker.definitions.finance.account_type), `Account`].join(` `);
   }
   routingNumber() {
-    let e2 = this.faker.helpers.arrayElement(this.faker.definitions.finance.federal_reserve_routing_symbol) + this.faker.string.numeric({ length: 4, allowLeadingZeros: true }), t2 = 0;
-    for (let n2 = 0;n2 < e2.length; n2 += 3)
-      t2 += Number(e2[n2]) * 3, t2 += Number(e2[n2 + 1]) * 7, t2 += Number(e2[n2 + 2]) || 0;
-    return `${e2}${Math.ceil(t2 / 10) * 10 - t2}`;
+    let e = this.faker.helpers.arrayElement(this.faker.definitions.finance.federal_reserve_routing_symbol) + this.faker.string.numeric({ length: 4, allowLeadingZeros: true }), t = 0;
+    for (let n = 0;n < e.length; n += 3)
+      t += Number(e[n]) * 3, t += Number(e[n + 1]) * 7, t += Number(e[n + 2]) || 0;
+    return `${e}${Math.ceil(t / 10) * 10 - t}`;
   }
-  amount(e2 = {}) {
-    let { autoFormat: t2 = false, dec: n2 = 2, max: r2 = 1000, min: i2 = 0, symbol: a2 = `` } = e2, o2 = this.faker.number.float({ max: r2, min: i2, fractionDigits: n2 });
-    return a2 + (t2 ? o2.toLocaleString(undefined, { minimumFractionDigits: n2 }) : o2.toFixed(n2));
+  amount(e = {}) {
+    let { autoFormat: t = false, dec: n = 2, max: r = 1000, min: i = 0, symbol: a = `` } = e, o = this.faker.number.float({ max: r, min: i, fractionDigits: n });
+    return a + (t ? o.toLocaleString(undefined, { minimumFractionDigits: n }) : o.toFixed(n));
   }
   transactionType() {
     return this.faker.helpers.arrayElement(this.faker.definitions.finance.transaction_type);
@@ -24398,35 +31806,35 @@ var Ce = class extends S {
     return this.currency().name;
   }
   currencySymbol() {
-    let e2;
+    let e;
     do
-      e2 = this.currency().symbol;
-    while (e2.length === 0);
-    return e2;
+      e = this.currency().symbol;
+    while (e.length === 0);
+    return e;
   }
   currencyNumericCode() {
     return this.currency().numericCode;
   }
-  bitcoinAddress(e2 = {}) {
-    let { type: t2 = this.faker.helpers.enumValue(j), network: n2 = `mainnet` } = e2, r2 = xe[t2], i2 = r2.prefix[n2], a2 = this.faker.number.int(r2.length);
-    return i2 + this.faker.string.alphanumeric({ length: a2 - i2.length, casing: r2.casing, exclude: r2.exclude });
+  bitcoinAddress(e = {}) {
+    let { type: t = this.faker.helpers.enumValue(j), network: n = `mainnet` } = e, r = xe[t], i = r.prefix[n], a = this.faker.number.int(r.length);
+    return i + this.faker.string.alphanumeric({ length: a - i.length, casing: r.casing, exclude: r.exclude });
   }
   litecoinAddress() {
-    let e2 = this.faker.number.int({ min: 26, max: 33 });
-    return this.faker.string.fromCharacters(`LM3`) + this.faker.string.fromCharacters(`123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ`, e2 - 1);
+    let e = this.faker.number.int({ min: 26, max: 33 });
+    return this.faker.string.fromCharacters(`LM3`) + this.faker.string.fromCharacters(`123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ`, e - 1);
   }
-  creditCardNumber(e2 = {}) {
-    typeof e2 == `string` && (e2 = { issuer: e2 });
-    let { issuer: t2 = `` } = e2, n2, r2 = this.faker.definitions.finance.credit_card, i2 = t2.toLowerCase();
-    if (i2 in r2)
-      n2 = this.faker.helpers.arrayElement(r2[i2]);
-    else if (t2.includes(`#`))
-      n2 = t2;
+  creditCardNumber(e = {}) {
+    typeof e == `string` && (e = { issuer: e });
+    let { issuer: t = `` } = e, n, r = this.faker.definitions.finance.credit_card, i = t.toLowerCase();
+    if (i in r)
+      n = this.faker.helpers.arrayElement(r[i]);
+    else if (t.includes(`#`))
+      n = t;
     else {
-      let e3 = this.faker.helpers.objectValue(r2);
-      n2 = this.faker.helpers.arrayElement(e3);
+      let e = this.faker.helpers.objectValue(r);
+      n = this.faker.helpers.arrayElement(e);
     }
-    return n2 = n2.replaceAll(`/`, ``), this.faker.helpers.replaceCreditCardSymbols(n2);
+    return n = n.replaceAll(`/`, ``), this.faker.helpers.replaceCreditCardSymbols(n);
   }
   creditCardCVV() {
     return this.faker.string.numeric({ length: 3, allowLeadingZeros: true });
@@ -24434,42 +31842,42 @@ var Ce = class extends S {
   creditCardIssuer() {
     return this.faker.helpers.objectKey(this.faker.definitions.finance.credit_card);
   }
-  pin(t2 = {}) {
-    typeof t2 == `number` && (t2 = { length: t2 });
-    let { length: n2 = 4 } = t2;
-    if (n2 < 1)
+  pin(t = {}) {
+    typeof t == `number` && (t = { length: t });
+    let { length: n = 4 } = t;
+    if (n < 1)
       throw new e(`minimum length is 1`);
-    return this.faker.string.numeric({ length: n2, allowLeadingZeros: true });
+    return this.faker.string.numeric({ length: n, allowLeadingZeros: true });
   }
   ethereumAddress() {
     return this.faker.string.hexadecimal({ length: 40, casing: `lower` });
   }
-  iban(t2 = {}) {
-    let { countryCode: n2, formatted: r2 = false } = t2, i2 = n2 ? M.formats.find((e2) => e2.country === n2) : this.faker.helpers.arrayElement(M.formats);
-    if (!i2)
-      throw new e(`Country code ${n2} not supported.`);
-    let a2 = ``, o2 = 0;
-    for (let e2 of i2.bban) {
-      let t3 = e2.count;
-      for (o2 += e2.count;t3 > 0; )
-        e2.type === `a` ? a2 += this.faker.helpers.arrayElement(M.alpha) : e2.type === `c` ? this.faker.datatype.boolean(0.8) ? a2 += this.faker.number.int(9) : a2 += this.faker.helpers.arrayElement(M.alpha) : t3 >= 3 && this.faker.datatype.boolean(0.3) ? this.faker.datatype.boolean() ? (a2 += this.faker.helpers.arrayElement(M.pattern100), t3 -= 2) : (a2 += this.faker.helpers.arrayElement(M.pattern10), t3--) : a2 += this.faker.number.int(9), t3--;
-      a2 = a2.substring(0, o2);
+  iban(t = {}) {
+    let { countryCode: n, formatted: r = false } = t, i = n ? M.formats.find((e) => e.country === n) : this.faker.helpers.arrayElement(M.formats);
+    if (!i)
+      throw new e(`Country code ${n} not supported.`);
+    let a = ``, o = 0;
+    for (let e of i.bban) {
+      let t = e.count;
+      for (o += e.count;t > 0; )
+        e.type === `a` ? a += this.faker.helpers.arrayElement(M.alpha) : e.type === `c` ? this.faker.datatype.boolean(0.8) ? a += this.faker.number.int(9) : a += this.faker.helpers.arrayElement(M.alpha) : t >= 3 && this.faker.datatype.boolean(0.3) ? this.faker.datatype.boolean() ? (a += this.faker.helpers.arrayElement(M.pattern100), t -= 2) : (a += this.faker.helpers.arrayElement(M.pattern10), t--) : a += this.faker.number.int(9), t--;
+      a = a.substring(0, o);
     }
-    let s2 = 98 - M.mod97(M.toDigitString(`${a2}${i2.country}00`));
-    s2 < 10 && (s2 = `0${s2}`);
-    let c2 = `${i2.country}${s2}${a2}`;
-    return r2 ? Se(c2) : c2;
+    let s = 98 - M.mod97(M.toDigitString(`${a}${i.country}00`));
+    s < 10 && (s = `0${s}`);
+    let c = `${i.country}${s}${a}`;
+    return r ? Se(c) : c;
   }
-  bic(e2 = {}) {
-    let { includeBranchCode: t2 = this.faker.datatype.boolean() } = e2;
-    return `${this.faker.string.alpha({ length: 4, casing: `upper` })}${this.faker.helpers.arrayElement(M.iso3166)}${this.faker.string.alphanumeric({ length: 2, casing: `upper` })}${t2 ? this.faker.datatype.boolean() ? this.faker.string.alphanumeric({ length: 3, casing: `upper` }) : `XXX` : ``}`;
+  bic(e = {}) {
+    let { includeBranchCode: t = this.faker.datatype.boolean() } = e;
+    return `${this.faker.string.alpha({ length: 4, casing: `upper` })}${this.faker.helpers.arrayElement(M.iso3166)}${this.faker.string.alphanumeric({ length: 2, casing: `upper` })}${t ? this.faker.datatype.boolean() ? this.faker.string.alphanumeric({ length: 3, casing: `upper` }) : `XXX` : ``}`;
   }
   transactionDescription() {
     return this.faker.helpers.fake(this.faker.definitions.finance.transaction_description_pattern);
   }
 };
-function we(e2) {
-  return e2.split(` `).map((e3) => e3.charAt(0).toUpperCase() + e3.slice(1)).join(` `);
+function we(e) {
+  return e.split(` `).map((e) => e.charAt(0).toUpperCase() + e.slice(1)).join(` `);
 }
 var Te = class extends S {
   adjective() {
@@ -24504,26 +31912,26 @@ var Ee = class extends S {
   branch() {
     return `${this.faker.hacker.noun().replace(` `, `-`)}-${this.faker.hacker.verb().replace(` `, `-`)}`;
   }
-  commitEntry(e2 = {}) {
-    let { merge: t2 = this.faker.datatype.boolean({ probability: 0.2 }), eol: n2 = `CRLF`, refDate: r2 } = e2, i2 = [`commit ${this.faker.git.commitSha()}`];
-    t2 && i2.push(`Merge: ${this.commitSha({ length: 7 })} ${this.commitSha({ length: 7 })}`);
-    let a2 = this.faker.person.firstName(), o2 = this.faker.person.lastName(), s2 = this.faker.person.fullName({ firstName: a2, lastName: o2 }), c2 = this.faker.internet.username({ firstName: a2, lastName: o2 }), l2 = this.faker.helpers.arrayElement([s2, c2]), u2 = this.faker.internet.email({ firstName: a2, lastName: o2 });
-    l2 = l2.replaceAll(/^[.,:;"\\']|[<>\n]|[.,:;"\\']$/g, ``), i2.push(`Author: ${l2} <${u2}>`, `Date: ${this.commitDate({ refDate: r2 })}`, ``, `${` `.repeat(4)}${this.commitMessage()}`, ``);
-    let d2 = n2 === `CRLF` ? `\r
+  commitEntry(e = {}) {
+    let { merge: t = this.faker.datatype.boolean({ probability: 0.2 }), eol: n = `CRLF`, refDate: r } = e, i = [`commit ${this.faker.git.commitSha()}`];
+    t && i.push(`Merge: ${this.commitSha({ length: 7 })} ${this.commitSha({ length: 7 })}`);
+    let a = this.faker.person.firstName(), o = this.faker.person.lastName(), s = this.faker.person.fullName({ firstName: a, lastName: o }), c = this.faker.internet.username({ firstName: a, lastName: o }), l = this.faker.helpers.arrayElement([s, c]), u = this.faker.internet.email({ firstName: a, lastName: o });
+    l = l.replaceAll(/^[.,:;"\\']|[<>\n]|[.,:;"\\']$/g, ``), i.push(`Author: ${l} <${u}>`, `Date: ${this.commitDate({ refDate: r })}`, ``, `${` `.repeat(4)}${this.commitMessage()}`, ``);
+    let d = n === `CRLF` ? `\r
 ` : `
 `;
-    return i2.join(d2);
+    return i.join(d);
   }
   commitMessage() {
     return `${this.faker.hacker.verb()} ${this.faker.hacker.adjective()} ${this.faker.hacker.noun()}`;
   }
-  commitDate(e2 = {}) {
-    let { refDate: t2 = this.faker.defaultRefDate() } = e2, n2 = [`Sun`, `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`], r2 = [`Jan`, `Feb`, `Mar`, `Apr`, `May`, `Jun`, `Jul`, `Aug`, `Sep`, `Oct`, `Nov`, `Dec`], i2 = this.faker.date.recent({ days: 1, refDate: t2 }), a2 = n2[i2.getUTCDay()], o2 = r2[i2.getUTCMonth()], s2 = i2.getUTCDate(), c2 = i2.getUTCHours().toString().padStart(2, `0`), l2 = i2.getUTCMinutes().toString().padStart(2, `0`), u2 = i2.getUTCSeconds().toString().padStart(2, `0`), d2 = i2.getUTCFullYear(), f2 = this.faker.number.int({ min: -11, max: 12 }), p2 = Math.abs(f2).toString().padStart(2, `0`);
-    return `${a2} ${o2} ${s2} ${c2}:${l2}:${u2} ${d2} ${f2 >= 0 ? `+` : `-`}${p2}00`;
+  commitDate(e = {}) {
+    let { refDate: t = this.faker.defaultRefDate() } = e, n = [`Sun`, `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`], r = [`Jan`, `Feb`, `Mar`, `Apr`, `May`, `Jun`, `Jul`, `Aug`, `Sep`, `Oct`, `Nov`, `Dec`], i = this.faker.date.recent({ days: 1, refDate: t }), a = n[i.getUTCDay()], o = r[i.getUTCMonth()], s = i.getUTCDate(), c = i.getUTCHours().toString().padStart(2, `0`), l = i.getUTCMinutes().toString().padStart(2, `0`), u = i.getUTCSeconds().toString().padStart(2, `0`), d = i.getUTCFullYear(), f = this.faker.number.int({ min: -11, max: 12 }), p = Math.abs(f).toString().padStart(2, `0`);
+    return `${a} ${o} ${s} ${c}:${l}:${u} ${d} ${f >= 0 ? `+` : `-`}${p}00`;
   }
-  commitSha(e2 = {}) {
-    let { length: t2 = 40 } = e2;
-    return this.faker.string.hexadecimal({ length: t2, casing: `lower`, prefix: `` });
+  commitSha(e = {}) {
+    let { length: t = 40 } = e;
+    return this.faker.string.hexadecimal({ length: t, casing: `lower`, prefix: `` });
   }
 };
 var De = class extends S {
@@ -24547,368 +31955,368 @@ var De = class extends S {
   }
 };
 var Oe = /\.|\(/;
-function ke(t2, n2, r2 = [n2, n2.definitions.raw]) {
-  if (t2.length === 0)
+function ke(t, n, r = [n, n.definitions.raw]) {
+  if (t.length === 0)
     throw new e(`Eval expression cannot be empty.`);
-  if (r2.length === 0)
+  if (r.length === 0)
     throw new e(`Eval entrypoints cannot be empty.`);
-  let i2 = r2, a2 = t2;
+  let i = r, a = t;
   do {
-    let e2;
-    a2.startsWith(`(`) ? [e2, i2] = Ae(a2, i2) : [e2, i2] = Me(a2, i2), a2 = a2.substring(e2), i2 = i2.filter((e3) => e3 != null).map((e3) => Array.isArray(e3) ? n2.helpers.arrayElement(e3) : e3);
-  } while (a2.length > 0 && i2.length > 0);
-  if (i2.length === 0)
-    throw new e(`Cannot resolve expression '${t2}'`);
-  let o2 = i2[0];
-  return typeof o2 == `function` ? o2() : o2;
+    let e;
+    a.startsWith(`(`) ? [e, i] = Ae(a, i) : [e, i] = Me(a, i), a = a.substring(e), i = i.filter((e) => e != null).map((e) => Array.isArray(e) ? n.helpers.arrayElement(e) : e);
+  } while (a.length > 0 && i.length > 0);
+  if (i.length === 0)
+    throw new e(`Cannot resolve expression '${t}'`);
+  let o = i[0];
+  return typeof o == `function` ? o() : o;
 }
-function Ae(t2, n2) {
-  let [r2, i2] = je(t2), a2 = t2[r2 + 1];
-  switch (a2) {
+function Ae(t, n) {
+  let [r, i] = je(t), a = t[r + 1];
+  switch (a) {
     case `.`:
     case `(`:
     case undefined:
       break;
     default:
-      throw new e(`Expected dot ('.'), open parenthesis ('('), or nothing after function call but got '${a2}'`);
+      throw new e(`Expected dot ('.'), open parenthesis ('('), or nothing after function call but got '${a}'`);
   }
-  return [r2 + (a2 === `.` ? 2 : 1), n2.map((e2) => typeof e2 == `function` ? e2(...i2) : undefined)];
+  return [r + (a === `.` ? 2 : 1), n.map((e) => typeof e == `function` ? e(...i) : undefined)];
 }
-function je(t2) {
-  let n2 = t2.indexOf(`)`, 1);
-  if (n2 === -1)
-    throw new e(`Missing closing parenthesis in '${t2}'`);
-  for (;n2 !== -1; ) {
-    let e2 = t2.substring(1, n2);
+function je(t) {
+  let n = t.indexOf(`)`, 1);
+  if (n === -1)
+    throw new e(`Missing closing parenthesis in '${t}'`);
+  for (;n !== -1; ) {
+    let e = t.substring(1, n);
     try {
-      return [n2, JSON.parse(`[${e2}]`)];
+      return [n, JSON.parse(`[${e}]`)];
     } catch {
-      if (!e2.includes(`'`) && !e2.includes(`"`))
+      if (!e.includes(`'`) && !e.includes(`"`))
         try {
-          return [n2, JSON.parse(`["${e2}"]`)];
+          return [n, JSON.parse(`["${e}"]`)];
         } catch {}
     }
-    n2 = t2.indexOf(`)`, n2 + 1);
+    n = t.indexOf(`)`, n + 1);
   }
-  n2 = t2.lastIndexOf(`)`);
-  let r2 = t2.substring(1, n2);
-  return [n2, [r2]];
+  n = t.lastIndexOf(`)`);
+  let r = t.substring(1, n);
+  return [n, [r]];
 }
-function Me(t2, n2) {
-  let r2 = Oe.exec(t2), i2 = (r2?.[0] ?? ``) === `.`, a2 = r2?.index ?? t2.length, o2 = t2.substring(0, a2);
-  if (o2.length === 0)
-    throw new e(`Expression parts cannot be empty in '${t2}'`);
-  let s2 = t2[a2 + 1];
-  if (i2 && (s2 == null || s2 === `.` || s2 === `(`))
-    throw new e(`Found dot without property name in '${t2}'`);
-  return [a2 + +!!i2, n2.map((e2) => N(e2, o2))];
+function Me(t, n) {
+  let r = Oe.exec(t), i = (r?.[0] ?? ``) === `.`, a = r?.index ?? t.length, o = t.substring(0, a);
+  if (o.length === 0)
+    throw new e(`Expression parts cannot be empty in '${t}'`);
+  let s = t[a + 1];
+  if (i && (s == null || s === `.` || s === `(`))
+    throw new e(`Found dot without property name in '${t}'`);
+  return [a + +!!i, n.map((e) => N(e, o))];
 }
-function N(e2, t2) {
-  switch (typeof e2) {
+function N(e, t) {
+  switch (typeof e) {
     case `function`:
       try {
-        e2 = e2();
+        e = e();
       } catch {
         return;
       }
-      return N(e2, t2);
+      return N(e, t);
     case `object`:
-      return e2?.[t2];
+      return e?.[t];
     default:
       return;
   }
 }
-function Ne(e2) {
-  let t2 = Pe(e2.replace(/L?$/, `0`));
-  return t2 === 0 ? 0 : 10 - t2;
+function Ne(e) {
+  let t = Pe(e.replace(/L?$/, `0`));
+  return t === 0 ? 0 : 10 - t;
 }
-function Pe(e2) {
-  e2 = e2.replaceAll(/[\s-]/g, ``);
-  let t2 = 0, n2 = false;
-  for (let r2 = e2.length - 1;r2 >= 0; r2--) {
-    let i2 = Number.parseInt(e2[r2]);
-    n2 && (i2 *= 2, i2 > 9 && (i2 = i2 % 10 + 1)), t2 += i2, n2 = !n2;
+function Pe(e) {
+  e = e.replaceAll(/[\s-]/g, ``);
+  let t = 0, n = false;
+  for (let r = e.length - 1;r >= 0; r--) {
+    let i = Number.parseInt(e[r]);
+    n && (i *= 2, i > 9 && (i = i % 10 + 1)), t += i, n = !n;
   }
-  return t2 % 10;
+  return t % 10;
 }
-function P(t2, n2, r2, i2) {
-  let a2 = 1;
-  if (n2)
-    switch (n2) {
+function P(t, n, r, i) {
+  let a = 1;
+  if (n)
+    switch (n) {
       case `?`:
-        a2 = +!t2.datatype.boolean();
+        a = +!t.datatype.boolean();
         break;
       case `*`: {
-        let e2 = 1;
-        for (;t2.datatype.boolean(); )
-          e2 *= 2;
-        a2 = t2.number.int({ min: 0, max: e2 });
+        let e = 1;
+        for (;t.datatype.boolean(); )
+          e *= 2;
+        a = t.number.int({ min: 0, max: e });
         break;
       }
       case `+`: {
-        let e2 = 1;
-        for (;t2.datatype.boolean(); )
-          e2 *= 2;
-        a2 = t2.number.int({ min: 1, max: e2 });
+        let e = 1;
+        for (;t.datatype.boolean(); )
+          e *= 2;
+        a = t.number.int({ min: 1, max: e });
         break;
       }
       default:
         throw new e(`Unknown quantifier symbol provided.`);
     }
   else
-    r2 != null && i2 != null ? a2 = t2.number.int({ min: Number.parseInt(r2), max: Number.parseInt(i2) }) : r2 != null && i2 == null && (a2 = Number.parseInt(r2));
-  return a2;
+    r != null && i != null ? a = t.number.int({ min: Number.parseInt(r), max: Number.parseInt(i) }) : r != null && i == null && (a = Number.parseInt(r));
+  return a;
 }
-function Fe(e2, t2 = ``) {
-  let n2 = /(.)\{(\d+),(\d+)\}/, r2 = /(.)\{(\d+)\}/, i2 = /\[(\d+)-(\d+)\]/, a2, o2, s2, c2, l2 = n2.exec(t2);
-  for (;l2 != null; )
-    a2 = Number.parseInt(l2[2]), o2 = Number.parseInt(l2[3]), a2 > o2 && (s2 = o2, o2 = a2, a2 = s2), c2 = e2.number.int({ min: a2, max: o2 }), t2 = t2.slice(0, l2.index) + l2[1].repeat(c2) + t2.slice(l2.index + l2[0].length), l2 = n2.exec(t2);
-  for (l2 = r2.exec(t2);l2 != null; )
-    c2 = Number.parseInt(l2[2]), t2 = t2.slice(0, l2.index) + l2[1].repeat(c2) + t2.slice(l2.index + l2[0].length), l2 = r2.exec(t2);
-  for (l2 = i2.exec(t2);l2 != null; )
-    a2 = Number.parseInt(l2[1]), o2 = Number.parseInt(l2[2]), a2 > o2 && (s2 = o2, o2 = a2, a2 = s2), t2 = t2.slice(0, l2.index) + e2.number.int({ min: a2, max: o2 }).toString() + t2.slice(l2.index + l2[0].length), l2 = i2.exec(t2);
-  return t2;
+function Fe(e, t = ``) {
+  let n = /(.)\{(\d+),(\d+)\}/, r = /(.)\{(\d+)\}/, i = /\[(\d+)-(\d+)\]/, a, o, s, c, l = n.exec(t);
+  for (;l != null; )
+    a = Number.parseInt(l[2]), o = Number.parseInt(l[3]), a > o && (s = o, o = a, a = s), c = e.number.int({ min: a, max: o }), t = t.slice(0, l.index) + l[1].repeat(c) + t.slice(l.index + l[0].length), l = n.exec(t);
+  for (l = r.exec(t);l != null; )
+    c = Number.parseInt(l[2]), t = t.slice(0, l.index) + l[1].repeat(c) + t.slice(l.index + l[0].length), l = r.exec(t);
+  for (l = i.exec(t);l != null; )
+    a = Number.parseInt(l[1]), o = Number.parseInt(l[2]), a > o && (s = o, o = a, a = s), t = t.slice(0, l.index) + e.number.int({ min: a, max: o }).toString() + t.slice(l.index + l[0].length), l = i.exec(t);
+  return t;
 }
-function Ie(e2, t2, n2) {
-  let r2 = ``, i2 = false;
-  for (let a2 = 0;a2 < t2.length; a2++) {
-    let o2 = t2[a2];
-    if (o2 === `\\`) {
-      r2 += o2, a2 + 1 < t2.length && (r2 += t2[++a2]);
+function Ie(e, t, n) {
+  let r = ``, i = false;
+  for (let a = 0;a < t.length; a++) {
+    let o = t[a];
+    if (o === `\\`) {
+      r += o, a + 1 < t.length && (r += t[++a]);
       continue;
     }
-    if (o2 === `[`) {
-      i2 = true, r2 += o2;
+    if (o === `[`) {
+      i = true, r += o;
       continue;
     }
-    if (o2 === `]`) {
-      i2 = false, r2 += o2;
+    if (o === `]`) {
+      i = false, r += o;
       continue;
     }
-    let s2 = t2[a2 + 1], c2 = [`?`, `*`, `+`, `{`].includes(s2);
-    if (!i2 && !c2 && o2 === `.`) {
-      r2 += e2.string.alphanumeric();
+    let s = t[a + 1], c = [`?`, `*`, `+`, `{`].includes(s);
+    if (!i && !c && o === `.`) {
+      r += e.string.alphanumeric();
       continue;
     }
-    if (!i2 && !c2 && n2 && /^[a-z]$/i.test(o2)) {
-      r2 += e2.string.fromCharacters([o2.toLowerCase(), o2.toUpperCase()]);
+    if (!i && !c && n && /^[a-z]$/i.test(o)) {
+      r += e.string.fromCharacters([o.toLowerCase(), o.toUpperCase()]);
       continue;
     }
-    r2 += o2;
+    r += o;
   }
-  return r2;
+  return r;
 }
-function F(e2, t2 = ``, n2 = `#`) {
-  let r2 = ``;
-  for (let i2 = 0;i2 < t2.length; i2++)
-    t2.charAt(i2) === n2 ? r2 += e2.number.int(9) : t2.charAt(i2) === `!` ? r2 += e2.number.int({ min: 2, max: 9 }) : r2 += t2.charAt(i2);
-  return r2;
+function F(e, t = ``, n = `#`) {
+  let r = ``;
+  for (let i = 0;i < t.length; i++)
+    t.charAt(i) === n ? r += e.number.int(9) : t.charAt(i) === `!` ? r += e.number.int({ min: 2, max: 9 }) : r += t.charAt(i);
+  return r;
 }
 var I = class extends x {
-  slugify(e2 = ``) {
-    return e2.normalize(`NFKD`).replaceAll(/[\u0300-\u036F]/g, ``).replaceAll(` `, `-`).replaceAll(/[^\w.-]+/g, ``);
+  slugify(e = ``) {
+    return e.normalize(`NFKD`).replaceAll(/[\u0300-\u036F]/g, ``).replaceAll(` `, `-`).replaceAll(/[^\w.-]+/g, ``);
   }
-  replaceSymbols(e2 = ``) {
-    let t2 = `ABCDEFGHIJKLMNOPQRSTUVWXYZ`.split(``), n2 = ``;
-    for (let r2 = 0;r2 < e2.length; r2++)
-      e2.charAt(r2) === `#` ? n2 += this.faker.number.int(9) : e2.charAt(r2) === `?` ? n2 += this.arrayElement(t2) : e2.charAt(r2) === `*` ? n2 += this.faker.datatype.boolean() ? this.arrayElement(t2) : this.faker.number.int(9) : n2 += e2.charAt(r2);
-    return n2;
+  replaceSymbols(e = ``) {
+    let t = `ABCDEFGHIJKLMNOPQRSTUVWXYZ`.split(``), n = ``;
+    for (let r = 0;r < e.length; r++)
+      e.charAt(r) === `#` ? n += this.faker.number.int(9) : e.charAt(r) === `?` ? n += this.arrayElement(t) : e.charAt(r) === `*` ? n += this.faker.datatype.boolean() ? this.arrayElement(t) : this.faker.number.int(9) : n += e.charAt(r);
+    return n;
   }
-  replaceCreditCardSymbols(e2 = `6453-####-####-####-###L`, t2 = `#`) {
-    e2 = Fe(this.faker, e2), e2 = F(this.faker, e2, t2);
-    let n2 = Ne(e2);
-    return e2.replace(`L`, String(n2));
+  replaceCreditCardSymbols(e = `6453-####-####-####-###L`, t = `#`) {
+    e = Fe(this.faker, e), e = F(this.faker, e, t);
+    let n = Ne(e);
+    return e.replace(`L`, String(n));
   }
-  fromRegExp(t2) {
-    let n2 = false;
-    if (t2 instanceof RegExp && (n2 = t2.flags.includes(`i`), t2 = t2.source.replace(/^\^+/, ``).replace(/\$+$/, ``)), t2 === `.`)
+  fromRegExp(t) {
+    let n = false;
+    if (t instanceof RegExp && (n = t.flags.includes(`i`), t = t.source.replace(/^\^+/, ``).replace(/\$+$/, ``)), t === `.`)
       return this.faker.string.alphanumeric();
-    if (n2 && /^[a-z]$/i.test(t2))
-      return this.faker.string.fromCharacters([t2.toLowerCase(), t2.toUpperCase()]);
-    t2 = Ie(this.faker, t2, n2);
-    let r2, i2, a2, o2 = /([.A-Za-z0-9])(?:\{(\d+)(?:,(\d+)|)\}|(\?|\*|\+))(?![^[]*]|[^{]*})/, s2 = o2.exec(t2);
-    for (;s2 != null; ) {
-      let e2 = s2[2], r3 = s2[3], i3 = s2[4];
-      a2 = P(this.faker, i3, e2, r3);
-      let c3;
-      c3 = s2[1] === `.` ? this.faker.string.alphanumeric(a2) : n2 ? this.faker.string.fromCharacters([s2[1].toLowerCase(), s2[1].toUpperCase()], a2) : s2[1].repeat(a2), t2 = t2.slice(0, s2.index) + c3 + t2.slice(s2.index + s2[0].length), s2 = o2.exec(t2);
+    if (n && /^[a-z]$/i.test(t))
+      return this.faker.string.fromCharacters([t.toLowerCase(), t.toUpperCase()]);
+    t = Ie(this.faker, t, n);
+    let r, i, a, o = /([.A-Za-z0-9])(?:\{(\d+)(?:,(\d+)|)\}|(\?|\*|\+))(?![^[]*]|[^{]*})/, s = o.exec(t);
+    for (;s != null; ) {
+      let e = s[2], r = s[3], i = s[4];
+      a = P(this.faker, i, e, r);
+      let c;
+      c = s[1] === `.` ? this.faker.string.alphanumeric(a) : n ? this.faker.string.fromCharacters([s[1].toLowerCase(), s[1].toUpperCase()], a) : s[1].repeat(a), t = t.slice(0, s.index) + c + t.slice(s.index + s[0].length), s = o.exec(t);
     }
-    let c2 = /(\d-\d|\w-\w|\d|\w|[-!@#$&()`.+,/"])/, l2 = /\[(\^|)(-|)(.+?)\](?:\{(\d+)(?:,(\d+)|)\}|(\?|\*|\+)|)/;
-    for (s2 = l2.exec(t2);s2 != null; ) {
-      let o3 = s2[1] === `^`, u3 = s2[2] === `-`, d3 = s2[4], f2 = s2[5], p2 = s2[6], m2 = [], h2 = s2[3], g2 = c2.exec(h2);
-      for (u3 && m2.push(45);g2 != null; ) {
-        if (g2[0].includes(`-`)) {
-          let t3 = g2[0].split(`-`).map((e2) => e2.codePointAt(0) ?? NaN);
-          if (r2 = t3[0], i2 = t3[1], r2 > i2)
+    let c = /(\d-\d|\w-\w|\d|\w|[-!@#$&()`.+,/"])/, l = /\[(\^|)(-|)(.+?)\](?:\{(\d+)(?:,(\d+)|)\}|(\?|\*|\+)|)/;
+    for (s = l.exec(t);s != null; ) {
+      let o = s[1] === `^`, u = s[2] === `-`, d = s[4], f = s[5], p = s[6], m = [], h = s[3], g = c.exec(h);
+      for (u && m.push(45);g != null; ) {
+        if (g[0].includes(`-`)) {
+          let t = g[0].split(`-`).map((e) => e.codePointAt(0) ?? NaN);
+          if (r = t[0], i = t[1], r > i)
             throw new e(`Character range provided is out of order.`);
-          for (let e2 = r2;e2 <= i2; e2++)
-            if (n2 && Number.isNaN(Number(String.fromCodePoint(e2)))) {
-              let t4 = String.fromCodePoint(e2);
-              m2.push(t4.toUpperCase().codePointAt(0) ?? NaN, t4.toLowerCase().codePointAt(0) ?? NaN);
+          for (let e = r;e <= i; e++)
+            if (n && Number.isNaN(Number(String.fromCodePoint(e)))) {
+              let t = String.fromCodePoint(e);
+              m.push(t.toUpperCase().codePointAt(0) ?? NaN, t.toLowerCase().codePointAt(0) ?? NaN);
             } else
-              m2.push(e2);
+              m.push(e);
         } else
-          n2 && Number.isNaN(Number(g2[0])) ? m2.push(g2[0].toUpperCase().codePointAt(0) ?? NaN, g2[0].toLowerCase().codePointAt(0) ?? NaN) : m2.push(g2[0].codePointAt(0) ?? NaN);
-        h2 = h2.substring(g2[0].length), g2 = c2.exec(h2);
+          n && Number.isNaN(Number(g[0])) ? m.push(g[0].toUpperCase().codePointAt(0) ?? NaN, g[0].toLowerCase().codePointAt(0) ?? NaN) : m.push(g[0].codePointAt(0) ?? NaN);
+        h = h.substring(g[0].length), g = c.exec(h);
       }
-      if (a2 = P(this.faker, p2, d3, f2), o3) {
-        let e2;
-        for (let t3 = 48;t3 <= 57; t3++) {
-          if (e2 = m2.indexOf(t3), e2 > -1) {
-            m2.splice(e2, 1);
+      if (a = P(this.faker, p, d, f), o) {
+        let e;
+        for (let t = 48;t <= 57; t++) {
+          if (e = m.indexOf(t), e > -1) {
+            m.splice(e, 1);
             continue;
           }
-          m2.push(t3);
+          m.push(t);
         }
-        for (let t3 = 65;t3 <= 90; t3++) {
-          if (e2 = m2.indexOf(t3), e2 > -1) {
-            m2.splice(e2, 1);
+        for (let t = 65;t <= 90; t++) {
+          if (e = m.indexOf(t), e > -1) {
+            m.splice(e, 1);
             continue;
           }
-          m2.push(t3);
+          m.push(t);
         }
-        for (let t3 = 97;t3 <= 122; t3++) {
-          if (e2 = m2.indexOf(t3), e2 > -1) {
-            m2.splice(e2, 1);
+        for (let t = 97;t <= 122; t++) {
+          if (e = m.indexOf(t), e > -1) {
+            m.splice(e, 1);
             continue;
           }
-          m2.push(t3);
+          m.push(t);
         }
       }
-      let _2 = this.multiple(() => String.fromCodePoint(this.arrayElement(m2)), { count: a2 }).join(``);
-      t2 = t2.slice(0, s2.index) + _2 + t2.slice(s2.index + s2[0].length), s2 = l2.exec(t2);
+      let _ = this.multiple(() => String.fromCodePoint(this.arrayElement(m)), { count: a }).join(``);
+      t = t.slice(0, s.index) + _ + t.slice(s.index + s[0].length), s = l.exec(t);
     }
-    let u2 = /(.)\{(\d+),(\d+)\}/;
-    for (s2 = u2.exec(t2);s2 != null; ) {
-      if (r2 = Number.parseInt(s2[2]), i2 = Number.parseInt(s2[3]), r2 > i2)
+    let u = /(.)\{(\d+),(\d+)\}/;
+    for (s = u.exec(t);s != null; ) {
+      if (r = Number.parseInt(s[2]), i = Number.parseInt(s[3]), r > i)
         throw new e(`Numbers out of order in {} quantifier.`);
-      a2 = this.faker.number.int({ min: r2, max: i2 }), t2 = t2.slice(0, s2.index) + s2[1].repeat(a2) + t2.slice(s2.index + s2[0].length), s2 = u2.exec(t2);
+      a = this.faker.number.int({ min: r, max: i }), t = t.slice(0, s.index) + s[1].repeat(a) + t.slice(s.index + s[0].length), s = u.exec(t);
     }
-    let d2 = /(.)\{(\d+)\}/;
-    for (s2 = d2.exec(t2);s2 != null; )
-      a2 = Number.parseInt(s2[2]), t2 = t2.slice(0, s2.index) + s2[1].repeat(a2) + t2.slice(s2.index + s2[0].length), s2 = d2.exec(t2);
-    return t2;
+    let d = /(.)\{(\d+)\}/;
+    for (s = d.exec(t);s != null; )
+      a = Number.parseInt(s[2]), t = t.slice(0, s.index) + s[1].repeat(a) + t.slice(s.index + s[0].length), s = d.exec(t);
+    return t;
   }
-  shuffle(e2, t2 = {}) {
-    let { inplace: n2 = false } = t2;
-    n2 || (e2 = [...e2]);
-    for (let t3 = e2.length - 1;t3 > 0; --t3) {
-      let n3 = this.faker.number.int(t3);
-      [e2[t3], e2[n3]] = [e2[n3], e2[t3]];
+  shuffle(e, t = {}) {
+    let { inplace: n = false } = t;
+    n || (e = [...e]);
+    for (let t = e.length - 1;t > 0; --t) {
+      let n = this.faker.number.int(t);
+      [e[t], e[n]] = [e[n], e[t]];
     }
-    return e2;
+    return e;
   }
-  uniqueArray(e2, t2) {
-    if (Array.isArray(e2)) {
-      let n3 = [...new Set(e2)];
-      return this.shuffle(n3).splice(0, t2);
+  uniqueArray(e, t) {
+    if (Array.isArray(e)) {
+      let n = [...new Set(e)];
+      return this.shuffle(n).splice(0, t);
     }
-    let n2 = new Set;
+    let n = new Set;
     try {
-      if (typeof e2 == `function`) {
-        let r2 = 1000 * t2, i2 = 0;
-        for (;n2.size < t2 && i2 < r2; )
-          n2.add(e2()), i2++;
+      if (typeof e == `function`) {
+        let r = 1000 * t, i = 0;
+        for (;n.size < t && i < r; )
+          n.add(e()), i++;
       }
     } catch {}
-    return [...n2];
+    return [...n];
   }
-  mustache(e2, t2) {
-    if (e2 == null)
+  mustache(e, t) {
+    if (e == null)
       return ``;
-    for (let n2 in t2) {
-      let r2 = RegExp(`{{${n2}}}`, `g`), i2 = t2[n2];
-      typeof i2 == `string` && (i2 = i2.replaceAll(`$`, `$$$$`)), e2 = e2.replace(r2, i2);
+    for (let n in t) {
+      let r = RegExp(`{{${n}}}`, `g`), i = t[n];
+      typeof i == `string` && (i = i.replaceAll(`$`, `$$$$`)), e = e.replace(r, i);
     }
-    return e2;
+    return e;
   }
-  maybe(e2, t2 = {}) {
-    if (this.faker.datatype.boolean(t2))
-      return e2();
+  maybe(e, t = {}) {
+    if (this.faker.datatype.boolean(t))
+      return e();
   }
-  objectKey(e2) {
-    let t2 = Object.keys(e2);
-    return this.arrayElement(t2);
+  objectKey(e) {
+    let t = Object.keys(e);
+    return this.arrayElement(t);
   }
-  objectValue(e2) {
-    return e2[this.faker.helpers.objectKey(e2)];
+  objectValue(e) {
+    return e[this.faker.helpers.objectKey(e)];
   }
-  objectEntry(e2) {
-    let t2 = this.faker.helpers.objectKey(e2);
-    return [t2, e2[t2]];
+  objectEntry(e) {
+    let t = this.faker.helpers.objectKey(e);
+    return [t, e[t]];
   }
-  arrayElement(t2) {
-    if (t2.length === 0)
+  arrayElement(t) {
+    if (t.length === 0)
       throw new e(`Cannot get value from empty dataset.`);
-    return t2[t2.length > 1 ? this.faker.number.int({ max: t2.length - 1 }) : 0];
+    return t[t.length > 1 ? this.faker.number.int({ max: t.length - 1 }) : 0];
   }
-  weightedArrayElement(t2) {
-    if (t2.length === 0)
+  weightedArrayElement(t) {
+    if (t.length === 0)
       throw new e(`weightedArrayElement expects an array with at least one element`);
-    if (t2.some((e2) => e2.weight <= 0))
+    if (t.some((e) => e.weight <= 0))
       throw new e(`weightedArrayElement expects an array of { weight, value } objects where weight is a positive number`);
-    let n2 = t2.reduce((e2, { weight: t3 }) => e2 + t3, 0), r2 = this.faker.number.float({ min: 0, max: n2 }), i2 = 0;
-    for (let { weight: e2, value: n3 } of t2)
-      if (i2 += e2, r2 < i2)
-        return n3;
-    return t2.at(-1).value;
+    let n = t.reduce((e, { weight: t }) => e + t, 0), r = this.faker.number.float({ min: 0, max: n }), i = 0;
+    for (let { weight: e, value: n } of t)
+      if (i += e, r < i)
+        return n;
+    return t.at(-1).value;
   }
-  arrayElements(e2, t2) {
-    if (e2.length === 0)
+  arrayElements(e, t) {
+    if (e.length === 0)
       return [];
-    let n2 = this.rangeToNumber(t2 ?? { min: 1, max: e2.length });
-    if (n2 >= e2.length)
-      return this.shuffle(e2);
-    if (n2 <= 0)
+    let n = this.rangeToNumber(t ?? { min: 1, max: e.length });
+    if (n >= e.length)
+      return this.shuffle(e);
+    if (n <= 0)
       return [];
-    let r2 = [...e2], i2 = e2.length, a2 = i2 - n2;
-    for (;i2-- > a2; ) {
-      let e3 = this.faker.number.int(i2), t3 = r2[e3];
-      r2[e3] = r2[i2], r2[i2] = t3;
+    let r = [...e], i = e.length, a = i - n;
+    for (;i-- > a; ) {
+      let e = this.faker.number.int(i), t = r[e];
+      r[e] = r[i], r[i] = t;
     }
-    return r2.slice(a2);
+    return r.slice(a);
   }
-  enumValue(e2) {
-    let t2 = Object.keys(e2).filter((e3) => Number.isNaN(Number(e3)));
-    return e2[this.arrayElement(t2)];
+  enumValue(e) {
+    let t = Object.keys(e).filter((e) => Number.isNaN(Number(e)));
+    return e[this.arrayElement(t)];
   }
-  rangeToNumber(e2) {
-    return typeof e2 == `number` ? e2 : this.faker.number.int(e2);
+  rangeToNumber(e) {
+    return typeof e == `number` ? e : this.faker.number.int(e);
   }
-  multiple(e2, t2 = {}) {
-    let n2 = this.rangeToNumber(t2.count ?? 3);
-    return n2 <= 0 ? [] : Array.from({ length: n2 }, e2);
+  multiple(e, t = {}) {
+    let n = this.rangeToNumber(t.count ?? 3);
+    return n <= 0 ? [] : Array.from({ length: n }, e);
   }
 };
 var Le = class extends I {
   faker;
-  constructor(e2) {
-    super(e2), this.faker = e2;
+  constructor(e) {
+    super(e), this.faker = e;
   }
-  fake(e2) {
-    e2 = typeof e2 == `string` ? e2 : this.arrayElement(e2);
-    let t2 = e2.search(/{{[a-z]/), n2 = e2.indexOf(`}}`, t2);
-    if (t2 === -1 || n2 === -1)
-      return e2;
-    let r2 = ke(e2.substring(t2 + 2, n2 + 2).replace(`}}`, ``).replace(`{{`, ``), this.faker), i2 = String(r2), a2 = e2.substring(0, t2) + i2 + e2.substring(n2 + 2);
-    return this.fake(a2);
+  fake(e) {
+    e = typeof e == `string` ? e : this.arrayElement(e);
+    let t = e.search(/{{[a-z]/), n = e.indexOf(`}}`, t);
+    if (t === -1 || n === -1)
+      return e;
+    let r = ke(e.substring(t + 2, n + 2).replace(`}}`, ``).replace(`{{`, ``), this.faker), i = String(r), a = e.substring(0, t) + i + e.substring(n + 2);
+    return this.fake(a);
   }
 };
-var L = typeof Buffer > `u` || !z(`base64`) ? (e2) => {
-  let t2 = new TextEncoder().encode(e2), n2 = Array.from(t2, (e3) => String.fromCodePoint(e3)).join(``);
-  return btoa(n2);
-} : (e2) => Buffer.from(e2).toString(`base64`);
-var R = typeof Buffer > `u` || !z(`base64url`) ? (e2) => L(e2).replaceAll(`+`, `-`).replaceAll(`/`, `_`).replaceAll(/=+$/g, ``) : (e2) => Buffer.from(e2).toString(`base64url`);
-function z(e2) {
+var L = typeof Buffer > `u` || !z(`base64`) ? (e) => {
+  let t = new TextEncoder().encode(e), n = Array.from(t, (e) => String.fromCodePoint(e)).join(``);
+  return btoa(n);
+} : (e) => Buffer.from(e).toString(`base64`);
+var R = typeof Buffer > `u` || !z(`base64url`) ? (e) => L(e).replaceAll(`+`, `-`).replaceAll(`/`, `_`).replaceAll(/=+$/g, ``) : (e) => Buffer.from(e).toString(`base64url`);
+function z(e) {
   try {
-    return typeof Buffer.from(`test`).toString(e2) == `string`;
+    return typeof Buffer.from(`test`).toString(e) == `string`;
   } catch {
     return false;
   }
 }
-function Re(e2) {
-  let { deprecated: t2, since: n2, until: r2, proposed: i2 } = e2, a2 = `[@faker-js/faker]: ${t2} is deprecated`;
-  n2 && (a2 += ` since v${n2}`), r2 && (a2 += ` and will be removed in v${r2}`), i2 && (a2 += `. Please use ${i2} instead`), console.warn(`${a2}.`);
+function Re(e) {
+  let { deprecated: t, since: n, until: r, proposed: i } = e, a = `[@faker-js/faker]: ${t} is deprecated`;
+  n && (a += ` since v${n}`), r && (a += ` and will be removed in v${r}`), i && (a += `. Please use ${i} instead`), console.warn(`${a}.`);
 }
 var ze = class extends S {
   avatar() {
@@ -24917,26 +32325,26 @@ var ze = class extends S {
   avatarGitHub() {
     return `https://avatars.githubusercontent.com/u/${this.faker.number.int(1e8)}`;
   }
-  personPortrait(e2 = {}) {
-    let { size: t2 = 512 } = e2, { sex: n2 = this.faker.person.sexType() } = e2;
-    return n2 === `generic` && (n2 = this.faker.person.sexType()), `https://cdn.jsdelivr.net/gh/faker-js/assets-person-portrait/${n2}/${t2}/${this.faker.number.int({ min: 0, max: 99 })}.jpg`;
+  personPortrait(e = {}) {
+    let { size: t = 512 } = e, { sex: n = this.faker.person.sexType() } = e;
+    return n === `generic` && (n = this.faker.person.sexType()), `https://cdn.jsdelivr.net/gh/faker-js/assets-person-portrait/${n}/${t}/${this.faker.number.int({ min: 0, max: 99 })}.jpg`;
   }
-  url(e2 = {}) {
-    let { width: t2 = this.faker.number.int({ min: 1, max: 3999 }), height: n2 = this.faker.number.int({ min: 1, max: 3999 }) } = e2;
-    return this.faker.helpers.arrayElement([({ width: e3, height: t3 }) => this.urlPicsumPhotos({ width: e3, height: t3, grayscale: false, blur: 0 })])({ width: t2, height: n2 });
+  url(e = {}) {
+    let { width: t = this.faker.number.int({ min: 1, max: 3999 }), height: n = this.faker.number.int({ min: 1, max: 3999 }) } = e;
+    return this.faker.helpers.arrayElement([({ width: e, height: t }) => this.urlPicsumPhotos({ width: e, height: t, grayscale: false, blur: 0 })])({ width: t, height: n });
   }
-  urlLoremFlickr(e2 = {}) {
+  urlLoremFlickr(e = {}) {
     Re({ deprecated: `faker.image.urlLoremFlickr()`, proposed: `faker.image.url()`, since: `10.1.0`, until: `11.0.0` });
-    let { width: t2 = this.faker.number.int({ min: 1, max: 3999 }), height: n2 = this.faker.number.int({ min: 1, max: 3999 }), category: r2 } = e2;
-    return `https://loremflickr.com/${t2}/${n2}${r2 == null ? `` : `/${r2}`}?lock=${this.faker.number.int()}`;
+    let { width: t = this.faker.number.int({ min: 1, max: 3999 }), height: n = this.faker.number.int({ min: 1, max: 3999 }), category: r } = e;
+    return `https://loremflickr.com/${t}/${n}${r == null ? `` : `/${r}`}?lock=${this.faker.number.int()}`;
   }
-  urlPicsumPhotos(e2 = {}) {
-    let { width: t2 = this.faker.number.int({ min: 1, max: 3999 }), height: n2 = this.faker.number.int({ min: 1, max: 3999 }), grayscale: r2 = this.faker.datatype.boolean(), blur: i2 = this.faker.number.int({ max: 10 }) } = e2, a2 = `https://picsum.photos/seed/${this.faker.string.alphanumeric({ length: { min: 5, max: 10 } })}/${t2}/${n2}`, o2 = typeof i2 == `number` && i2 >= 1 && i2 <= 10;
-    return (r2 || o2) && (a2 += `?`, r2 && (a2 += `grayscale`), r2 && o2 && (a2 += `&`), o2 && (a2 += `blur=${i2}`)), a2;
+  urlPicsumPhotos(e = {}) {
+    let { width: t = this.faker.number.int({ min: 1, max: 3999 }), height: n = this.faker.number.int({ min: 1, max: 3999 }), grayscale: r = this.faker.datatype.boolean(), blur: i = this.faker.number.int({ max: 10 }) } = e, a = `https://picsum.photos/seed/${this.faker.string.alphanumeric({ length: { min: 5, max: 10 } })}/${t}/${n}`, o = typeof i == `number` && i >= 1 && i <= 10;
+    return (r || o) && (a += `?`, r && (a += `grayscale`), r && o && (a += `&`), o && (a += `blur=${i}`)), a;
   }
-  dataUri(e2 = {}) {
-    let { width: t2 = this.faker.number.int({ min: 1, max: 3999 }), height: n2 = this.faker.number.int({ min: 1, max: 3999 }), color: r2 = this.faker.color.rgb(), type: i2 = this.faker.helpers.arrayElement([`svg-uri`, `svg-base64`]) } = e2, a2 = `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" width="${t2}" height="${n2}"><rect width="100%" height="100%" fill="${r2}"/><text x="${t2 / 2}" y="${n2 / 2}" font-size="20" alignment-baseline="middle" text-anchor="middle" fill="white">${t2}x${n2}</text></svg>`;
-    return i2 === `svg-uri` ? `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(a2)}` : `data:image/svg+xml;base64,${L(a2)}`;
+  dataUri(e = {}) {
+    let { width: t = this.faker.number.int({ min: 1, max: 3999 }), height: n = this.faker.number.int({ min: 1, max: 3999 }), color: r = this.faker.color.rgb(), type: i = this.faker.helpers.arrayElement([`svg-uri`, `svg-base64`]) } = e, a = `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" width="${t}" height="${n}"><rect width="100%" height="100%" fill="${r}"/><text x="${t / 2}" y="${n / 2}" font-size="20" alignment-baseline="middle" text-anchor="middle" fill="white">${t}x${n}</text></svg>`;
+    return i === `svg-uri` ? `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(a)}` : `data:image/svg+xml;base64,${L(a)}`;
   }
 };
 var Be = Object.fromEntries([[`А`, `A`], [`а`, `a`], [`Б`, `B`], [`б`, `b`], [`В`, `V`], [`в`, `v`], [`Г`, `G`], [`г`, `g`], [`Д`, `D`], [`д`, `d`], [`ъе`, `ye`], [`Ъе`, `Ye`], [`ъЕ`, `yE`], [`ЪЕ`, `YE`], [`Е`, `E`], [`е`, `e`], [`Ё`, `Yo`], [`ё`, `yo`], [`Ж`, `Zh`], [`ж`, `zh`], [`З`, `Z`], [`з`, `z`], [`И`, `I`], [`и`, `i`], [`ый`, `iy`], [`Ый`, `Iy`], [`ЫЙ`, `IY`], [`ыЙ`, `iY`], [`Й`, `Y`], [`й`, `y`], [`К`, `K`], [`к`, `k`], [`Л`, `L`], [`л`, `l`], [`М`, `M`], [`м`, `m`], [`Н`, `N`], [`н`, `n`], [`О`, `O`], [`о`, `o`], [`П`, `P`], [`п`, `p`], [`Р`, `R`], [`р`, `r`], [`С`, `S`], [`с`, `s`], [`Т`, `T`], [`т`, `t`], [`У`, `U`], [`у`, `u`], [`Ф`, `F`], [`ф`, `f`], [`Х`, `Kh`], [`х`, `kh`], [`Ц`, `Ts`], [`ц`, `ts`], [`Ч`, `Ch`], [`ч`, `ch`], [`Ш`, `Sh`], [`ш`, `sh`], [`Щ`, `Sch`], [`щ`, `sch`], [`Ъ`, ``], [`ъ`, ``], [`Ы`, `Y`], [`ы`, `y`], [`Ь`, ``], [`ь`, ``], [`Э`, `E`], [`э`, `e`], [`Ю`, `Yu`], [`ю`, `yu`], [`Я`, `Ya`], [`я`, `ya`]]);
@@ -24946,47 +32354,47 @@ var Ue = Object.fromEntries([[`ա`, `a`], [`Ա`, `A`], [`բ`, `b`], [`Բ`, `B`],
 var We = Object.fromEntries([[`چ`, `ch`], [`ک`, `k`], [`گ`, `g`], [`پ`, `p`], [`ژ`, `zh`], [`ی`, `y`]]);
 var Ge = Object.fromEntries([[`א`, `a`], [`ב`, `b`], [`ג`, `g`], [`ד`, `d`], [`ה`, `h`], [`ו`, `v`], [`ז`, `z`], [`ח`, `ch`], [`ט`, `t`], [`י`, `y`], [`כ`, `k`], [`ך`, `kh`], [`ל`, `l`], [`ם`, `m`], [`מ`, `m`], [`ן`, `n`], [`נ`, `n`], [`ס`, `s`], [`ע`, `a`], [`פ`, `f`], [`ף`, `ph`], [`צ`, `ts`], [`ץ`, `ts`], [`ק`, `k`], [`ר`, `r`], [`ש`, `sh`], [`ת`, `t`], [`ו`, `v`]]);
 var B = { ...Be, ...Ve, ...He, ...We, ...Ue, ...Ge };
-var Ke = function(e2) {
-  return e2.Any = `any`, e2.Loopback = `loopback`, e2.PrivateA = `private-a`, e2.PrivateB = `private-b`, e2.PrivateC = `private-c`, e2.TestNet1 = `test-net-1`, e2.TestNet2 = `test-net-2`, e2.TestNet3 = `test-net-3`, e2.LinkLocal = `link-local`, e2.Multicast = `multicast`, e2;
+var Ke = function(e) {
+  return e.Any = `any`, e.Loopback = `loopback`, e.PrivateA = `private-a`, e.PrivateB = `private-b`, e.PrivateC = `private-c`, e.TestNet1 = `test-net-1`, e.TestNet2 = `test-net-2`, e.TestNet3 = `test-net-3`, e.LinkLocal = `link-local`, e.Multicast = `multicast`, e;
 }({});
 var qe = { any: `0.0.0.0/0`, loopback: `127.0.0.0/8`, "private-a": `10.0.0.0/8`, "private-b": `172.16.0.0/12`, "private-c": `192.168.0.0/16`, "test-net-1": `192.0.2.0/24`, "test-net-2": `198.51.100.0/24`, "test-net-3": `203.0.113.0/24`, "link-local": `169.254.0.0/16`, multicast: `224.0.0.0/4` };
-function V(e2) {
-  return /^[a-z][a-z-]*[a-z]$/i.exec(e2) !== null;
+function V(e) {
+  return /^[a-z][a-z-]*[a-z]$/i.exec(e) !== null;
 }
-function H(e2, t2) {
-  let n2 = e2.helpers.slugify(t2);
-  if (V(n2))
-    return n2;
-  let r2 = e2.helpers.slugify(e2.lorem.word());
-  return V(r2) ? r2 : e2.string.alpha({ casing: `lower`, length: e2.number.int({ min: 4, max: 8 }) });
+function H(e, t) {
+  let n = e.helpers.slugify(t);
+  if (V(n))
+    return n;
+  let r = e.helpers.slugify(e.lorem.word());
+  return V(r) ? r : e.string.alpha({ casing: `lower`, length: e.number.int({ min: 4, max: 8 }) });
 }
 var Je = class extends S {
-  email(e2 = {}) {
-    let { firstName: t2, lastName: n2, provider: r2 = this.faker.helpers.arrayElement(this.faker.definitions.internet.free_email), allowSpecialCharacters: i2 = false } = e2, a2 = this.username({ firstName: t2, lastName: n2 });
-    if (a2 = a2.replaceAll(/[^A-Za-z0-9._+-]+/g, ``), a2 = a2.substring(0, 50), i2) {
-      let e3 = [...`._-`], t3 = [...".!#$%&'*+-/=?^_`{|}~"];
-      a2 = a2.replace(this.faker.helpers.arrayElement(e3), this.faker.helpers.arrayElement(t3));
+  email(e = {}) {
+    let { firstName: t, lastName: n, provider: r = this.faker.helpers.arrayElement(this.faker.definitions.internet.free_email), allowSpecialCharacters: i = false } = e, a = this.username({ firstName: t, lastName: n });
+    if (a = a.replaceAll(/[^A-Za-z0-9._+-]+/g, ``), a = a.substring(0, 50), i) {
+      let e = [...`._-`], t = [...".!#$%&'*+-/=?^_`{|}~"];
+      a = a.replace(this.faker.helpers.arrayElement(e), this.faker.helpers.arrayElement(t));
     }
-    return a2 = a2.replaceAll(/\.{2,}/g, `.`), a2 = a2.replace(/^\./, ``), a2 = a2.replace(/\.$/, ``), `${a2}@${r2}`;
+    return a = a.replaceAll(/\.{2,}/g, `.`), a = a.replace(/^\./, ``), a = a.replace(/\.$/, ``), `${a}@${r}`;
   }
-  exampleEmail(e2 = {}) {
-    let { firstName: t2, lastName: n2, allowSpecialCharacters: r2 = false } = e2, i2 = this.faker.helpers.arrayElement(this.faker.definitions.internet.example_email);
-    return this.email({ firstName: t2, lastName: n2, provider: i2, allowSpecialCharacters: r2 });
+  exampleEmail(e = {}) {
+    let { firstName: t, lastName: n, allowSpecialCharacters: r = false } = e, i = this.faker.helpers.arrayElement(this.faker.definitions.internet.example_email);
+    return this.email({ firstName: t, lastName: n, provider: i, allowSpecialCharacters: r });
   }
-  username(e2 = {}) {
-    let { firstName: t2 = this.faker.person.firstName(), lastName: n2 = this.faker.person.lastName(), lastName: r2 } = e2, i2 = this.faker.helpers.arrayElement([`.`, `_`]), a2 = this.faker.number.int(99), o2 = [() => `${t2}${i2}${n2}${a2}`, () => `${t2}${i2}${n2}`];
-    r2 || o2.push(() => `${t2}${a2}`);
-    let s2 = this.faker.helpers.arrayElement(o2)();
-    return s2 = s2.normalize(`NFKD`).replaceAll(/[\u0300-\u036F]/g, ``), s2 = [...s2].map((e3) => {
-      if (B[e3])
-        return B[e3];
-      let t3 = e3.codePointAt(0) ?? NaN;
-      return t3 < 128 ? e3 : t3.toString(36);
-    }).join(``), s2 = s2.replaceAll(`'`, ``), s2 = s2.replaceAll(` `, ``), s2;
+  username(e = {}) {
+    let { firstName: t = this.faker.person.firstName(), lastName: n = this.faker.person.lastName(), lastName: r } = e, i = this.faker.helpers.arrayElement([`.`, `_`]), a = this.faker.number.int(99), o = [() => `${t}${i}${n}${a}`, () => `${t}${i}${n}`];
+    r || o.push(() => `${t}${a}`);
+    let s = this.faker.helpers.arrayElement(o)();
+    return s = s.normalize(`NFKD`).replaceAll(/[\u0300-\u036F]/g, ``), s = [...s].map((e) => {
+      if (B[e])
+        return B[e];
+      let t = e.codePointAt(0) ?? NaN;
+      return t < 128 ? e : t.toString(36);
+    }).join(``), s = s.replaceAll(`'`, ``), s = s.replaceAll(` `, ``), s;
   }
-  displayName(e2 = {}) {
-    let { firstName: t2 = this.faker.person.firstName(), lastName: n2 = this.faker.person.lastName() } = e2, r2 = this.faker.helpers.arrayElement([`.`, `_`]), i2 = this.faker.number.int(99), a2 = this.faker.helpers.arrayElement([() => `${t2}${i2}`, () => `${t2}${r2}${n2}`, () => `${t2}${r2}${n2}${i2}`])();
-    return a2 = a2.replaceAll(`'`, ``), a2 = a2.replaceAll(` `, ``), a2;
+  displayName(e = {}) {
+    let { firstName: t = this.faker.person.firstName(), lastName: n = this.faker.person.lastName() } = e, r = this.faker.helpers.arrayElement([`.`, `_`]), i = this.faker.number.int(99), a = this.faker.helpers.arrayElement([() => `${t}${i}`, () => `${t}${r}${n}`, () => `${t}${r}${n}${i}`])();
+    return a = a.replaceAll(`'`, ``), a = a.replaceAll(` `, ``), a;
   }
   protocol() {
     return this.faker.helpers.arrayElement([`http`, `https`]);
@@ -24994,13 +32402,13 @@ var Je = class extends S {
   httpMethod() {
     return this.faker.helpers.arrayElement([`GET`, `POST`, `PUT`, `DELETE`, `PATCH`]);
   }
-  httpStatusCode(e2 = {}) {
-    let { types: t2 = Object.keys(this.faker.definitions.internet.http_status_code) } = e2, n2 = this.faker.helpers.arrayElement(t2);
-    return this.faker.helpers.arrayElement(this.faker.definitions.internet.http_status_code[n2]);
+  httpStatusCode(e = {}) {
+    let { types: t = Object.keys(this.faker.definitions.internet.http_status_code) } = e, n = this.faker.helpers.arrayElement(t);
+    return this.faker.helpers.arrayElement(this.faker.definitions.internet.http_status_code[n]);
   }
-  url(e2 = {}) {
-    let { appendSlash: t2 = this.faker.datatype.boolean(), protocol: n2 = `https` } = e2;
-    return `${n2}://${this.domainName()}${t2 ? `/` : ``}`;
+  url(e = {}) {
+    let { appendSlash: t = this.faker.datatype.boolean(), protocol: n = `https` } = e;
+    return `${n}://${this.domainName()}${t ? `/` : ``}`;
   }
   domainName() {
     return `${this.domainWord()}.${this.domainSuffix()}`;
@@ -25014,20 +32422,20 @@ var Je = class extends S {
   ip() {
     return this.faker.datatype.boolean() ? this.ipv4() : this.ipv6();
   }
-  ipv4(t2 = {}) {
-    let { network: n2 = `any`, cidrBlock: r2 = qe[n2] } = t2;
-    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(r2))
-      throw new e(`Invalid CIDR block provided: ${r2}. Must be in the format x.x.x.x/y.`);
-    let [i2, a2] = r2.split(`/`), o2 = Number.parseInt(a2, 10);
-    if (o2 > 32)
-      throw new e(`Invalid CIDR block provided: ${r2}. Prefix length must be between 0 and 32.`);
-    let s2 = i2.split(`.`).map(Number);
-    if (s2.some((e2) => e2 > 255))
-      throw new e(`Invalid CIDR block provided: ${r2}. Each octet must be between 0 and 255.`);
-    if (o2 === 32)
-      return i2;
-    let c2 = 4294967295 >>> o2, [l2, u2, d2, f2] = s2, p2 = (l2 << 24 | u2 << 16 | d2 << 8 | f2) & ~c2 | this.faker.number.int(c2);
-    return [p2 >>> 24 & 255, p2 >>> 16 & 255, p2 >>> 8 & 255, p2 & 255].join(`.`);
+  ipv4(t = {}) {
+    let { network: n = `any`, cidrBlock: r = qe[n] } = t;
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(r))
+      throw new e(`Invalid CIDR block provided: ${r}. Must be in the format x.x.x.x/y.`);
+    let [i, a] = r.split(`/`), o = Number.parseInt(a, 10);
+    if (o > 32)
+      throw new e(`Invalid CIDR block provided: ${r}. Prefix length must be between 0 and 32.`);
+    let s = i.split(`.`).map(Number);
+    if (s.some((e) => e > 255))
+      throw new e(`Invalid CIDR block provided: ${r}. Each octet must be between 0 and 255.`);
+    if (o === 32)
+      return i;
+    let c = 4294967295 >>> o, [l, u, d, f] = s, p = (l << 24 | u << 16 | d << 8 | f) & ~c | this.faker.number.int(c);
+    return [p >>> 24 & 255, p >>> 16 & 255, p >>> 8 & 255, p & 255].join(`.`);
   }
   ipv6() {
     return Array.from({ length: 8 }, () => this.faker.string.hexadecimal({ length: 4, casing: `lower`, prefix: `` })).join(`:`);
@@ -25038,87 +32446,87 @@ var Je = class extends S {
   userAgent() {
     return this.faker.helpers.fake(this.faker.definitions.internet.user_agent_pattern);
   }
-  mac(e2 = {}) {
-    typeof e2 == `string` && (e2 = { separator: e2 });
-    let { separator: t2 = `:` } = e2, n2, r2 = ``;
-    for ([`:`, `-`, ``].includes(t2) || (t2 = `:`), n2 = 0;n2 < 12; n2++)
-      r2 += this.faker.number.hex(15), n2 % 2 == 1 && n2 !== 11 && (r2 += t2);
-    return r2;
+  mac(e = {}) {
+    typeof e == `string` && (e = { separator: e });
+    let { separator: t = `:` } = e, n, r = ``;
+    for ([`:`, `-`, ``].includes(t) || (t = `:`), n = 0;n < 12; n++)
+      r += this.faker.number.hex(15), n % 2 == 1 && n !== 11 && (r += t);
+    return r;
   }
-  password(e2 = {}) {
-    let t2 = /[aeiouAEIOU]$/, n2 = /[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]$/, { length: r2 = 15, memorable: i2 = false, pattern: a2 = /\w/, prefix: o2 = `` } = e2, s2 = a2, c2 = o2;
-    for (;c2.length < r2; ) {
-      i2 && (s2 = n2.test(c2) ? t2 : n2);
-      let e3 = this.faker.number.int(94) + 33, r3 = String.fromCodePoint(e3);
-      i2 && (r3 = r3.toLowerCase()), s2.test(r3) && (c2 += r3);
+  password(e = {}) {
+    let t = /[aeiouAEIOU]$/, n = /[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]$/, { length: r = 15, memorable: i = false, pattern: a = /\w/, prefix: o = `` } = e, s = a, c = o;
+    for (;c.length < r; ) {
+      i && (s = n.test(c) ? t : n);
+      let e = this.faker.number.int(94) + 33, r = String.fromCodePoint(e);
+      i && (r = r.toLowerCase()), s.test(r) && (c += r);
     }
-    return c2;
+    return c;
   }
-  emoji(e2 = {}) {
-    let { types: t2 = Object.keys(this.faker.definitions.internet.emoji) } = e2, n2 = this.faker.helpers.arrayElement(t2);
-    return this.faker.helpers.arrayElement(this.faker.definitions.internet.emoji[n2]);
+  emoji(e = {}) {
+    let { types: t = Object.keys(this.faker.definitions.internet.emoji) } = e, n = this.faker.helpers.arrayElement(t);
+    return this.faker.helpers.arrayElement(this.faker.definitions.internet.emoji[n]);
   }
   jwtAlgorithm() {
     return this.faker.helpers.arrayElement(this.faker.definitions.internet.jwt_algorithm);
   }
-  jwt(e2 = {}) {
-    let { refDate: t2 = this.faker.defaultRefDate() } = e2, n2 = this.faker.date.recent({ refDate: t2 }), { header: r2 = { alg: this.jwtAlgorithm(), typ: `JWT` }, payload: i2 = { iat: Math.round(n2.valueOf() / 1000), exp: Math.round(this.faker.date.soon({ refDate: n2 }).valueOf() / 1000), nbf: Math.round(this.faker.date.anytime({ refDate: t2 }).valueOf() / 1000), iss: this.faker.company.name(), sub: this.faker.string.uuid(), aud: this.faker.string.uuid(), jti: this.faker.string.uuid() } } = e2;
-    return `${R(JSON.stringify(r2))}.${R(JSON.stringify(i2))}.${this.faker.string.alphanumeric(64)}`;
+  jwt(e = {}) {
+    let { refDate: t = this.faker.defaultRefDate() } = e, n = this.faker.date.recent({ refDate: t }), { header: r = { alg: this.jwtAlgorithm(), typ: `JWT` }, payload: i = { iat: Math.round(n.valueOf() / 1000), exp: Math.round(this.faker.date.soon({ refDate: n }).valueOf() / 1000), nbf: Math.round(this.faker.date.anytime({ refDate: t }).valueOf() / 1000), iss: this.faker.company.name(), sub: this.faker.string.uuid(), aud: this.faker.string.uuid(), jti: this.faker.string.uuid() } } = e;
+    return `${R(JSON.stringify(r))}.${R(JSON.stringify(i))}.${this.faker.string.alphanumeric(64)}`;
   }
 };
 var U = class extends x {
-  latitude(e2 = {}) {
-    let { max: t2 = 90, min: n2 = -90, precision: r2 = 4 } = e2;
-    return this.faker.number.float({ min: n2, max: t2, fractionDigits: r2 });
+  latitude(e = {}) {
+    let { max: t = 90, min: n = -90, precision: r = 4 } = e;
+    return this.faker.number.float({ min: n, max: t, fractionDigits: r });
   }
-  longitude(e2 = {}) {
-    let { max: t2 = 180, min: n2 = -180, precision: r2 = 4 } = e2;
-    return this.faker.number.float({ max: t2, min: n2, fractionDigits: r2 });
+  longitude(e = {}) {
+    let { max: t = 180, min: n = -180, precision: r = 4 } = e;
+    return this.faker.number.float({ max: t, min: n, fractionDigits: r });
   }
-  nearbyGPSCoordinate(e2 = {}) {
-    let { origin: t2, radius: n2 = 10, isMetric: r2 = false } = e2;
-    if (t2 == null)
+  nearbyGPSCoordinate(e = {}) {
+    let { origin: t, radius: n = 10, isMetric: r = false } = e;
+    if (t == null)
       return [this.latitude(), this.longitude()];
-    let i2 = this.faker.number.float({ max: 2 * Math.PI, fractionDigits: 5 }), a2 = r2 ? n2 : n2 * 1.60934, o2 = this.faker.number.float({ max: a2, fractionDigits: 3 }) * 0.995 / (40000 / 360), s2 = [t2[0] + Math.sin(i2) * o2, t2[1] + Math.cos(i2) * o2];
-    return s2[0] %= 180, Math.abs(s2[0]) > 90 && (s2[0] = Math.sign(s2[0]) * 180 - s2[0], s2[1] += 180), s2[1] = (s2[1] % 360 + 540) % 360 - 180, [s2[0], s2[1]];
+    let i = this.faker.number.float({ max: 2 * Math.PI, fractionDigits: 5 }), a = r ? n : n * 1.60934, o = this.faker.number.float({ max: a, fractionDigits: 3 }) * 0.995 / (40000 / 360), s = [t[0] + Math.sin(i) * o, t[1] + Math.cos(i) * o];
+    return s[0] %= 180, Math.abs(s[0]) > 90 && (s[0] = Math.sign(s[0]) * 180 - s[0], s[1] += 180), s[1] = (s[1] % 360 + 540) % 360 - 180, [s[0], s[1]];
   }
 };
 var Ye = class extends U {
   faker;
-  constructor(e2) {
-    super(e2), this.faker = e2;
+  constructor(e) {
+    super(e), this.faker = e;
   }
-  zipCode(t2 = {}) {
-    typeof t2 == `string` && (t2 = { format: t2 });
-    let { state: n2 } = t2;
-    if (n2 != null) {
-      let t3 = this.faker.definitions.location.postcode_by_state[n2];
-      if (t3 == null)
-        throw new e(`No zip code definition found for state "${n2}"`);
-      return this.faker.helpers.fake(t3);
+  zipCode(t = {}) {
+    typeof t == `string` && (t = { format: t });
+    let { state: n } = t;
+    if (n != null) {
+      let t = this.faker.definitions.location.postcode_by_state[n];
+      if (t == null)
+        throw new e(`No zip code definition found for state "${n}"`);
+      return this.faker.helpers.fake(t);
     }
-    let { format: r2 = this.faker.definitions.location.postcode } = t2;
-    return typeof r2 == `string` && (r2 = [r2]), r2 = this.faker.helpers.arrayElement(r2), this.faker.helpers.replaceSymbols(r2);
+    let { format: r = this.faker.definitions.location.postcode } = t;
+    return typeof r == `string` && (r = [r]), r = this.faker.helpers.arrayElement(r), this.faker.helpers.replaceSymbols(r);
   }
   city() {
     return this.faker.helpers.fake(this.faker.definitions.location.city_pattern);
   }
   buildingNumber() {
-    return this.faker.helpers.arrayElement(this.faker.definitions.location.building_number).replaceAll(/#+/g, (e2) => this.faker.string.numeric({ length: e2.length, allowLeadingZeros: false }));
+    return this.faker.helpers.arrayElement(this.faker.definitions.location.building_number).replaceAll(/#+/g, (e) => this.faker.string.numeric({ length: e.length, allowLeadingZeros: false }));
   }
   street() {
     return this.faker.helpers.fake(this.faker.definitions.location.street_pattern);
   }
-  streetAddress(e2 = {}) {
-    typeof e2 == `boolean` && (e2 = { useFullAddress: e2 });
-    let { useFullAddress: t2 } = e2, n2 = this.faker.definitions.location.street_address[t2 ? `full` : `normal`];
-    return this.faker.helpers.fake(n2);
+  streetAddress(e = {}) {
+    typeof e == `boolean` && (e = { useFullAddress: e });
+    let { useFullAddress: t } = e, n = this.faker.definitions.location.street_address[t ? `full` : `normal`];
+    return this.faker.helpers.fake(n);
   }
   postalAddress() {
     return this.faker.helpers.fake(this.faker.definitions.location.postal_address);
   }
   secondaryAddress() {
-    return this.faker.helpers.fake(this.faker.definitions.location.secondary_address).replaceAll(/#+/g, (e2) => this.faker.string.numeric({ length: e2.length, allowLeadingZeros: false }));
+    return this.faker.helpers.fake(this.faker.definitions.location.secondary_address).replaceAll(/#+/g, (e) => this.faker.string.numeric({ length: e.length, allowLeadingZeros: false }));
   }
   county() {
     return this.faker.helpers.arrayElement(this.faker.definitions.location.county);
@@ -25129,10 +32537,10 @@ var Ye = class extends U {
   continent() {
     return this.faker.helpers.arrayElement(this.faker.definitions.location.continent);
   }
-  countryCode(e2 = {}) {
-    typeof e2 == `string` && (e2 = { variant: e2 });
-    let { variant: t2 = `alpha-2` } = e2, n2 = (() => {
-      switch (t2) {
+  countryCode(e = {}) {
+    typeof e == `string` && (e = { variant: e });
+    let { variant: t = `alpha-2` } = e, n = (() => {
+      switch (t) {
         case `numeric`:
           return `numeric`;
         case `alpha-3`:
@@ -25141,23 +32549,23 @@ var Ye = class extends U {
           return `alpha2`;
       }
     })();
-    return this.faker.helpers.arrayElement(this.faker.definitions.location.country_code)[n2];
+    return this.faker.helpers.arrayElement(this.faker.definitions.location.country_code)[n];
   }
-  state(e2 = {}) {
-    let { abbreviated: t2 = false } = e2, n2 = t2 ? this.faker.definitions.location.state_abbr : this.faker.definitions.location.state;
-    return this.faker.helpers.arrayElement(n2);
+  state(e = {}) {
+    let { abbreviated: t = false } = e, n = t ? this.faker.definitions.location.state_abbr : this.faker.definitions.location.state;
+    return this.faker.helpers.arrayElement(n);
   }
-  direction(e2 = {}) {
-    let { abbreviated: t2 = false } = e2, n2 = this.faker.definitions.location.direction, r2 = t2 ? [...n2.cardinal_abbr, ...n2.ordinal_abbr] : [...n2.cardinal, ...n2.ordinal];
-    return this.faker.helpers.arrayElement(r2);
+  direction(e = {}) {
+    let { abbreviated: t = false } = e, n = this.faker.definitions.location.direction, r = t ? [...n.cardinal_abbr, ...n.ordinal_abbr] : [...n.cardinal, ...n.ordinal];
+    return this.faker.helpers.arrayElement(r);
   }
-  cardinalDirection(e2 = {}) {
-    let { abbreviated: t2 = false } = e2, n2 = this.faker.definitions.location.direction, r2 = t2 ? n2.cardinal_abbr : n2.cardinal;
-    return this.faker.helpers.arrayElement(r2);
+  cardinalDirection(e = {}) {
+    let { abbreviated: t = false } = e, n = this.faker.definitions.location.direction, r = t ? n.cardinal_abbr : n.cardinal;
+    return this.faker.helpers.arrayElement(r);
   }
-  ordinalDirection(e2 = {}) {
-    let { abbreviated: t2 = false } = e2, n2 = this.faker.definitions.location.direction, r2 = t2 ? n2.ordinal_abbr : n2.ordinal;
-    return this.faker.helpers.arrayElement(r2);
+  ordinalDirection(e = {}) {
+    let { abbreviated: t = false } = e, n = this.faker.definitions.location.direction, r = t ? n.ordinal_abbr : n.ordinal;
+    return this.faker.helpers.arrayElement(r);
   }
   timeZone() {
     return this.faker.helpers.arrayElement(this.faker.definitions.location.time_zone);
@@ -25166,66 +32574,66 @@ var Ye = class extends U {
     return this.faker.helpers.arrayElement(this.faker.definitions.location.language);
   }
 };
-function Xe(e2, t2, n2 = (e3) => e3) {
-  let r2 = Object.create(null);
-  for (let i2 of e2) {
-    let e3 = t2(i2);
-    r2[e3] === undefined && (r2[e3] = []), r2[e3].push(n2(i2));
+function Xe(e, t, n = (e) => e) {
+  let r = Object.create(null);
+  for (let i of e) {
+    let e = t(i);
+    r[e] === undefined && (r[e] = []), r[e].push(n(i));
   }
-  return r2;
+  return r;
 }
 var W = { fail: () => {
   throw new e(`No words found that match the given length.`);
-}, closest: (e2, t2) => {
-  let n2 = Xe(e2, (e3) => e3.length), r2 = Object.keys(n2).map(Number), i2 = Math.max(...r2.filter((e3) => e3 < t2.min)), a2 = Math.min(...r2.filter((e3) => e3 > t2.max)), o2 = Math.min(t2.min - i2, a2 - t2.max);
-  return e2.filter((e3) => e3.length === t2.min - o2 || e3.length === t2.max + o2);
-}, shortest: (e2) => {
-  let t2 = Math.min(...e2.map((e3) => e3.length));
-  return e2.filter((e3) => e3.length === t2);
-}, longest: (e2) => {
-  let t2 = Math.max(...e2.map((e3) => e3.length));
-  return e2.filter((e3) => e3.length === t2);
-}, "any-length": (e2) => [...e2] };
-function G(e2) {
-  let { wordList: t2, length: n2, strategy: r2 = `fail` } = e2;
-  if (n2 != null) {
-    let e3 = typeof n2 == `number` ? (e4) => e4.length === n2 : (e4) => e4.length >= n2.min && e4.length <= n2.max, i2 = t2.filter(e3);
-    return i2.length > 0 ? i2 : typeof n2 == `number` ? W[r2](t2, { min: n2, max: n2 }) : W[r2](t2, n2);
-  } else if (r2 === `shortest` || r2 === `longest`)
-    return W[r2](t2);
-  return [...t2];
+}, closest: (e, t) => {
+  let n = Xe(e, (e) => e.length), r = Object.keys(n).map(Number), i = Math.max(...r.filter((e) => e < t.min)), a = Math.min(...r.filter((e) => e > t.max)), o = Math.min(t.min - i, a - t.max);
+  return e.filter((e) => e.length === t.min - o || e.length === t.max + o);
+}, shortest: (e) => {
+  let t = Math.min(...e.map((e) => e.length));
+  return e.filter((e) => e.length === t);
+}, longest: (e) => {
+  let t = Math.max(...e.map((e) => e.length));
+  return e.filter((e) => e.length === t);
+}, "any-length": (e) => [...e] };
+function G(e) {
+  let { wordList: t, length: n, strategy: r = `fail` } = e;
+  if (n != null) {
+    let e = typeof n == `number` ? (e) => e.length === n : (e) => e.length >= n.min && e.length <= n.max, i = t.filter(e);
+    return i.length > 0 ? i : typeof n == `number` ? W[r](t, { min: n, max: n }) : W[r](t, n);
+  } else if (r === `shortest` || r === `longest`)
+    return W[r](t);
+  return [...t];
 }
 var Ze = class extends S {
-  word(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.lorem.word }));
+  word(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.lorem.word }));
   }
-  words(e2 = 3) {
-    return this.faker.helpers.multiple(() => this.word(), { count: e2 }).join(` `);
+  words(e = 3) {
+    return this.faker.helpers.multiple(() => this.word(), { count: e }).join(` `);
   }
-  sentence(e2 = { min: 3, max: 10 }) {
-    let t2 = this.words(e2);
-    return `${t2.charAt(0).toUpperCase() + t2.substring(1)}.`;
+  sentence(e = { min: 3, max: 10 }) {
+    let t = this.words(e);
+    return `${t.charAt(0).toUpperCase() + t.substring(1)}.`;
   }
-  slug(e2 = 3) {
-    let t2 = this.words(e2);
-    return this.faker.helpers.slugify(t2);
+  slug(e = 3) {
+    let t = this.words(e);
+    return this.faker.helpers.slugify(t);
   }
-  sentences(e2 = { min: 2, max: 6 }, t2 = ` `) {
-    return this.faker.helpers.multiple(() => this.sentence(), { count: e2 }).join(t2);
+  sentences(e = { min: 2, max: 6 }, t = ` `) {
+    return this.faker.helpers.multiple(() => this.sentence(), { count: e }).join(t);
   }
-  paragraph(e2 = 3) {
-    return this.sentences(e2);
+  paragraph(e = 3) {
+    return this.sentences(e);
   }
-  paragraphs(e2 = 3, t2 = `
+  paragraphs(e = 3, t = `
 `) {
-    return this.faker.helpers.multiple(() => this.paragraph(), { count: e2 }).join(t2);
+    return this.faker.helpers.multiple(() => this.paragraph(), { count: e }).join(t);
   }
   text() {
-    let e2 = this.faker.helpers.arrayElement([`sentence`, `sentences`, `paragraph`, `paragraphs`, `lines`]);
-    return this[e2]();
+    let e = this.faker.helpers.arrayElement([`sentence`, `sentences`, `paragraph`, `paragraphs`, `lines`]);
+    return this[e]();
   }
-  lines(e2 = { min: 1, max: 5 }) {
-    return this.sentences(e2, `
+  lines(e = { min: 1, max: 5 }) {
+    return this.sentences(e, `
 `);
   }
 };
@@ -25243,34 +32651,34 @@ var Qe = class extends S {
     return this.faker.helpers.arrayElement(this.faker.definitions.music.song_name);
   }
 };
-var K = function(e2) {
-  return e2.Female = `female`, e2.Generic = `generic`, e2.Male = `male`, e2;
+var K = function(e) {
+  return e.Female = `female`, e.Generic = `generic`, e.Male = `male`, e;
 }({});
-function q(e2, t2 = e2.person.sexType(), n2) {
-  let { generic: r2, female: i2, male: a2 } = n2;
-  if (t2 === `generic`)
-    return r2 ?? e2.helpers.arrayElement([i2, a2]) ?? [];
-  let o2 = t2 === `female` ? i2 : a2;
-  return o2 == null ? r2 ?? [] : r2 == null ? o2 : e2.helpers.weightedArrayElement([{ weight: 3 * Math.sqrt(o2.length), value: o2 }, { weight: Math.sqrt(r2.length), value: r2 }]);
+function q(e, t = e.person.sexType(), n) {
+  let { generic: r, female: i, male: a } = n;
+  if (t === `generic`)
+    return r ?? e.helpers.arrayElement([i, a]) ?? [];
+  let o = t === `female` ? i : a;
+  return o == null ? r ?? [] : r == null ? o : e.helpers.weightedArrayElement([{ weight: 3 * Math.sqrt(o.length), value: o }, { weight: Math.sqrt(r.length), value: r }]);
 }
 var $e = class extends S {
-  firstName(e2) {
-    return this.faker.helpers.arrayElement(q(this.faker, e2, this.faker.definitions.person.first_name));
+  firstName(e) {
+    return this.faker.helpers.arrayElement(q(this.faker, e, this.faker.definitions.person.first_name));
   }
-  lastName(e2) {
-    let t2 = this.faker.definitions.raw.person?.last_name_pattern;
-    if (t2 != null) {
-      let n2 = this.faker.helpers.weightedArrayElement(q(this.faker, e2, t2));
-      return this.faker.helpers.fake(n2);
+  lastName(e) {
+    let t = this.faker.definitions.raw.person?.last_name_pattern;
+    if (t != null) {
+      let n = this.faker.helpers.weightedArrayElement(q(this.faker, e, t));
+      return this.faker.helpers.fake(n);
     }
-    return this.faker.helpers.arrayElement(q(this.faker, e2, this.faker.definitions.person.last_name));
+    return this.faker.helpers.arrayElement(q(this.faker, e, this.faker.definitions.person.last_name));
   }
-  middleName(e2) {
-    return this.faker.helpers.arrayElement(q(this.faker, e2, this.faker.definitions.person.middle_name));
+  middleName(e) {
+    return this.faker.helpers.arrayElement(q(this.faker, e, this.faker.definitions.person.middle_name));
   }
-  fullName(e2 = {}) {
-    let { sex: t2 = this.faker.helpers.arrayElement([`female`, `male`]), firstName: n2 = this.firstName(t2), lastName: r2 = this.lastName(t2) } = e2, i2 = this.faker.helpers.weightedArrayElement(this.faker.definitions.person.name);
-    return this.faker.helpers.mustache(i2, { "person.prefix": () => this.prefix(t2), "person.firstName": () => n2, "person.middleName": () => this.middleName(t2), "person.lastName": () => r2, "person.suffix": () => this.suffix() });
+  fullName(e = {}) {
+    let { sex: t = this.faker.helpers.arrayElement([`female`, `male`]), firstName: n = this.firstName(t), lastName: r = this.lastName(t) } = e, i = this.faker.helpers.weightedArrayElement(this.faker.definitions.person.name);
+    return this.faker.helpers.mustache(i, { "person.prefix": () => this.prefix(t), "person.firstName": () => n, "person.middleName": () => this.middleName(t), "person.lastName": () => r, "person.suffix": () => this.suffix() });
   }
   gender() {
     return this.faker.helpers.arrayElement(this.faker.definitions.person.gender);
@@ -25278,15 +32686,15 @@ var $e = class extends S {
   sex() {
     return this.faker.helpers.arrayElement(this.faker.definitions.person.sex);
   }
-  sexType(e2 = {}) {
-    let { includeGeneric: t2 = false } = e2;
-    return t2 ? this.faker.helpers.enumValue(K) : this.faker.helpers.arrayElement([`female`, `male`]);
+  sexType(e = {}) {
+    let { includeGeneric: t = false } = e;
+    return t ? this.faker.helpers.enumValue(K) : this.faker.helpers.arrayElement([`female`, `male`]);
   }
   bio() {
     return this.faker.helpers.fake(this.faker.definitions.person.bio_pattern);
   }
-  prefix(e2) {
-    return this.faker.helpers.arrayElement(q(this.faker, e2, this.faker.definitions.person.prefix));
+  prefix(e) {
+    return this.faker.helpers.arrayElement(q(this.faker, e, this.faker.definitions.person.prefix));
   }
   suffix() {
     return this.faker.helpers.arrayElement(this.faker.definitions.person.suffix);
@@ -25308,12 +32716,12 @@ var $e = class extends S {
   }
 };
 var et = class extends S {
-  number(e2 = {}) {
-    let { style: t2 = `human` } = e2, n2 = this.faker.definitions.phone_number.format[t2];
-    if (!n2)
-      throw Error(`No definitions for ${t2} in this locale`);
-    let r2 = this.faker.helpers.arrayElement(n2);
-    return F(this.faker, r2);
+  number(e = {}) {
+    let { style: t = `human` } = e, n = this.faker.definitions.phone_number.format[t];
+    if (!n)
+      throw Error(`No definitions for ${t} in this locale`);
+    let r = this.faker.helpers.arrayElement(n);
+    return F(this.faker, r);
   }
   imei() {
     return this.faker.helpers.replaceCreditCardSymbols(`##-######-######-L`, `#`);
@@ -25333,16 +32741,16 @@ var it = [`en`, `wl`, `ww`];
 var J = { index: `o`, slot: `s`, mac: `x`, pci: `p` };
 var at = [`SUN`, `MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`];
 var ot = class extends S {
-  fileName(e2 = {}) {
-    let { extensionCount: t2 = 1 } = e2, n2 = this.faker.word.words().toLowerCase().replaceAll(/\W/g, `_`), r2 = this.faker.helpers.multiple(() => this.fileExt(), { count: t2 }).join(`.`);
-    return r2.length === 0 ? n2 : `${n2}.${r2}`;
+  fileName(e = {}) {
+    let { extensionCount: t = 1 } = e, n = this.faker.word.words().toLowerCase().replaceAll(/\W/g, `_`), r = this.faker.helpers.multiple(() => this.fileExt(), { count: t }).join(`.`);
+    return r.length === 0 ? n : `${n}.${r}`;
   }
-  commonFileName(e2) {
-    return `${this.fileName({ extensionCount: 0 })}.${e2 || this.commonFileExt()}`;
+  commonFileName(e) {
+    return `${this.fileName({ extensionCount: 0 })}.${e || this.commonFileExt()}`;
   }
   mimeType() {
-    let e2 = Object.keys(this.faker.definitions.system.mime_type);
-    return this.faker.helpers.arrayElement(e2);
+    let e = Object.keys(this.faker.definitions.system.mime_type);
+    return this.faker.helpers.arrayElement(e);
   }
   commonFileType() {
     return this.faker.helpers.arrayElement(nt);
@@ -25351,23 +32759,23 @@ var ot = class extends S {
     return this.fileExt(this.faker.helpers.arrayElement(rt));
   }
   fileType() {
-    let e2 = this.faker.definitions.system.mime_type, t2 = new Set(Object.keys(e2).map((e3) => e3.split(`/`, 1)[0]));
-    return this.faker.helpers.arrayElement([...t2]);
+    let e = this.faker.definitions.system.mime_type, t = new Set(Object.keys(e).map((e) => e.split(`/`, 1)[0]));
+    return this.faker.helpers.arrayElement([...t]);
   }
-  fileExt(t2) {
-    let n2 = this.faker.definitions.system.mime_type;
-    if (typeof t2 == `string`) {
-      let r3 = n2[t2];
-      if (r3 == null)
-        throw new e(`MIME type ${t2} is not supported.`);
-      return this.faker.helpers.arrayElement(r3.extensions);
+  fileExt(t) {
+    let n = this.faker.definitions.system.mime_type;
+    if (typeof t == `string`) {
+      let r = n[t];
+      if (r == null)
+        throw new e(`MIME type ${t} is not supported.`);
+      return this.faker.helpers.arrayElement(r.extensions);
     }
-    let r2 = new Set(Object.values(n2).flatMap(({ extensions: e2 }) => e2));
-    return this.faker.helpers.arrayElement([...r2]);
+    let r = new Set(Object.values(n).flatMap(({ extensions: e }) => e));
+    return this.faker.helpers.arrayElement([...r]);
   }
   directoryPath() {
-    let e2 = this.faker.definitions.system.directory_path;
-    return this.faker.helpers.arrayElement(e2);
+    let e = this.faker.definitions.system.directory_path;
+    return this.faker.helpers.arrayElement(e);
   }
   filePath() {
     return `${this.directoryPath()}/${this.fileName()}`;
@@ -25375,38 +32783,38 @@ var ot = class extends S {
   semver() {
     return [this.faker.number.int(9), this.faker.number.int(20), this.faker.number.int(20)].join(`.`);
   }
-  networkInterface(e2 = {}) {
-    let { interfaceType: t2 = this.faker.helpers.arrayElement(it), interfaceSchema: n2 = this.faker.helpers.objectKey(J) } = e2, r2, i2 = ``;
-    switch (n2) {
+  networkInterface(e = {}) {
+    let { interfaceType: t = this.faker.helpers.arrayElement(it), interfaceSchema: n = this.faker.helpers.objectKey(J) } = e, r, i = ``;
+    switch (n) {
       case `index`:
-        r2 = this.faker.string.numeric();
+        r = this.faker.string.numeric();
         break;
       case `slot`:
-        r2 = `${this.faker.string.numeric()}${this.faker.helpers.maybe(() => `f${this.faker.string.numeric()}`) ?? ``}${this.faker.helpers.maybe(() => `d${this.faker.string.numeric()}`) ?? ``}`;
+        r = `${this.faker.string.numeric()}${this.faker.helpers.maybe(() => `f${this.faker.string.numeric()}`) ?? ``}${this.faker.helpers.maybe(() => `d${this.faker.string.numeric()}`) ?? ``}`;
         break;
       case `mac`:
-        r2 = this.faker.internet.mac(``);
+        r = this.faker.internet.mac(``);
         break;
       case `pci`:
-        i2 = this.faker.helpers.maybe(() => `P${this.faker.string.numeric()}`) ?? ``, r2 = `${this.faker.string.numeric()}s${this.faker.string.numeric()}${this.faker.helpers.maybe(() => `f${this.faker.string.numeric()}`) ?? ``}${this.faker.helpers.maybe(() => `d${this.faker.string.numeric()}`) ?? ``}`;
+        i = this.faker.helpers.maybe(() => `P${this.faker.string.numeric()}`) ?? ``, r = `${this.faker.string.numeric()}s${this.faker.string.numeric()}${this.faker.helpers.maybe(() => `f${this.faker.string.numeric()}`) ?? ``}${this.faker.helpers.maybe(() => `d${this.faker.string.numeric()}`) ?? ``}`;
         break;
     }
-    return `${i2}${t2}${J[n2]}${r2}`;
+    return `${i}${t}${J[n]}${r}`;
   }
-  cron(e2 = {}) {
-    let { includeYear: t2 = false, includeNonStandard: n2 = false } = e2, r2 = [this.faker.number.int(59), `*`], i2 = [this.faker.number.int(23), `*`], a2 = [this.faker.number.int({ min: 1, max: 31 }), `*`, `?`], o2 = [this.faker.number.int({ min: 1, max: 12 }), `*`], s2 = [this.faker.number.int(6), this.faker.helpers.arrayElement(at), `*`, `?`], c2 = [this.faker.number.int({ min: 1970, max: 2099 }), `*`], l2 = this.faker.helpers.arrayElement(r2), u2 = this.faker.helpers.arrayElement(i2), d2 = this.faker.helpers.arrayElement(a2), f2 = this.faker.helpers.arrayElement(o2), p2 = this.faker.helpers.arrayElement(s2), m2 = this.faker.helpers.arrayElement(c2), h2 = `${l2} ${u2} ${d2} ${f2} ${p2}`;
-    return t2 && (h2 += ` ${m2}`), !n2 || this.faker.datatype.boolean() ? h2 : this.faker.helpers.arrayElement([`@annually`, `@daily`, `@hourly`, `@monthly`, `@reboot`, `@weekly`, `@yearly`]);
+  cron(e = {}) {
+    let { includeYear: t = false, includeNonStandard: n = false } = e, r = [this.faker.number.int(59), `*`], i = [this.faker.number.int(23), `*`], a = [this.faker.number.int({ min: 1, max: 31 }), `*`, `?`], o = [this.faker.number.int({ min: 1, max: 12 }), `*`], s = [this.faker.number.int(6), this.faker.helpers.arrayElement(at), `*`, `?`], c = [this.faker.number.int({ min: 1970, max: 2099 }), `*`], l = this.faker.helpers.arrayElement(r), u = this.faker.helpers.arrayElement(i), d = this.faker.helpers.arrayElement(a), f = this.faker.helpers.arrayElement(o), p = this.faker.helpers.arrayElement(s), m = this.faker.helpers.arrayElement(c), h = `${l} ${u} ${d} ${f} ${p}`;
+    return t && (h += ` ${m}`), !n || this.faker.datatype.boolean() ? h : this.faker.helpers.arrayElement([`@annually`, `@daily`, `@hourly`, `@monthly`, `@reboot`, `@weekly`, `@yearly`]);
   }
 };
 var st = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
 var ct = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8, J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9, S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9 };
-function lt(e2) {
-  let t2 = 0;
-  for (let [n2, r2] of e2.split(``).entries()) {
-    let e3 = ct[r2] ?? Number(r2);
-    t2 += e3 * st[n2];
+function lt(e) {
+  let t = 0;
+  for (let [n, r] of e.split(``).entries()) {
+    let e = ct[r] ?? Number(r);
+    t += e * st[n];
   }
-  return t2 % 11 == 10 ? `X` : String(t2 % 11);
+  return t % 11 == 10 ? `X` : String(t % 11);
 }
 var ut = class extends S {
   vehicle() {
@@ -25425,8 +32833,8 @@ var ut = class extends S {
     return this.faker.helpers.arrayElement(this.faker.definitions.vehicle.fuel);
   }
   vin() {
-    let e2 = [`o`, `i`, `q`, `O`, `I`, `Q`], t2 = `${this.faker.string.alphanumeric({ length: 10, casing: `upper`, exclude: e2 })}${this.faker.string.alpha({ length: 1, casing: `upper`, exclude: e2 })}${this.faker.string.alphanumeric({ length: 1, casing: `upper`, exclude: e2 })}${this.faker.string.numeric({ length: 5, allowLeadingZeros: true })}`;
-    return `${t2.slice(0, 8)}${lt(t2)}${t2.slice(9)}`;
+    let e = [`o`, `i`, `q`, `O`, `I`, `Q`], t = `${this.faker.string.alphanumeric({ length: 10, casing: `upper`, exclude: e })}${this.faker.string.alpha({ length: 1, casing: `upper`, exclude: e })}${this.faker.string.alphanumeric({ length: 1, casing: `upper`, exclude: e })}${this.faker.string.numeric({ length: 5, allowLeadingZeros: true })}`;
+    return `${t.slice(0, 8)}${lt(t)}${t.slice(9)}`;
   }
   color() {
     return this.faker.color.human();
@@ -25439,280 +32847,280 @@ var ut = class extends S {
   }
 };
 var dt = class extends S {
-  adjective(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.adjective }));
+  adjective(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.adjective }));
   }
-  adverb(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.adverb }));
+  adverb(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.adverb }));
   }
-  conjunction(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.conjunction }));
+  conjunction(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.conjunction }));
   }
-  interjection(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.interjection }));
+  interjection(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.interjection }));
   }
-  noun(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.noun }));
+  noun(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.noun }));
   }
-  preposition(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.preposition }));
+  preposition(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.preposition }));
   }
-  verb(e2 = {}) {
-    return typeof e2 == `number` && (e2 = { length: e2 }), this.faker.helpers.arrayElement(G({ ...e2, wordList: this.faker.definitions.word.verb }));
+  verb(e = {}) {
+    return typeof e == `number` && (e = { length: e }), this.faker.helpers.arrayElement(G({ ...e, wordList: this.faker.definitions.word.verb }));
   }
-  sample(t2 = {}) {
-    let n2 = this.faker.helpers.shuffle([this.adjective, this.adverb, this.conjunction, this.interjection, this.noun, this.preposition, this.verb]);
-    for (let e2 of n2)
+  sample(t = {}) {
+    let n = this.faker.helpers.shuffle([this.adjective, this.adverb, this.conjunction, this.interjection, this.noun, this.preposition, this.verb]);
+    for (let e of n)
       try {
-        return e2(t2);
+        return e(t);
       } catch {
         continue;
       }
     throw new e(`No matching word data available for the current locale`);
   }
-  words(e2 = {}) {
-    typeof e2 == `number` && (e2 = { count: e2 });
-    let { count: t2 = { min: 1, max: 3 } } = e2;
-    return this.faker.helpers.multiple(() => this.sample(), { count: t2 }).join(` `);
+  words(e = {}) {
+    typeof e == `number` && (e = { count: e });
+    let { count: t = { min: 1, max: 3 } } = e;
+    return this.faker.helpers.multiple(() => this.sample(), { count: t }).join(` `);
   }
 };
 var ft = class extends x {
-  boolean(e2 = {}) {
-    typeof e2 == `number` && (e2 = { probability: e2 });
-    let { probability: t2 = 0.5 } = e2;
-    return t2 <= 0 ? false : t2 >= 1 || this.faker.number.float() < t2;
+  boolean(e = {}) {
+    typeof e == `number` && (e = { probability: e });
+    let { probability: t = 0.5 } = e;
+    return t <= 0 ? false : t >= 1 || this.faker.number.float() < t;
   }
 };
 var pt = class extends x {
-  int(t2 = {}) {
-    typeof t2 == `number` && (t2 = { max: t2 });
-    let { min: n2 = 0, max: r2 = 2 ** 53 - 1, multipleOf: i2 = 1, distributor: a2 = b() } = t2;
-    if (!Number.isSafeInteger(i2))
+  int(t = {}) {
+    typeof t == `number` && (t = { max: t });
+    let { min: n = 0, max: r = 2 ** 53 - 1, multipleOf: i = 1, distributor: a = b() } = t;
+    if (!Number.isSafeInteger(i))
       throw new e(`multipleOf should be an integer.`);
-    if (i2 <= 0)
+    if (i <= 0)
       throw new e(`multipleOf should be greater than 0.`);
-    let o2 = Math.ceil(n2 / i2), s2 = Math.floor(r2 / i2);
-    if (o2 === s2)
-      return o2 * i2;
-    if (s2 < o2)
-      throw r2 >= n2 ? new e(`No suitable integer value between ${n2} and ${r2} found.`) : new e(`Max ${r2} should be greater than min ${n2}.`);
-    let c2 = a2(this.faker.fakerCore.randomizer), l2 = s2 - o2 + 1;
-    return Math.floor(c2 * l2 + o2) * i2;
+    let o = Math.ceil(n / i), s = Math.floor(r / i);
+    if (o === s)
+      return o * i;
+    if (s < o)
+      throw r >= n ? new e(`No suitable integer value between ${n} and ${r} found.`) : new e(`Max ${r} should be greater than min ${n}.`);
+    let c = a(this.faker.fakerCore.randomizer), l = s - o + 1;
+    return Math.floor(c * l + o) * i;
   }
-  float(t2 = {}) {
-    typeof t2 == `number` && (t2 = { max: t2 });
-    let { min: n2 = 0, max: r2 = 1, fractionDigits: i2, multipleOf: a2, multipleOf: o2 = i2 == null ? undefined : 10 ** -i2, distributor: s2 = b() } = t2;
-    if (r2 < n2)
-      throw new e(`Max ${r2} should be greater than min ${n2}.`);
-    if (i2 != null) {
-      if (a2 != null)
+  float(t = {}) {
+    typeof t == `number` && (t = { max: t });
+    let { min: n = 0, max: r = 1, fractionDigits: i, multipleOf: a, multipleOf: o = i == null ? undefined : 10 ** -i, distributor: s = b() } = t;
+    if (r < n)
+      throw new e(`Max ${r} should be greater than min ${n}.`);
+    if (i != null) {
+      if (a != null)
         throw new e(`multipleOf and fractionDigits cannot be set at the same time.`);
-      if (!Number.isSafeInteger(i2))
+      if (!Number.isSafeInteger(i))
         throw new e(`fractionDigits should be an integer.`);
-      if (i2 < 0)
+      if (i < 0)
         throw new e(`fractionDigits should be greater than or equal to 0.`);
     }
-    if (o2 != null) {
-      if (o2 <= 0)
+    if (o != null) {
+      if (o <= 0)
         throw new e(`multipleOf should be greater than 0.`);
-      let t3 = Math.log10(o2), i3 = o2 < 1 && Number.isSafeInteger(t3) ? 10 ** -t3 : 1 / o2;
-      return this.int({ min: n2 * i3, max: r2 * i3, distributor: s2 }) / i3;
+      let t = Math.log10(o), i = o < 1 && Number.isSafeInteger(t) ? 10 ** -t : 1 / o;
+      return this.int({ min: n * i, max: r * i, distributor: s }) / i;
     }
-    return s2(this.faker.fakerCore.randomizer) * (r2 - n2) + n2;
+    return s(this.faker.fakerCore.randomizer) * (r - n) + n;
   }
-  binary(e2 = {}) {
-    typeof e2 == `number` && (e2 = { max: e2 });
-    let { min: t2 = 0, max: n2 = 1 } = e2;
-    return this.int({ max: n2, min: t2 }).toString(2);
+  binary(e = {}) {
+    typeof e == `number` && (e = { max: e });
+    let { min: t = 0, max: n = 1 } = e;
+    return this.int({ max: n, min: t }).toString(2);
   }
-  octal(e2 = {}) {
-    typeof e2 == `number` && (e2 = { max: e2 });
-    let { min: t2 = 0, max: n2 = 7 } = e2;
-    return this.int({ max: n2, min: t2 }).toString(8);
+  octal(e = {}) {
+    typeof e == `number` && (e = { max: e });
+    let { min: t = 0, max: n = 7 } = e;
+    return this.int({ max: n, min: t }).toString(8);
   }
-  hex(e2 = {}) {
-    typeof e2 == `number` && (e2 = { max: e2 });
-    let { min: t2 = 0, max: n2 = 15 } = e2;
-    return this.int({ max: n2, min: t2 }).toString(16);
+  hex(e = {}) {
+    typeof e == `number` && (e = { max: e });
+    let { min: t = 0, max: n = 15 } = e;
+    return this.int({ max: n, min: t }).toString(16);
   }
-  bigInt(t2 = {}) {
-    (typeof t2 == `bigint` || typeof t2 == `number` || typeof t2 == `string` || typeof t2 == `boolean`) && (t2 = { max: t2 });
-    let n2 = BigInt(t2.min ?? 0), r2 = BigInt(t2.max ?? n2 + BigInt(999999999999999));
-    if (r2 < n2)
-      throw new e(`Max ${r2} should be larger than min ${n2}.`);
-    let i2 = BigInt(t2.multipleOf ?? 1);
-    if (i2 <= BigInt(0))
+  bigInt(t = {}) {
+    (typeof t == `bigint` || typeof t == `number` || typeof t == `string` || typeof t == `boolean`) && (t = { max: t });
+    let n = BigInt(t.min ?? 0), r = BigInt(t.max ?? n + BigInt(999999999999999));
+    if (r < n)
+      throw new e(`Max ${r} should be larger than min ${n}.`);
+    let i = BigInt(t.multipleOf ?? 1);
+    if (i <= BigInt(0))
       throw new e(`multipleOf should be greater than 0.`);
-    let a2 = n2 / i2 + (n2 % i2 > 0n ? 1n : 0n), o2 = r2 / i2 - (r2 % i2 < 0n ? 1n : 0n);
-    if (a2 === o2)
-      return a2 * i2;
-    if (o2 < a2)
-      throw new e(`No suitable bigint value between ${n2} and ${r2} found.`);
-    let s2 = o2 - a2 + 1n;
-    return (a2 + BigInt(this.faker.string.numeric({ length: s2.toString(10).length, allowLeadingZeros: true })) % s2) * i2;
+    let a = n / i + (n % i > 0n ? 1n : 0n), o = r / i - (r % i < 0n ? 1n : 0n);
+    if (a === o)
+      return a * i;
+    if (o < a)
+      throw new e(`No suitable bigint value between ${n} and ${r} found.`);
+    let s = o - a + 1n;
+    return (a + BigInt(this.faker.string.numeric({ length: s.toString(10).length, allowLeadingZeros: true })) % s) * i;
   }
-  romanNumeral(t2 = {}) {
-    let n2 = 3999;
-    typeof t2 == `number` && (t2 = { max: t2 });
-    let { min: r2 = 1, max: i2 = n2 } = t2;
-    if (r2 < 1)
-      throw new e(`Min value ${r2} should be 1 or greater.`);
-    if (i2 > n2)
-      throw new e(`Max value ${i2} should be ${n2} or less.`);
-    let a2 = this.int({ min: r2, max: i2 }), o2 = [[`M`, 1000], [`CM`, 900], [`D`, 500], [`CD`, 400], [`C`, 100], [`XC`, 90], [`L`, 50], [`XL`, 40], [`X`, 10], [`IX`, 9], [`V`, 5], [`IV`, 4], [`I`, 1]], s2 = ``;
-    for (let [e2, t3] of o2)
-      s2 += e2.repeat(Math.floor(a2 / t3)), a2 %= t3;
-    return s2;
+  romanNumeral(t = {}) {
+    let n = 3999;
+    typeof t == `number` && (t = { max: t });
+    let { min: r = 1, max: i = n } = t;
+    if (r < 1)
+      throw new e(`Min value ${r} should be 1 or greater.`);
+    if (i > n)
+      throw new e(`Max value ${i} should be ${n} or less.`);
+    let a = this.int({ min: r, max: i }), o = [[`M`, 1000], [`CM`, 900], [`D`, 500], [`CD`, 400], [`C`, 100], [`XC`, 90], [`L`, 50], [`XL`, 40], [`X`, 10], [`IX`, 9], [`V`, 5], [`IV`, 4], [`I`, 1]], s = ``;
+    for (let [e, t] of o)
+      s += e.repeat(Math.floor(a / t)), a %= t;
+    return s;
   }
 };
 var Y = `0123456789ABCDEFGHJKMNPQRSTVWXYZ`;
-function mt(e2) {
-  let t2 = e2.valueOf(), n2 = ``;
-  for (let e3 = 10;e3 > 0; e3--) {
-    let e4 = t2 % 32;
-    n2 = Y[e4] + n2, t2 = (t2 - e4) / 32;
+function mt(e) {
+  let t = e.valueOf(), n = ``;
+  for (let e = 10;e > 0; e--) {
+    let e = t % 32;
+    n = Y[e] + n, t = (t - e) / 32;
   }
-  return n2;
+  return n;
 }
-function ht(e2) {
-  return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replaceAll(`x`, () => e2.number.hex({ min: 0, max: 15 })).replaceAll(`y`, () => e2.number.hex({ min: 8, max: 11 }));
+function ht(e) {
+  return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replaceAll(`x`, () => e.number.hex({ min: 0, max: 15 })).replaceAll(`y`, () => e.number.hex({ min: 8, max: 11 }));
 }
-function gt(e2, t2) {
-  let n2 = t2.valueOf(), r2 = Math.max(n2, 0).toString(16).padStart(12, `0`).slice(-12);
-  return `${[r2.substring(0, 8), r2.substring(8)].join(`-`)}-${`7xxx-yxxx-xxxxxxxxxxxx`.replaceAll(`x`, () => e2.number.hex({ min: 0, max: 15 })).replaceAll(`y`, () => e2.number.hex({ min: 8, max: 11 }))}`;
+function gt(e, t) {
+  let n = t.valueOf(), r = Math.max(n, 0).toString(16).padStart(12, `0`).slice(-12);
+  return `${[r.substring(0, 8), r.substring(8)].join(`-`)}-${`7xxx-yxxx-xxxxxxxxxxxx`.replaceAll(`x`, () => e.number.hex({ min: 0, max: 15 })).replaceAll(`y`, () => e.number.hex({ min: 8, max: 11 }))}`;
 }
 var X = 2 ** 48 - 1;
 var Z = [...`ABCDEFGHIJKLMNOPQRSTUVWXYZ`];
 var Q = [...`abcdefghijklmnopqrstuvwxyz`];
 var _t = [...`0123456789`];
 var vt = class extends x {
-  fromCharacters(t2, n2 = 1) {
-    if (n2 = this.faker.helpers.rangeToNumber(n2), n2 <= 0)
+  fromCharacters(t, n = 1) {
+    if (n = this.faker.helpers.rangeToNumber(n), n <= 0)
       return ``;
-    if (typeof t2 == `string` && (t2 = [...t2]), t2.length === 0)
+    if (typeof t == `string` && (t = [...t]), t.length === 0)
       throw new e(`Unable to generate string: No characters to select from.`);
-    return this.faker.helpers.multiple(() => this.faker.helpers.arrayElement(t2), { count: n2 }).join(``);
+    return this.faker.helpers.multiple(() => this.faker.helpers.arrayElement(t), { count: n }).join(``);
   }
-  alpha(e2 = {}) {
-    typeof e2 == `number` && (e2 = { length: e2 });
-    let t2 = this.faker.helpers.rangeToNumber(e2.length ?? 1);
-    if (t2 <= 0)
+  alpha(e = {}) {
+    typeof e == `number` && (e = { length: e });
+    let t = this.faker.helpers.rangeToNumber(e.length ?? 1);
+    if (t <= 0)
       return ``;
-    let { casing: n2 = `mixed` } = e2, { exclude: r2 = [] } = e2;
-    typeof r2 == `string` && (r2 = [...r2]);
-    let i2;
-    switch (n2) {
+    let { casing: n = `mixed` } = e, { exclude: r = [] } = e;
+    typeof r == `string` && (r = [...r]);
+    let i;
+    switch (n) {
       case `upper`:
-        i2 = [...Z];
+        i = [...Z];
         break;
       case `lower`:
-        i2 = [...Q];
+        i = [...Q];
         break;
       case `mixed`:
-        i2 = [...Q, ...Z];
+        i = [...Q, ...Z];
         break;
     }
-    return i2 = i2.filter((e3) => !r2.includes(e3)), this.fromCharacters(i2, t2);
+    return i = i.filter((e) => !r.includes(e)), this.fromCharacters(i, t);
   }
-  alphanumeric(e2 = {}) {
-    typeof e2 == `number` && (e2 = { length: e2 });
-    let t2 = this.faker.helpers.rangeToNumber(e2.length ?? 1);
-    if (t2 <= 0)
+  alphanumeric(e = {}) {
+    typeof e == `number` && (e = { length: e });
+    let t = this.faker.helpers.rangeToNumber(e.length ?? 1);
+    if (t <= 0)
       return ``;
-    let { casing: n2 = `mixed` } = e2, { exclude: r2 = [] } = e2;
-    typeof r2 == `string` && (r2 = [...r2]);
-    let i2 = [..._t];
-    switch (n2) {
+    let { casing: n = `mixed` } = e, { exclude: r = [] } = e;
+    typeof r == `string` && (r = [...r]);
+    let i = [..._t];
+    switch (n) {
       case `upper`:
-        i2.push(...Z);
+        i.push(...Z);
         break;
       case `lower`:
-        i2.push(...Q);
+        i.push(...Q);
         break;
       case `mixed`:
-        i2.push(...Q, ...Z);
+        i.push(...Q, ...Z);
         break;
     }
-    return i2 = i2.filter((e3) => !r2.includes(e3)), this.fromCharacters(i2, t2);
+    return i = i.filter((e) => !r.includes(e)), this.fromCharacters(i, t);
   }
-  binary(e2 = {}) {
-    let { prefix: t2 = `0b` } = e2, n2 = t2;
-    return n2 += this.fromCharacters([`0`, `1`], e2.length ?? 1), n2;
+  binary(e = {}) {
+    let { prefix: t = `0b` } = e, n = t;
+    return n += this.fromCharacters([`0`, `1`], e.length ?? 1), n;
   }
-  octal(e2 = {}) {
-    let { prefix: t2 = `0o` } = e2, n2 = t2;
-    return n2 += this.fromCharacters([`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`], e2.length ?? 1), n2;
+  octal(e = {}) {
+    let { prefix: t = `0o` } = e, n = t;
+    return n += this.fromCharacters([`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`], e.length ?? 1), n;
   }
-  hexadecimal(e2 = {}) {
-    let { casing: t2 = `mixed`, prefix: n2 = `0x` } = e2, r2 = this.faker.helpers.rangeToNumber(e2.length ?? 1);
-    if (r2 <= 0)
-      return n2;
-    let i2 = this.fromCharacters([`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `a`, `b`, `c`, `d`, `e`, `f`, `A`, `B`, `C`, `D`, `E`, `F`], r2);
-    return t2 === `upper` ? i2 = i2.toUpperCase() : t2 === `lower` && (i2 = i2.toLowerCase()), `${n2}${i2}`;
+  hexadecimal(e = {}) {
+    let { casing: t = `mixed`, prefix: n = `0x` } = e, r = this.faker.helpers.rangeToNumber(e.length ?? 1);
+    if (r <= 0)
+      return n;
+    let i = this.fromCharacters([`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `a`, `b`, `c`, `d`, `e`, `f`, `A`, `B`, `C`, `D`, `E`, `F`], r);
+    return t === `upper` ? i = i.toUpperCase() : t === `lower` && (i = i.toLowerCase()), `${n}${i}`;
   }
-  numeric(t2 = {}) {
-    typeof t2 == `number` && (t2 = { length: t2 });
-    let n2 = this.faker.helpers.rangeToNumber(t2.length ?? 1);
-    if (n2 <= 0)
+  numeric(t = {}) {
+    typeof t == `number` && (t = { length: t });
+    let n = this.faker.helpers.rangeToNumber(t.length ?? 1);
+    if (n <= 0)
       return ``;
-    let { allowLeadingZeros: r2 = true } = t2, { exclude: i2 = [] } = t2;
-    typeof i2 == `string` && (i2 = [...i2]);
-    let a2 = _t.filter((e2) => !i2.includes(e2));
-    if (a2.length === 0 || a2.length === 1 && !r2 && a2[0] === `0`)
+    let { allowLeadingZeros: r = true } = t, { exclude: i = [] } = t;
+    typeof i == `string` && (i = [...i]);
+    let a = _t.filter((e) => !i.includes(e));
+    if (a.length === 0 || a.length === 1 && !r && a[0] === `0`)
       throw new e(`Unable to generate numeric string, because all possible digits are excluded.`);
-    let o2 = ``;
-    return !r2 && !i2.includes(`0`) && (o2 += this.faker.helpers.arrayElement(a2.filter((e2) => e2 !== `0`))), o2 += this.fromCharacters(a2, n2 - o2.length), o2;
+    let o = ``;
+    return !r && !i.includes(`0`) && (o += this.faker.helpers.arrayElement(a.filter((e) => e !== `0`))), o += this.fromCharacters(a, n - o.length), o;
   }
-  sample(e2 = 10) {
-    e2 = this.faker.helpers.rangeToNumber(e2);
-    let t2 = { min: 33, max: 125 }, n2 = ``;
-    for (;n2.length < e2; )
-      n2 += String.fromCodePoint(this.faker.number.int(t2));
-    return n2;
+  sample(e = 10) {
+    e = this.faker.helpers.rangeToNumber(e);
+    let t = { min: 33, max: 125 }, n = ``;
+    for (;n.length < e; )
+      n += String.fromCodePoint(this.faker.number.int(t));
+    return n;
   }
-  uuid(e2 = {}) {
-    let { version: t2 = 4, refDate: n2 = this.faker.defaultRefDate() } = e2;
-    switch (t2) {
+  uuid(e = {}) {
+    let { version: t = 4, refDate: n = this.faker.defaultRefDate() } = e;
+    switch (t) {
       case 7:
-        return gt(this.faker, k(n2));
+        return gt(this.faker, k(n));
       default:
         return ht(this.faker);
     }
   }
-  ulid(t2 = {}) {
-    let { refDate: n2 = this.faker.defaultRefDate() } = t2, r2 = k(n2);
-    if (r2.valueOf() < 0 || r2.valueOf() > X)
-      throw new e(`Unable to generate ULID: the refDate must be between ${new Date(0).toISOString()} and ${new Date(X).toISOString()}, but was ${r2.toISOString()}.`);
-    return mt(r2) + this.fromCharacters(Y, 16);
+  ulid(t = {}) {
+    let { refDate: n = this.faker.defaultRefDate() } = t, r = k(n);
+    if (r.valueOf() < 0 || r.valueOf() > X)
+      throw new e(`Unable to generate ULID: the refDate must be between ${new Date(0).toISOString()} and ${new Date(X).toISOString()}, but was ${r.toISOString()}.`);
+    return mt(r) + this.fromCharacters(Y, 16);
   }
-  nanoid(e2 = 21) {
-    if (e2 = this.faker.helpers.rangeToNumber(e2), e2 <= 0)
+  nanoid(e = 21) {
+    if (e = this.faker.helpers.rangeToNumber(e), e <= 0)
       return ``;
-    let t2 = [{ value: () => this.alphanumeric(1), weight: 62 }, { value: () => this.faker.helpers.arrayElement([`_`, `-`]), weight: 2 }], n2 = ``;
-    for (;n2.length < e2; ) {
-      let e3 = this.faker.helpers.weightedArrayElement(t2);
-      n2 += e3();
+    let t = [{ value: () => this.alphanumeric(1), weight: 62 }, { value: () => this.faker.helpers.arrayElement([`_`, `-`]), weight: 2 }], n = ``;
+    for (;n.length < e; ) {
+      let e = this.faker.helpers.weightedArrayElement(t);
+      n += e();
     }
-    return n2;
+    return n;
   }
-  symbol(e2 = 1) {
-    return this.fromCharacters(`!"#$%&'()*+,-./:;<=>?@[\\]^_\`{|}~`.split(``), e2);
+  symbol(e = 1) {
+    return this.fromCharacters(`!"#$%&'()*+,-./:;<=>?@[\\]^_\`{|}~`.split(``), e);
   }
 };
 var yt = () => new Date;
-function bt(e2) {
-  return (e2.config.defaultRefDate ?? yt)();
+function bt(e) {
+  return (e.config.defaultRefDate ?? yt)();
 }
-function xt(e2, t2 = () => new Date) {
-  typeof t2 == `function` ? e2.config.defaultRefDate = t2 : e2.config.defaultRefDate = () => new Date(t2);
+function xt(e, t = () => new Date) {
+  typeof t == `function` ? e.config.defaultRefDate = t : e.config.defaultRefDate = () => new Date(t);
 }
 var $ = class {
   fakerCore;
   get defaultRefDate() {
     return () => bt(this.fakerCore);
   }
-  setDefaultRefDate(e2 = () => new Date) {
-    xt(this.fakerCore, e2);
+  setDefaultRefDate(e = () => new Date) {
+    xt(this.fakerCore, e);
   }
   datatype = new ft(this);
   date = new A(this);
@@ -25720,11 +33128,11 @@ var $ = class {
   location = new U(this);
   number = new pt(this);
   string = new vt(this);
-  constructor(e2) {
-    this.fakerCore = te(e2);
+  constructor(e) {
+    this.fakerCore = te(e);
   }
-  seed(e2 = v()) {
-    return this.fakerCore.randomizer.seed(e2), e2;
+  seed(e = v()) {
+    return this.fakerCore.randomizer.seed(e), e;
   }
 };
 var St = new $;
@@ -25759,10 +33167,10 @@ var Ct = class extends $ {
   get definitions() {
     return this.fakerCore.locale;
   }
-  constructor(t2) {
-    super(t2);
-    let { locale: n2 } = t2;
-    if (Array.isArray(n2) && n2.length === 0)
+  constructor(t) {
+    super(t);
+    let { locale: n } = t;
+    if (Array.isArray(n) && n.length === 0)
       throw new e(`The locale option must contain at least one locale definition.`);
   }
   getMetadata() {
@@ -25785,19 +33193,19 @@ var e2 = { airline: { airline: [{ name: `Aegean Airlines`, iataCode: `A3` }, { n
 {{location.zipCode}}`], postcode: [`#####`, `#####-####`], secondary_address: [`Apt. ###`, `Suite ###`], state: `Alabama.Alaska.Arizona.Arkansas.California.Colorado.Connecticut.Delaware.Florida.Georgia.Hawaii.Idaho.Illinois.Indiana.Iowa.Kansas.Kentucky.Louisiana.Maine.Maryland.Massachusetts.Michigan.Minnesota.Mississippi.Missouri.Montana.Nebraska.Nevada.New Hampshire.New Jersey.New Mexico.New York.North Carolina.North Dakota.Ohio.Oklahoma.Oregon.Pennsylvania.Rhode Island.South Carolina.South Dakota.Tennessee.Texas.Utah.Vermont.Virginia.Washington.West Virginia.Wisconsin.Wyoming`.split(`.`), state_abbr: `AL.AK.AZ.AR.CA.CO.CT.DE.FL.GA.HI.ID.IL.IN.IA.KS.KY.LA.ME.MD.MA.MI.MN.MS.MO.MT.NE.NV.NH.NJ.NM.NY.NC.ND.OH.OK.OR.PA.RI.SC.SD.TN.TX.UT.VT.VA.WA.WV.WI.WY`.split(`.`), street_address: { normal: `{{location.buildingNumber}} {{location.street}}`, full: `{{location.buildingNumber}} {{location.street}} {{location.secondaryAddress}}` }, street_name: `10th Street.11th Street.12th Street.13th Street.14th Street.15th Street.16th Street.1st Avenue.1st Street.2nd Avenue.2nd Street.3rd Avenue.3rd Street.4th Avenue.4th Street.5th Avenue.5th Street.6th Avenue.6th Street.7th Avenue.7th Street.8th Avenue.8th Street.9th Street.A Street.Abbey Road.Adams Avenue.Adams Street.Airport Road.Albany Road.Albert Road.Albion Street.Alexandra Road.Alfred Street.Alma Street.Ash Close.Ash Grove.Ash Road.Ash Street.Aspen Close.Atlantic Avenue.Avenue Road.Back Lane.Baker Street.Balmoral Road.Barn Close.Barton Road.Bath Road.Bath Street.Bay Street.Beach Road.Bedford Road.Beech Close.Beech Drive.Beech Grove.Beech Road.Beechwood Avenue.Bell Lane.Belmont Road.Birch Avenue.Birch Close.Birch Grove.Birch Road.Blind Lane.Bluebell Close.Boundary Road.Bramble Close.Bramley Close.Bridge Road.Bridge Street.Broad Lane.Broad Street.Broadway.Broadway Avenue.Broadway Street.Brook Lane.Brook Road.Brook Street.Brookside.Buckingham Road.Cambridge Street.Canal Street.Castle Close.Castle Lane.Castle Road.Castle Street.Cavendish Road.Cedar Avenue.Cedar Close.Cedar Grove.Cedar Road.Cedar Street.Cemetery Road.Center Avenue.Center Road.Center Street.Central Avenue.Central Street.Chapel Close.Chapel Hill.Chapel Road.Chapel Street.Charles Street.Cherry Close.Cherry Street.Cherry Tree Close.Chester Road.Chestnut Close.Chestnut Drive.Chestnut Grove.Chestnut Street.Church Avenue.Church Close.Church Hill.Church Lane.Church Path.Church Road.Church Street.Church View.Church Walk.Claremont Road.Clarence Road.Clarence Street.Clarendon Road.Clark Street.Clay Lane.Cleveland Street.Cliff Road.Clifton Road.Clinton Street.College Avenue.College Street.Columbia Avenue.Commerce Street.Commercial Road.Commercial Street.Common Lane.Coronation Avenue.Coronation Road.County Line Road.County Road.Court Street.Cow Lane.Crescent Road.Cromwell Road.Cross Lane.Cross Street.Crown Street.Cumberland Street.Dale Street.Dark Lane.Davis Street.Depot Street.Derby Road.Derwent Close.Devonshire Road.Division Street.Douglas Road.Duke Street.E 10th Street.E 11th Street.E 12th Street.E 14th Street.E 1st Street.E 2nd Street.E 3rd Street.E 4th Avenue.E 4th Street.E 5th Street.E 6th Avenue.E 6th Street.E 7th Street.E 8th Street.E 9th Street.E Bridge Street.E Broad Street.E Broadway.E Broadway Street.E Cedar Street.E Center Street.E Central Avenue.E Church Street.E Elm Street.E Franklin Street.E Front Street.E Grand Avenue.E High Street.E Jackson Street.E Jefferson Street.E Main.E Main Street.E Maple Street.E Market Street.E North Street.E Oak Street.E Park Avenue.E Pine Street.E River Road.E South Street.E State Street.E Union Street.E Walnut Street.E Washington Avenue.E Washington Street.E Water Street.East Avenue.East Road.East Street.Edward Street.Elm Close.Elm Grove.Elm Road.Elm Street.Euclid Avenue.Fairfield Road.Farm Close.Ferry Road.Field Close.Field Lane.First Avenue.First Street.Fore Street.Forest Avenue.Forest Road.Fourth Avenue.Franklin Avenue.Franklin Road.Franklin Street.Front Street.Frontage Road.Garden Close.Garden Street.George Street.Gladstone Road.Glebe Close.Gloucester Road.Gordon Road.Gordon Street.Grand Avenue.Grange Avenue.Grange Close.Grange Road.Grant Street.Green Close.Green Lane.Green Street.Greenville Road.Greenway.Greenwood Road.Grove Lane.Grove Road.Grove Street.Hall Lane.Hall Street.Harrison Avenue.Harrison Street.Hawthorn Avenue.Hawthorn Close.Hazel Close.Hazel Grove.Heath Road.Heather Close.Henry Street.Heron Close.Hickory Street.High Road.High Street.Highfield Avenue.Highfield Close.Highfield Road.Highland Avenue.Hill Road.Hill Street.Hillside.Hillside Avenue.Hillside Close.Hillside Road.Holly Close.Honeysuckle Close.Howard Road.Howard Street.Jackson Avenue.Jackson Street.James Street.Jefferson Avenue.Jefferson Street.Johnson Street.Jubilee Close.Juniper Close.Kent Road.Kestrel Close.King Street.King's Road.Kingfisher Close.Kings Highway.Kingsway.Laburnum Grove.Lafayette Street.Lake Avenue.Lake Drive.Lake Road.Lake Street.Lancaster Road.Lansdowne Road.Larch Close.Laurel Close.Lawrence Street.Lee Street.Liberty Street.Lime Grove.Lincoln Avenue.Lincoln Highway.Lincoln Road.Lincoln Street.Locust Street.Lodge Close.Lodge Lane.London Road.Long Lane.Low Road.Madison Avenue.Madison Street.Main.Main Avenue.Main Road.Main Street.Main Street E.Main Street N.Main Street S.Main Street W.Manchester Road.Manor Close.Manor Drive.Manor Gardens.Manor Road.Manor Way.Maple Avenue.Maple Close.Maple Drive.Maple Road.Maple Street.Market Place.Market Square.Market Street.Marlborough Road.Marsh Lane.Martin Luther King Boulevard.Martin Luther King Drive.Martin Luther King Jr Boulevard.Mary Street.Mayfield Road.Meadow Close.Meadow Drive.Meadow Lane.Meadow View.Meadow Way.Memorial Drive.Middle Street.Mill Close.Mill Lane.Mill Road.Mill Street.Milton Road.Milton Street.Monroe Street.Moor Lane.Moss Lane.Mount Pleasant.Mount Street.Mulberry Street.N 1st Street.N 2nd Street.N 3rd Street.N 4th Street.N 5th Street.N 6th Street.N 7th Street.N 8th Street.N 9th Street.N Bridge Street.N Broad Street.N Broadway.N Broadway Street.N Cedar Street.N Center Street.N Central Avenue.N Chestnut Street.N Church Street.N College Street.N Court Street.N Division Street.N East Street.N Elm Street.N Franklin Street.N Front Street.N Harrison Street.N High Street.N Jackson Street.N Jefferson Street.N Lincoln Street.N Locust Street.N Main.N Main Avenue.N Main Street.N Maple Street.N Market Street.N Monroe Street.N Oak Street.N Park Street.N Pearl Street.N Pine Street.N Poplar Street.N Railroad Street.N State Street.N Union Street.N Walnut Street.N Washington Avenue.N Washington Street.N Water Street.Nelson Road.Nelson Street.New Lane.New Road.New Street.Newton Road.Nightingale Close.Norfolk Road.North Avenue.North Lane.North Road.North Street.Northfield Road.Oak Avenue.Oak Drive.Oak Lane.Oak Road.Oak Street.Oakfield Road.Oaklands.Old Lane.Old Military Road.Old Road.Old State Road.Orchard Drive.Orchard Lane.Orchard Road.Orchard Street.Oxford Road.Oxford Street.Park Avenue.Park Crescent.Park Drive.Park Lane.Park Place.Park Road.Park Street.Park View.Parkside.Pearl Street.Pennsylvania Avenue.Pine Close.Pine Grove.Pine Street.Pinfold Lane.Pleasant Street.Poplar Avenue.Poplar Close.Poplar Road.Poplar Street.Post Road.Pound Lane.Princes Street.Princess Street.Priory Close.Priory Road.Prospect Avenue.Prospect Place.Prospect Road.Prospect Street.Quarry Lane.Quarry Road.Queen's Road.Railroad Avenue.Railroad Street.Railway Street.Rectory Close.Rectory Lane.Richmond Close.Richmond Road.Ridge Road.River Road.River Street.Riverside.Riverside Avenue.Riverside Drive.Roman Road.Roman Way.Rowan Close.Russell Street.S 10th Street.S 14th Street.S 1st Avenue.S 1st Street.S 2nd Street.S 3rd Street.S 4th Street.S 5th Street.S 6th Street.S 7th Street.S 8th Street.S 9th Street.S Bridge Street.S Broad Street.S Broadway.S Broadway Street.S Center Street.S Central Avenue.S Chestnut Street.S Church Street.S College Street.S Division Street.S East Street.S Elm Street.S Franklin Street.S Front Street.S Grand Avenue.S High Street.S Jackson Street.S Jefferson Street.S Lincoln Street.S Main.S Main Avenue.S Main Street.S Maple Street.S Market Street.S Mill Street.S Monroe Street.S Oak Street.S Park Street.S Pine Street.S Railroad Street.S State Street.S Union Street.S Walnut Street.S Washington Avenue.S Washington Street.S Water Street.S West Street.Salisbury Road.Sandringham Road.Sandy Lane.School Close.School Lane.School Road.School Street.Second Avenue.Silver Street.Skyline Drive.Smith Street.Somerset Road.South Avenue.South Drive.South Road.South Street.South View.Spring Gardens.Spring Street.Springfield Close.Springfield Road.Spruce Street.St Andrew's Road.St Andrews Close.St George's Road.St John's Road.St Mary's Close.St Mary's Road.Stanley Road.Stanley Street.State Avenue.State Line Road.State Road.State Street.Station Road.Station Street.Stoney Lane.Sycamore Avenue.Sycamore Close.Sycamore Drive.Sycamore Street.Talbot Road.Tennyson Road.The Avenue.The Beeches.The Causeway.The Chase.The Coppice.The Copse.The Crescent.The Croft.The Dell.The Drive.The Fairway.The Glebe.The Grange.The Green.The Grove.The Hawthorns.The Lane.The Laurels.The Limes.The Maltings.The Meadows.The Mews.The Mount.The Oaks.The Orchard.The Oval.The Paddock.The Paddocks.The Poplars.The Ridgeway.The Ridings.The Rise.The Sidings.The Spinney.The Square.The Willows.The Woodlands.Third Avenue.Third Street.Tower Road.Trinity Road.Tudor Close.Union Avenue.Union Street.University Avenue.University Drive.Valley Road.Veterans Memorial Drive.Veterans Memorial Highway.Vicarage Close.Vicarage Lane.Vicarage Road.Victoria Place.Victoria Road.Victoria Street.Vine Street.W 10th Street.W 11th Street.W 12th Street.W 14th Street.W 1st Street.W 2nd Street.W 3rd Street.W 4th Avenue.W 4th Street.W 5th Street.W 6th Avenue.W 6th Street.W 7th Street.W 8th Street.W 9th Street.W Bridge Street.W Broad Street.W Broadway.W Broadway Avenue.W Broadway Street.W Center Street.W Central Avenue.W Chestnut Street.W Church Street.W Division Street.W Elm Street.W Franklin Street.W Front Street.W Grand Avenue.W High Street.W Jackson Street.W Jefferson Street.W Lake Street.W Main.W Main Street.W Maple Street.W Market Street.W Monroe Street.W North Street.W Oak Street.W Park Street.W Pine Street.W River Road.W South Street.W State Street.W Union Street.W Walnut Street.W Washington Avenue.W Washington Street.Walnut Close.Walnut Street.Warren Close.Warren Road.Washington Avenue.Washington Boulevard.Washington Road.Washington Street.Water Lane.Water Street.Waterloo Road.Waterside.Watery Lane.Waverley Road.Well Lane.Wellington Road.Wellington Street.West Avenue.West End.West Lane.West Road.West Street.West View.Western Avenue.Western Road.Westfield Road.Westgate.William Street.Willow Close.Willow Drive.Willow Grove.Willow Road.Willow Street.Windermere Road.Windmill Close.Windmill Lane.Windsor Avenue.Windsor Close.Windsor Drive.Wood Lane.Wood Street.Woodland Close.Woodland Road.Woodlands.Woodlands Avenue.Woodlands Close.Woodlands Road.Woodside.Woodside Road.Wren Close.Yew Tree Close.York Road.York Street`.split(`.`), street_pattern: [`{{person.firstName}} {{location.street_suffix}}`, `{{person.lastName}} {{location.street_suffix}}`, `{{location.street_name}}`], street_suffix: `Alley.Avenue.Branch.Bridge.Brook.Brooks.Burg.Burgs.Bypass.Camp.Canyon.Cape.Causeway.Center.Centers.Circle.Circles.Cliff.Cliffs.Club.Common.Corner.Corners.Course.Court.Courts.Cove.Coves.Creek.Crescent.Crest.Crossing.Crossroad.Curve.Dale.Dam.Divide.Drive.Drives.Estate.Estates.Expressway.Extension.Extensions.Fall.Falls.Ferry.Field.Fields.Flat.Flats.Ford.Fords.Forest.Forge.Forges.Fork.Forks.Fort.Freeway.Garden.Gardens.Gateway.Glen.Glens.Green.Greens.Grove.Groves.Harbor.Harbors.Haven.Heights.Highway.Hill.Hills.Hollow.Inlet.Island.Islands.Isle.Junction.Junctions.Key.Keys.Knoll.Knolls.Lake.Lakes.Land.Landing.Lane.Light.Lights.Loaf.Lock.Locks.Lodge.Loop.Mall.Manor.Manors.Meadow.Meadows.Mews.Mill.Mills.Mission.Motorway.Mount.Mountain.Mountains.Neck.Orchard.Oval.Overpass.Park.Parks.Parkway.Parkways.Pass.Passage.Path.Pike.Pine.Pines.Place.Plain.Plains.Plaza.Point.Points.Port.Ports.Prairie.Radial.Ramp.Ranch.Rapid.Rapids.Rest.Ridge.Ridges.River.Road.Roads.Route.Row.Rue.Run.Shoal.Shoals.Shore.Shores.Skyway.Spring.Springs.Spur.Spurs.Square.Squares.Station.Stravenue.Stream.Street.Streets.Summit.Terrace.Throughway.Trace.Track.Trafficway.Trail.Tunnel.Turnpike.Underpass.Union.Unions.Valley.Valleys.Via.Viaduct.View.Views.Village.Villages.Ville.Vista.Walk.Walks.Wall.Way.Ways.Well.Wells`.split(`.`) }, lorem: { word: `a.ab.abbas.abduco.abeo.abscido.absconditus.absens.absorbeo.absque.abstergo.absum.abundans.abutor.accedo.accendo.acceptus.accommodo.accusamus.accusantium.accusator.acer.acerbitas.acervus.acidus.acies.acquiro.acsi.ad.adamo.adaugeo.addo.adduco.ademptio.adeo.adeptio.adfectus.adfero.adficio.adflicto.adhaero.adhuc.adicio.adimpleo.adinventitias.adipisci.adipiscor.adiuvo.administratio.admiratio.admitto.admoneo.admoveo.adnuo.adopto.adsidue.adstringo.adsuesco.adsum.adulatio.adulescens.aduro.advenio.adversus.advoco.aedificium.aeger.aegre.aegrotatio.aegrus.aeneus.aequitas.aequus.aer.aestas.aestivus.aestus.aetas.aeternus.ager.aggero.aggredior.agnitio.agnosco.ago.ait.aiunt.alias.alienus.alii.alioqui.aliqua.aliquam.aliquid.alius.allatus.alo.alter.altus.alveus.amaritudo.ambitus.ambulo.amet.amicitia.amiculum.amissio.amita.amitto.amo.amor.amoveo.amplexus.amplitudo.amplus.ancilla.angelus.angulus.angustus.animadverto.animi.animus.annus.anser.ante.antea.antepono.antiquus.aperiam.aperio.aperte.apostolus.apparatus.appello.appono.appositus.approbo.apto.aptus.apud.aqua.ara.aranea.arbitro.arbor.arbustum.arca.arceo.arcesso.architecto.arcus.argentum.argumentum.arguo.arma.armarium.aro.ars.articulus.artificiose.arto.arx.ascisco.ascit.asper.asperiores.aspernatur.aspicio.asporto.assentator.assumenda.astrum.at.atavus.ater.atque.atqui.atrocitas.atrox.attero.attollo.attonbitus.auctor.auctus.audacia.audax.audentia.audeo.audio.auditor.aufero.aureus.aurum.aut.autem.autus.auxilium.avaritia.avarus.aveho.averto.baiulus.balbus.barba.bardus.basium.beatae.beatus.bellicus.bellum.bene.beneficium.benevolentia.benigne.bestia.bibo.bis.blandior.blanditiis.bonus.bos.brevis.cado.caecus.caelestis.caelum.calamitas.calcar.calco.calculus.callide.campana.candidus.canis.canonicus.canto.capillus.capio.capitulus.capto.caput.carbo.carcer.careo.caries.cariosus.caritas.carmen.carpo.carus.casso.caste.casus.catena.caterva.cattus.cauda.causa.caute.caveo.cavus.cedo.celebrer.celer.celo.cena.cenaculum.ceno.censura.centum.cerno.cernuus.certe.certus.cervus.cetera.charisma.chirographum.cibo.cibus.cicuta.cilicium.cimentarius.ciminatio.cinis.circumvenio.cito.civis.civitas.clam.clamo.claro.clarus.claudeo.claustrum.clementia.clibanus.coadunatio.coaegresco.coepi.coerceo.cogito.cognatus.cognomen.cogo.cohaero.cohibeo.cohors.colligo.collum.colo.color.coma.combibo.comburo.comedo.comes.cometes.comis.comitatus.commemoro.comminor.commodi.commodo.communis.comparo.compello.complectus.compono.comprehendo.comptus.conatus.concedo.concido.conculco.condico.conduco.confero.confido.conforto.confugo.congregatio.conicio.coniecto.conitor.coniuratio.conor.conqueror.conscendo.consectetur.consequatur.consequuntur.conservo.considero.conspergo.constans.consuasor.contabesco.contego.contigo.contra.conturbo.conventus.convoco.copia.copiose.cornu.corona.corporis.corpus.correptius.corrigo.corroboro.corrumpo.corrupti.coruscus.cotidie.crapula.cras.crastinus.creator.creber.crebro.credo.creo.creptio.crepusculum.cresco.creta.cribro.crinis.cruciamentum.crudelis.cruentus.crur.crustulum.crux.cubicularis.cubitum.cubo.cui.cuius.culpa.culpo.cultellus.cultura.cum.cumque.cunabula.cunae.cunctatio.cupiditas.cupiditate.cupio.cuppedia.cupressus.cur.cura.curatio.curia.curiositas.curis.curo.curriculum.currus.cursim.curso.cursus.curto.curtus.curvo.custodia.damnatio.damno.dapifer.debeo.debilito.debitis.decens.decerno.decet.decimus.decipio.decor.decretum.decumbo.dedecor.dedico.deduco.defaeco.defendo.defero.defessus.defetiscor.deficio.defleo.defluo.defungo.degenero.degero.degusto.deinde.delectatio.delectus.delego.deleniti.deleo.delibero.delicate.delinquo.deludo.demens.demergo.demitto.demo.demonstro.demoror.demulceo.demum.denego.denique.dens.denuncio.denuo.deorsum.depereo.depono.depopulo.deporto.depraedor.deprecator.deprimo.depromo.depulso.deputo.derelinquo.derideo.deripio.deserunt.desidero.desino.desipio.desolo.desparatus.despecto.dicta.dignissimos.distinctio.dolor.dolore.dolorem.doloremque.dolores.doloribus.dolorum.ducimus.ea.eaque.earum.eius.eligendi.enim.eos.error.esse.est.et.eum.eveniet.ex.excepturi.exercitationem.expedita.explicabo.facere.facilis.fuga.fugiat.fugit.harum.hic.id.illo.illum.impedit.in.incidunt.infit.inflammatio.inventore.ipsa.ipsam.ipsum.iste.itaque.iure.iusto.labore.laboriosam.laborum.laudantium.libero.magnam.magni.maiores.maxime.minima.minus.modi.molestiae.molestias.mollitia.nam.natus.necessitatibus.nemo.neque.nesciunt.nihil.nisi.nobis.non.nostrum.nulla.numquam.occaecati.ocer.odio.odit.officia.officiis.omnis.optio.paens.pariatur.patior.patria.patrocinor.patruus.pauci.paulatim.pauper.pax.peccatus.pecco.pecto.pectus.pecus.peior.pel.perferendis.perspiciatis.placeat.porro.possimus.praesentium.provident.quae.quaerat.quam.quas.quasi.qui.quia.quibusdam.quidem.quis.quisquam.quo.quod.quos.ratione.recusandae.reiciendis.rem.repellat.repellendus.reprehenderit.repudiandae.rerum.saepe.sapiente.sed.sequi.similique.sint.sit.socius.sodalitas.sol.soleo.solio.solitudo.solium.sollers.sollicito.solum.solus.soluta.solutio.solvo.somniculosus.somnus.sonitus.sono.sophismata.sopor.sordeo.sortitus.spargo.speciosus.spectaculum.speculum.sperno.spero.spes.spiculum.spiritus.spoliatio.sponte.stabilis.statim.statua.stella.stillicidium.stipes.stips.sto.strenuus.strues.studio.stultus.suadeo.suasoria.sub.subito.subiungo.sublime.subnecto.subseco.substantia.subvenio.succedo.succurro.sufficio.suffoco.suffragium.suggero.sui.sulum.sum.summa.summisse.summopere.sumo.sumptus.sunt.supellex.super.suppellex.supplanto.suppono.supra.surculus.surgo.sursum.suscipio.suscipit.suspendo.sustineo.suus.synagoga.tabella.tabernus.tabesco.tabgo.tabula.taceo.tactus.taedium.talio.talis.talus.tam.tamdiu.tamen.tametsi.tamisium.tamquam.tandem.tantillus.tantum.tardus.tego.temeritas.temperantia.templum.tempora.tempore.temporibus.temptatio.tempus.tenax.tendo.teneo.tener.tenetur.tenuis.tenus.tepesco.tepidus.ter.terebro.teres.terga.tergeo.tergiversatio.tergo.tergum.termes.terminatio.tero.terra.terreo.territo.terror.tersus.tertius.testimonium.texo.textilis.textor.textus.thalassinus.theatrum.theca.thema.theologus.thermae.thesaurus.thesis.thorax.thymbra.thymum.tibi.timidus.timor.titulus.tolero.tollo.tondeo.tonsor.torqueo.torrens.tot.totam.totidem.toties.totus.tracto.trado.traho.trans.tredecim.tremo.trepide.tres.tribuo.tricesimus.triduana.tripudio.tristis.triumphus.trucido.truculenter.tubineus.tui.tum.tumultus.tunc.turba.turbo.turpis.tutamen.tutis.tyrannus.uberrime.ubi.ulciscor.ullam.ullus.ulterius.ultio.ultra.umbra.umerus.umquam.una.unde.undique.universe.unus.urbanus.urbs.uredo.usitas.usque.ustilo.ustulo.usus.ut.uter.uterque.utilis.utique.utor.utpote.utrimque.utroque.utrum.uxor.vaco.vacuus.vado.vae.valde.valens.valeo.valetudo.validus.vallum.vapulus.varietas.varius.vehemens.vel.velit.velociter.velum.velut.venia.veniam.venio.ventito.ventosus.ventus.venustas.ver.verbera.verbum.vere.verecundia.vereor.vergo.veritas.veritatis.vero.versus.verto.verumtamen.verus.vesco.vesica.vesper.vespillo.vester.vestigium.vestrum.vetus.via.vicinus.vicissitudo.victoria.victus.videlicet.video.viduo.vigilo.vigor.vilicus.vilis.vilitas.villa.vinco.vinculum.vindico.vinitor.vinum.vir.virga.virgo.viridis.viriliter.virtus.vis.viscus.vita.vitae.vitiosus.vitium.vito.vivo.vix.vobis.vociferor.voco.volaticus.volo.volubilis.voluntarius.volup.voluptas.voluptate.voluptatem.voluptates.voluptatibus.voluptatum.volutabrum.volva.vomer.vomica.vomito.vorago.vorax.voro.vos.votum.voveo.vox.vulariter.vulgaris.vulgivagus.vulgo.vulgus.vulnero.vulnus.vulpes.vulticulus.xiphias`.split(`.`) }, metadata: { title: `English`, code: `en`, language: `en`, endonym: `English`, dir: `ltr`, script: `Latn` }, music: { album: [`"Awaken, My Love!"`, `(What's The Story) Morning Glory?`, `- Tragedy +`, `13 Reasons Why (Season 3)`, `21st Century Breakdown`, `30 De Febrero`, `432 Hz Deep Healing`, `5-Star`, `528 Hz Meditation Music`, `54+1`, `8 Mile`, `808s & Heartbreak`, `9 To 5 And Odd Jobs`, `A Beautiful Lie`, `A Day At The Races`, `A Day Without Rain`, `A Fever You Can't Sweat Out`, `A Gangsta's Pain`, `A Gift & A Curse`, `A Hard Day's Night`, `A Head Full Of Dreams`, `A Kind Of Magic`, `A Million Ways To Murder`, `A Moment Apart`, `A Song For Every Moon`, `A Thousand Suns`, `A Winter Romance`, `ABBA`, `AI YoungBoy`, `AJ Tracey`, `Act One`, `After Hours`, `Agent Provocateur`, `All About You`, `All I Know So Far: Setlist`, `All Or Nothing`, `All Out`, `All Over The Place`, `All Stand Together`, `All The Lost Souls`, `All The Things I Never Said`, `All Things Must Pass`, `Alleen`, `Alright, Still`, `Alta Suciedad`, `America`, `American Heartbreak`, `American Teen`, `And Justice For None`, `Animal Songs`, `Another Friday Night`, `Anything Goes`, `Ao Vivo Em São Paulo`, `Ao Vivo No Ibirapuera`, `Apricot Princess`, `Aqui E Agora (Ao Vivo)`, `Arcane League Of Legends`, `Ardipithecus`, `Aretha Now`, `Around The Fur`, `Arrival`, `Artist 2.0`, `As She Pleases`, `Ascend`, `Ashlyn`, `Astro Lounge`, `At Night, Alone.`, `At. Long. Last. ASAP`, `Atlas`, `Audioslave`, `Aura`, `Austin`, `Awake`, `Away From The Sun`, `Ayayay!`, `Baby On Baby`, `Back For Everything`, `Back From The Edge`, `Back In Black`, `Back To Black`, `Back To The Game`, `Bad`, `Bahía Ducati`, `Baila`, `Barbie The Album`, `Battleground`, `Bayou Country`, `Bcos U Will Never B Free`, `Be`, `Be Here Now`, `Beautiful Mind`, `Beautiful Thugger Girls`, `Beautiful Trauma`, `Beauty And The Beast`, `Beggars Banquet`, `Being Funny In A Foreign Language`, `Berlin Lebt`, `Berry Is On Top`, `Best White Noise For Baby Sleep - Loopable With No Fade`, `Big Baby DRAM`, `Bigger, Better, Faster, More!`, `Billy Talent II`, `Black Star Elephant`, `Blackout`, `Blank Face LP`, `Bleach`, `Blizzard Of Ozz`, `Blonde`, `Blood Sugar Sex Magik`, `Bloom`, `Blowin' Your Mind!`, `Blu Celeste`, `Blue`, `Blue Banisters`, `Blue Hawaii`, `Blue Neighbourhood`, `Bluebird Days`, `Bobby Tarantino`, `Bobby Tarantino II`, `Bon Iver`, `Born Pink`, `Born To Run`, `Brand New Eyes`, `Break The Cycle`, `Breakfast In America`, `Breakthrough`, `Brett Young`, `Bridge Over Troubled Water`, `Bright: The Album`, `Brol`, `Buds`, `Buena Vista Social Club`, `Built On Glass`, `Bury Me At Makeout Creek`, `Busyhead`, `By The Way`, `CB6`, `CNCO`, `California Sunrise`, `Californication`, `Call Me Irresponsible`, `Calm`, `Camino Palmero`, `Camp`, `Caracal`, `Carbon Fiber Hits`, `Carnival`, `Carry On`, `Cartel De Santa`, `Certified Lover Boy`, `Chaaama`, `Chama Meu Nome`, `Chapter 1: Snake Oil`, `Chapter 2: Swamp Savant`, `Chapter One`, `Charlie's Angels`, `Cherry Bomb`, `Chief`, `Chocolate Factory`, `Chosen`, `Chris Brown`, `Christina Aguilera`, `Chromatica`, `Church`, `City Of Evil`, `Clandestino`, `Clouds`, `Coco`, `Collision Course`, `Colour Vision`, `Combat Rock`, `Come Around Sundown`, `Come Away With Me`, `Come Home The Kids Miss You`, `Come What(ever) May`, `Commando`, `Common Sense`, `Communion`, `Conditions`, `Confident`, `Confrontation`, `Control The Streets, Volume 2`, `Corinne Bailey Rae`, `Costello Music`, `Cottonwood`, `Covers, Vol. 2`, `Cozy Tapes Vol. 2: Too Cozy`, `Crash Talk`, `Crazy Love`, `Crazysexycool`, `Crowded House`, `Cruisin' With Junior H`, `Culture`, `Current Mood`, `DS2`, `Dale`, `Danger Days: The True Lives Of The Fabulous Killjoys`, `Dangerous Woman`, `Dangerous: The Double Album`, `Dark Horse`, `Day69`, `Daydream`, `De Fiesta`, `De Viaje`, `DeAnn`, `Death Race For Love`, `Delirium`, `Delta`, `Demidevil`, `Depression Cherry`, `Descendants`, `Desgenerados Mixtape`, `Destin`, `Destiny Fulfilled`, `Desvelado`, `Detroit 2`, `Dex Meets Dexter`, `Dharma`, `Die A Legend`, `Different World`, `Dig Your Roots`, `Digital Druglord`, `Dirt`, `Disclaimer I / II`, `Discovery`, `Disraeli Gears`, `Disumano`, `Dizzy Up The Girl`, `Don't Play That Song`, `Donda`, `Donde Quiero Estar`, `Doo-Wops & Hooligans`, `Down The Way`, `Dr. Feelgood`, `Dream Your Life Away`, `Dreaming Out Loud`, `Drip Harder`, `Drive`, `Drones`, `Dropped Outta College`, `Drowning`, `Dua Warna Cinta`, `Dulce Beat`, `Dusty In Memphis`, `Dutty Rock`, `Dying To Live`, `ENR`, `East Atlanta Love Letter`, `Editorial`, `Edna`, `El Abayarde`, `El Amor En Los Tiempos Del Perreo`, `El Camino`, `El Comienzo`, `El Dorado`, `El Karma`, `El Mal Querer`, `El Malo`, `El Trabajo Es La Suerte`, `El Viaje De Copperpot`, `Electric Ladyland`, `Emotion`, `En Tus Planes`, `Endless Summer Vacation`, `Enter The Wu-Tang (36 Chambers)`, `Equals (=)`, `Estrella`, `Euphoria`, `Europop`, `Evermore`, `Every Kingdom`, `Everyday Life`, `Evolve`, `Expectations`, `Face Yourself`, `Facelift`, `Fallin'`, `Fancy You`, `Fantasía`, `Favourite Worst Nightmare`, `Fear Of The Dark`, `Fearless`, `Feel Something`, `Feels Like Home`, `Femme Fatale`, `Ferxxocalipsis`, `Fifty Shades Darker`, `Fifty Shades Freed`, `Fifty Shades Of Grey`, `Final (Vol.1)`, `Finding Beauty In Negative Spaces`, `Fine Line`, `First Impressions Of Earth`, `First Steps`, `Five Seconds Flat`, `Folklore`, `For Emma, Forever Ago`, `Forajido EP 1`, `Forever`, `Forever Young`, `Formula Of Love: O+T=<3`, `Free 6lack`, `Freudian`, `Frozen II`, `Full Moon Fever`, `Funhouse`, `Funk Wav Bounces Vol.1`, `Future History`, `FutureSex/LoveSounds`, `Fuzzybrain`, `Gallery`, `Gangsta's Paradise`, `Gemini`, `Gemini Rights`, `Generationwhy`, `Get A Grip`, `Get Up`, `Gettin' Old`, `Girl`, `Gladiator`, `Glisten`, `Globalization`, `Gloria`, `Glory Days`, `God's Project`, `Gold Skies`, `Golden`, `Good Evening`, `Good Thing`, `Goodbye Yellow Brick Road`, `Gossip Columns`, `Got Your Six`, `Graceland`, `Graduation`, `Grand Champ`, `Grandson, Vol. 1`, `Green River`, `Guerra`, `Ha*Ash Primera Fila - Hecho Realidad`, `Haiz`, `Hamilton`, `Happy Endings`, `Harry Styles`, `Hasta La Raíz`, `Hatful Of Hollow`, `Head In The Clouds`, `Heard It In A Past Life`, `Heart Shaped World`, `Heartbeat City`, `Heartbreak On A Full Moon / Cuffing Season - 12 Days Of Christmas`, `Heaven Or Hell`, `Heaven knows`, `Hellbilly Deluxe`, `Hellboy`, `Help!`, `Her Loss`, `Here Comes The Cowboy`, `Hey World`, `High School Musical`, `High Tide In The Snake's Nest`, `Historias De Un Capricornio`, `Hndrxx`, `Hombres G (Devuélveme A Mi Chica)`, `Homerun`, `Homework`, `Hot Fuss`, `Hot Pink`, `Hot Sauce / Hello Future`, `Hot Space`, `Hotel Diablo`, `Houses Of The Holy`, `How Big, How Blue, How Beautiful`, `How I'm Feeling`, `How To Be Human`, `How To Save A Life`, `How To: Friend, Love, Freefall`, `Hozier`, `Human`, `Huncho Jack, Jack Huncho`, `Hunter Hayes`, `Hysteria`, `I Am...Sasha Fierce`, `I Can't Handle Change`, `I Met You When I Was 18. (The Playlist)`, `I Never Liked You`, `I Never Loved A Man The Way I Love You`, `I See You`, `I Think You Think Too Much Of Me`, `I Used To Know Her`, `I Used To Think I Could Fly`, `I'm Comin' Over`, `Ich & Keine Maske`, `If You Can Believe Your Eyes & Ears`, `Il Ballo Della Vita`, `Ill Communication`, `Imagination & The Misfit Kid`, `Imagine`, `Immortalized`, `In A Perfect World...`, `In Colour`, `In My Own Words`, `In Rainbows`, `In Return`, `In The Lonely Hour`, `Infest`, `Innuendo`, `Inter Shibuya - La Mafia`, `Interstellar`, `Is This It`, `It Was Written`, `It's Not Me, It's You`, `It's Only Me`, `Ivory`, `JackBoys`, `Jamie`, `Jazz`, `Jibrail & Iblis`, `Jordi`, `Jordin Sparks`, `Jose`, `Just As I Am`, `Just Cause Y'all Waited 2`, `Just Like You`, `Justified`, `K-12 / After School`, `K.I.D.S.`, `K.O.`, `K.O.B. Live`, `KG0516`, `KOD`, `Kane Brown`, `Kid A`, `Kid Krow`, `Kids See Ghosts`, `Kids in Love`, `Kinks (You Really Got Me)`, `Know-It-All`, `Konvicted`, `Kring`, `LANY`, `LM5`, `La Criatura`, `La Flaca`, `La Melodia De La Calle`, `La Revolucion`, `Lady Lady`, `Lady Wood`, `Langit Mong Bughaw`, `Las Que No Iban A Salir`, `Last Day Of Summer`, `Last Year Was Complicated`, `Layers`, `Layover`, `Lazarus`, `Led Zeppelin`, `Left Of The Middle`, `Leftoverture`, `Legends Never Die`, `Let's Skip To The Wedding`, `Let's Talk About Love`, `Licensed To Ill`, `Life In Cartoon Motion`, `Life Thru A Lens`, `Lifelines`, `Like..?`, `Lil Big Pac`, `Lil Boat`, `Lil Boat 2`, `Lil Boat 3.5`, `Lil Kiwi`, `Lil Pump`, `Limon Y Sal`, `Listen Without Prejudice`, `Little Voice`, `Live On Red Barn Radio I & II`, `Lo Que Andábamos Buscando`, `Lofi Fruits Music 2021`, `London Calling`, `Los Campeones Del Pueblo`, `Los Extraterrestres`, `Los Favoritos 2`, `Lost`, `Lost In Love`, `Loud`, `Love Sick`, `Love Story`, `Love Stuff`, `Love Yourself: Tear`, `Lover`, `Luca Brasi 2: Gangsta Grillz`, `Lust For Life`, `Luv Is Rage`, `M!ssundaztood`, `Ma Fleur`, `Made In Lagos`, `Mafia Bidness`, `Magazines Or Novels`, `Mainstream Sellout`, `Majestic`, `Make It Big`, `Make Yourself`, `Making Mirrors`, `Mamma Mia! Here We Go Again`, `Man Of The Woods`, `Manic`, `Me And My Gang`, `Meduza`, `Meet The Orphans`, `Meet The Woo`, `Melim`, `Mellon Collie And The Infinite Sadness`, `Melly vs. Melvin`, `Memories...Do Not Open`, `Menagerie`, `Midnights`, `Minecraft - Volume Alpha`, `Minutes To Midnight`, `Mix Pa Llorar En Tu Cuarto`, `Modo Avión`, `Monkey Business`, `Mono.`, `Montana`, `Montevallo`, `Moosetape`, `Morning View`, `Motivan2`, `Moving Pictures`, `Mr. Davis`, `Mr. Misunderstood`, `Mulan`, `Mura Masa`, `Music From The Edge Of Heaven`, `Music Of The Sun`, `My House`, `My Kinda Party`, `My Krazy Life`, `My Liver Will Handle What My Heart Can't`, `My Moment`, `My Own Lane`, `My Turn`, `My Worlds`, `Na Praia (Ao Vivo)`, `Nakamura`, `Nation Of Two`, `Navegando`, `Need You Now`, `Neon Future III`, `Neotheater`, `Never Trust A Happy Song`, `New English`, `News Of The World`, `Nicole`, `Night & Day`, `Nimmerland`, `Nimrod`, `Nine Track Mind`, `No Angel`, `No Me Pidas Perdón`, `No More Drama`, `No Protection`, `No Strings Attached`, `No Time To Die`, `Nobody Is Listening`, `Non Stop Erotic Cabaret`, `Non-Fiction`, `Northsbest`, `Nostalgia`, `Nostalgia, Ultra`, `Notes On A Conditional Form`, `Now Or Never`, `O Embaixador (Ao Vivo)`, `O My Heart`, `OK Computer`, `Ocean`, `Ocean Avenue`, `Ocean Eyes`, `Odisea`, `Oh My My`, `Oh, What A Life`, `On The 6`, `One In A Million`, `One More Light`, `One Of These Nights`, `Open Up And Say...Ahh!`, `Ordinary Man`, `Origins`, `Out Of The Blue`, `Over It`, `OzuTochi`, `PTSD`, `Pa Las Baby's Y Belikeada`, `Pa Que Hablen`, `Pa' Luego Es Tarde`, `Pa' Otro La 'O`, `Pablo Honey`, `Pain Is Love`, `Pain Is Temporary`, `Painting Pictures`, `Palmen Aus Plastik 2`, `Para Mi Ex`, `Para Siempre`, `Partners In Crime`, `Pawn Shop`, `Pegasus / Neon Shark VS Pegasus`, `Pet Sounds`, `Piece By Piece`, `Pier Pressure`, `Pineapple Sunrise`, `Piseiro 2020 Ao Vivo`, `Planet Pit`, `Plans`, `Play Deep`, `Playa Saturno`, `Por Primera Vez`, `Por Vida`, `Positions`, `Post Human: Survival Horror`, `Poster Girl`, `Prazer, Eu Sou Ferrugem (Ao Vivo)`, `Pretty Girls Like Trap Music`, `Pretty. Odd.`, `Prince Royce`, `Prisma`, `Prometo`, `Providence`, `Puberty 2`, `Punisher`, `Purgatory`, `Purple Rain`, `Que Bendición`, `Queen Of The Clouds`, `Quiero Volver`, `R&G (Rhythm & Gangsta): The Masterpiece`, `Raise!`, `Ransom 2`, `Rapunzel`, `Rare`, `Re Mida`, `Ready To Die`, `Realer`, `Rebelde`, `Reclassified`, `Recovery`, `Recuerden Mi Estilo`, `Reggatta De Blanc`, `Regulate… G Funk Era`, `Reik`, `Reise, Reise`, `Relapse`, `Relaxing Piano Lullabies And Natural Sleep Aid For Baby Sleep Music`, `Religiously. The Album.`, `Replay`, `Results May Vary`, `Revenge`, `Revolve`, `Revolver`, `Ricky Martin`, `Rien 100 Rien`, `Ripcord`, `Rise And Fall, Rage And Grace`, `Rise Of An Empire`, `Robin Hood: Prince Of Thieves`, `Rock N Roll Jesus`, `Romance`, `Romances`, `Ronan`, `Royal Blood`, `Rumours`, `Sad Boyz 4 Life II`, `San Lucas`, `Santana World`, `Saturation III`, `Sauce Boyz`, `Savage Mode`, `Saxobeats`, `Scarlet`, `Schwarzes Herz`, `Seal The Deal & Let's Boogie`, `Section.80`, `Segundo Romance`, `Sehnsucht`, `Shake The Snow Globe`, `Shang-Chi And The Legend Of The Ten Rings: The Album`, `Sheer Heart Attack`, `Shiesty Season`, `Shock Value`, `Shoot For The Stars, Aim For The Moon`, `Signed Sealed And Delivered`, `Signos`, `Silent Alarm`, `Simplemente Gracias`, `Sin Bandera`, `Sing Me A Lullaby, My Sweet Temptation`, `Sinner`, `Sirio`, `Sit Still, Look Pretty`, `Skin`, `Slowhand`, `Smash`, `Smithereens`, `Snow Cougar`, `Social Cues`, `Some Girls`, `Song Hits From Holiday Inn`, `Songs For Dads`, `Songs For The Deaf`, `Songs For You, Truths For Me`, `Songs In The Key Of Life`, `Souled Out`, `Sounds Of Silence`, `Soy Como Quiero Ser`, `Speak Now`, `Speak Your Mind`, `Speakerboxxx/The Love Below`, `Spider-Man: Into The Spider-Verse`, `Split Decision`, `Square Up`, `SremmLife`, `Starboy`, `Stay +`, `Stay Dangerous`, `Staying At Tamara's`, `Steppenwolf`, `Stick Season`, `Still Bill`, `Straight Outta Compton`, `Strange Trails`, `Stronger`, `Suavemente`, `Sublime`, `Suck It and See`, `Sucker`, `Sueños`, `Sugar`, `Summer Forever`, `Summer,`, `Sunset Season`, `Sunshine On Leith`, `Surfer Rosa`, `Sweet Talker`, `SweetSexySavage`, `System Of A Down`, `TA13OO`, `Talk That Talk`, `Talking Heads: 77`, `Tangled Up`, `Tango In The Night`, `Taxi Driver`, `Taylor Swift`, `Tell Me It's Real`, `Ten`, `Ten Summoner's Tales`, `Terra Sem Cep (Ao Vivo)`, `Terral`, `Testing`, `Tha Carter III`, `Thank Me Later`, `That's Christmas To Me`, `The Academy`, `The Adventures Of Bobby Ray`, `The Album`, `The Andy Williams Christmas Album`, `The Aviary`, `The Balcony`, `The Battle Of Los Angeles`, `The Beatles (White Album)`, `The Beginning`, `The Better Life`, `The Big Day`, `The Book`, `The Breakfast Club`, `The Cars`, `The Colour And The Shape`, `The Death Of Peace Of Mind`, `The Diary Of Alicia Keys`, `The Documentary`, `The Emancipation Of Mimi`, `The Eminem Show`, `The End Of Everything`, `The Final Countdown`, `The Forever Story`, `The Foundation`, `The Goat`, `The Golden Child`, `The Good Parts`, `The Greatest Showman: Reimagined`, `The Green Trip`, `The Hardest Love`, `The Head And The Heart`, `The Human Condition`, `The Infamous`, `The Lady Killer`, `The Last Don II`, `The Lion King`, `The Lockdown Sessions`, `The London Sessions`, `The Lord Of The Rings: The Fellowship Of The Ring`, `The Lost Boy`, `The Magic Of Christmas / The Christmas Song`, `The Marshall Mathers LP`, `The Martin Garrix Collection`, `The Melodic Blue`, `The Mockingbird & The Crow`, `The Pains Of Growing`, `The Papercut Chronicles`, `The Perfect Luv Tape`, `The Pinkprint`, `The Predator`, `The Queen Is Dead`, `The ReVe Festival: Finale`, `The Rise And Fall Of Ziggy Stardust And The Spiders From Mars`, `The Rising Tied`, `The River`, `The Stone Roses`, `The Story Of Us`, `The Stranger`, `The Sufferer & The Witness`, `The Sun's Tirade`, `The Temptations Sing Smokey`, `The Time Of Our Lives`, `The Way It Is`, `The Wonderful World Of Sam Cooke`, `The Writing's On The Wall`, `The Young And The Hopeless`, `Therapy`, `Therapy Session`, `There Is More (Live)`, `There Is Nothing Left To Lose`, `These Things Happen`, `Third Eye Blind`, `This Is Me...Then`, `This Unruly Mess I've Made`, `Threat to Survival`, `Thrill Of The Chase`, `Time`, `Timelezz`, `To Let A Good Thing Die`, `To Pimp A Butterfly`, `Toast To Our Differences`, `Todos Os Cantos, Vol. 1 (Ao Vivo)`, `Too Hard`, `Torches X`, `Total Xanarchy`, `Toto IV`, `Toulouse Street`, `Tourist History`, `Toxicity`, `Tragic Kingdom`, `Tranquility Base Hotel & Casino`, `Traumazine`, `Traveler`, `Tres Hombres`, `Trip At Knight`, `Tron: Legacy`, `True Blue`, `True Colors`, `Trustfall`, `Tu Veneno Mortal`, `Tudo Em Paz`, `Ubuntu`, `Ugly Is Beautiful`, `Ultra 2021`, `Una Mattina`, `Unbroken`, `Uncovered`, `Under Pressure`, `Unsponsored Content`, `Unstoppable`, `Unwritten`, `Urban Flora`, `Urban Hymns`, `Use Your Illusion I`, `Veneer`, `Versions Of Me`, `Vibes`, `Vice Versa`, `Vices & Virtues`, `Victory`, `Vida`, `Viejo Marihuano`, `Visualízate`, `Walk Away`, `Walk Me Home...`, `Watch The Throne`, `Wave`, `We Broke The Rules`, `We Love You Tecca`, `We Love You Tecca 2`, `Weezer (Green Album)`, `Welcome To The Madhouse`, `Westlife`, `What A Time To Be Alive`, `What Do You Think About The Car?`, `What Is Love?`, `What Makes You Country`, `What Separates Me From You`, `What You See Is What You Get / What You See Ain't Always What You Get`, `When It's Dark Out`, `When We All Fall Asleep, Where Do We Go?`, `Where The Light Is`, `While The World Was Burning`, `White Pony`, `Whitney`, `Who Really Cares`, `Who You Are`, `Who's Next`, `Wide Open`, `Wilder Mind`, `Wildfire`, `Willy And The Poor Boys`, `Wings / You Never Walk Alone`, `Wish`, `Wish You Were Here`, `Without Warning`, `Wonder`, `X&Y`, `XOXO`, `Y Que Quede Claro`, `YBN: The Mixtape`, `Yo Creo`, `You Will Regret`, `Youngblood`, `Younger Now`, `Youth`], artist: [`$NOT`, `$uicideboy$`, `(G)I-DLE`, `*NSYNC`, `2 Chainz`, `21 Savage`, `6LACK`, `? & The Mysterians`, `A Boogie Wit da Hoodie`, `A Taste of Honey`, `A Tribe Called Quest`, `A-Ha`, `ABBA`, `AC/DC`, `AJ Tracey`, `ATEEZ`, `Ace of Base`, `Adele`, `Ado`, `Aerosmith`, `Agust D`, `Aitana`, `Al Dexter & his Troopers`, `Al Green`, `Al Jolson`, `Al Martino`, `Alan Jackson`, `Alannah Myles`, `Alec Benjamin`, `Alejandro Sanz`, `Alesso`, `Alfredo Olivas`, `Ali Gatie`, `Alice In Chains`, `Alina Baraz`, `All Time Low`, `All-4-One`, `All-American Rejects`, `Alok`, `America`, `American Quartet`, `Amii Stewart`, `Amitabh Bhattacharya`, `Ana Castela`, `Anderson .Paak`, `Andy Grammer`, `Angus & Julia Stone`, `Anirudh Ravichander`, `Anita Ward`, `Anitta`, `Anton Karas`, `Anuel AA`, `Arcade Fire`, `Archie Bell & The Drells`, `Archies`, `Aretha Franklin`, `Arizona Zervas`, `Armin van Buuren`, `Arthur Conley`, `Artie Shaw`, `Asake`, `Asees Kaur`, `Association`, `Atif Aslam`, `Audioslave`, `Aventura`, `Avril Lavigne`, `Aya Nakamura`, `B J Thomas`, `B.o.B`, `BLACKPINK`, `BONES`, `BROCKHAMPTON`, `BTS`, `Baby Keem`, `Bachman-Turner Overdrive`, `Backstreet Boys`, `Bad Bunny`, `Badshah`, `Bailey Zimmerman`, `Banda El Recodo`, `Barbra Streisand`, `Barry White`, `Bazzi`, `Bebe Rexha`, `Becky G`, `Becky Hill`, `Bee Gees`, `Ben Bernie`, `Ben Howard`, `Ben Selvin`, `Berlin`, `Bessie Smith`, `Bethel Music`, `Bette Midler`, `Beyonce`, `Bibi Blocksberg`, `Bibi und Tina`, `BigXthaPlug`, `Bill Doggett`, `Bill Haley & his Comets`, `Bill Withers`, `Billy Davis Jr`, `Billy Joel`, `Billy Paul`, `Billy Preston`, `Billy Swan`, `Birdy`, `Bizarrap`, `Blake Shelton`, `Blur`, `Bob Marley & The Wailers`, `Bob Seger`, `Bobby Darin`, `Bobby Lewis`, `Bobby McFerrin`, `Bobby Vinton`, `Boney M.`, `Bonez MC`, `Bonnie Tyler`, `Booba`, `Boston`, `BoyWithUke`, `Boyce Avenue`, `Bradley Cooper`, `Bread`, `Brent Faiyaz`, `Brett Young`, `Bring Me The Horizon`, `Britney Spears`, `Brooks & Dunn`, `Bruce Channel`, `Bruno & Marrone`, `Bryan Adams`, `Bryce Vine`, `Buddy Holly`, `Burna Boy`, `C. Tangana`, `CKay`, `CRO`, `Camilo`, `Capital Bra`, `Captain & Tennille`, `Cardi B`, `Carin Leon`, `Carlos Vives`, `Carly Simon`, `Carpenters`, `Cavetown`, `Celine Dion`, `Central Cee`, `Chaka Khan`, `Champs`, `Charlie Rich`, `Chayanne`, `Cheat Codes`, `Cher`, `Chic`, `Chicago`, `Chris Brown`, `Chris Isaak`, `Chris Young`, `Christina Aguilera`, `Christina Perri`, `Christopher Cross`, `Chuck Berry`, `Ciara`, `Cigarettes After Sex`, `Cliff Edwards (Ukelele Ike)`, `Cody Johnson`, `Colbie Caillat`, `Colby O'Donis`, `Cole Swindell`, `Coleman Hawkins`, `Contours`, `Coolio`, `Count Basie`, `Cris Mj`, `Culture Club`, `Cyndi Lauper`, `D-Block Europe`, `DAY6`, `DJ Khaled`, `DJ Luian`, `DJ Nelson`, `DMX`, `DNCE`, `DaVido`, `Dadju`, `Daft Punk`, `Dan + Shay`, `Daniel Powter`, `Danny Ocean`, `Darius Rucker`, `Dave`, `David Bowie`, `David Guetta`, `Daya`, `Dean Martin`, `Deee-Lite`, `Deep Purple`, `Deftones`, `Demi Lovato`, `Dennis Lloyd`, `Denzel Curry`, `Dermot Kennedy`, `Desiigner`, `Devo`, `Dewa 19`, `Dexys Midnight Runners`, `Diddy`, `Dido`, `Die drei !!!`, `Diego & Victor Hugo`, `Diljit Dosanjh`, `Dimitri Vegas & Like Mike`, `Dinah Shore`, `Dionne Warwick`, `Dire Straits`, `Disclosure`, `Dixie Cups`, `Doja Cat`, `Dolly Parton`, `Don Diablo`, `Don Henley`, `Don McLean`, `Don Omar`, `Donna Summer`, `Donovan`, `Dr. Dre`, `Drake`, `Dreamville`, `Dua Lipa`, `EMF`, `ENHYPEN`, `Earth, Wind & Fire`, `Ed Sheeran`, `Eddie Cantor`, `Eddie Cochran`, `Eddy Howard`, `Edgar Winter Group`, `Edwin Hawkins Singers`, `Edwin Starr`, `El Alfa`, `Eladio Carrion`, `Electric Light Orchestra`, `Elevation Worship`, `Ella Henderson`, `Ellie Goulding`, `Elton John`, `Elvis Presley`, `Empire of the Sun`, `En Vogue`, `Enrique Iglesias`, `Eslabon Armado`, `Ethel Waters`, `Etta James`, `Evanescence`, `Exile`, `Extreme`, `Faith Hill`, `Fall Out Boy`, `Fanny Brice`, `Farruko`, `Fats Domino`, `Fats Waller`, `Feid`, `Felix Jaehn`, `Fergie`, `Fetty Wap`, `Fiersa Besari`, `Fifth Harmony`, `Fine Young Cannibals`, `Five Finger Death Punch`, `Fleetwood Mac`, `Flo-Rida`, `Florence + The Machine`, `Flume`, `Foo Fighters`, `Foreigner`, `Foster The People`, `Four Aces`, `Frank Ocean`, `Frank Sinatra`, `Frankie Avalon`, `Frankie Valli`, `Fred Astaire`, `Freda Payne`, `Freddie Dredd`, `Freddy Fender`, `French Montana`, `Fuerza Regida`, `Fujii Kaze`, `Future`, `G-Eazy`, `Garfunkel and Oates`, `Gary Lewis & The Playboys`, `Gary Numan`, `Gene Autry`, `Gene Chandler`, `Gene Vincent`, `George Michael`, `George Strait`, `Gera MX`, `Ghost`, `Ghostemane`, `Gigi D'Agostino`, `Gladys Knight & The Pips`, `Glass Animals`, `Glee Cast`, `Gloria Gaynor`, `Godsmack`, `Gorillaz`, `Gotye`, `Grand Funk Railroad`, `Green Day`, `Grouplove`, `Grupo Firme`, `Grupo Marca Registrada`, `Gryffin`, `Gucci Mane`, `Guess Who`, `Gunna`, `Gusttavo Lima`, `Guy Mitchell`, `Gwen Stefani`, `Gzuz`, `H.E.R.`, `HARDY`, `Hailee Steinfeld`, `Halsey`, `Hans Zimmer`, `Harris Jayaraj`, `Harry Chapin`, `Harry James`, `Harry Nilsson`, `Harry Styles`, `Hayley Williams`, `Herb Alpert`, `Herman's Hermits`, `Hillsong UNITED`, `Hillsong Worship`, `Hollywood Undead`, `Honey Cone`, `Hoobastank`, `Hues Corporation`, `I Prevail`, `ITZY`, `IVE`, `Ice Cube`, `Ice Spice`, `Iggy Azalea`, `Imagine Dragons`, `Incubus`, `Internet Money`, `Isaac Hayes`, `J Geils Band`, `J. Cole`, `JAY-Z`, `JJ Lin`, `JP Saxe`, `JVKE`, `Jack Harlow`, `Jack Johnson`, `Jackie Wilson`, `Jacquees`, `James Arthur`, `James Brown`, `James TW`, `James Taylor`, `Jamie Foxx`, `Janet Jackson`, `Janis Joplin`, `Jason Aldean`, `Jason Mraz`, `Jay Chou`, `Jay Sean`, `Jay Wheeler`, `Jaymes Young`, `Jean Knight`, `Jeezy`, `Jennifer Lopez`, `Jennifer Warnes`, `Jeremih`, `Jeremy Zucker`, `Jerry Lee Lewis`, `Jerry Murad's Harmonicats`, `Jess Glynne`, `Jessie J`, `Jewel`, `Jimi Hendrix`, `Jimin`, `Jimmie Rodgers`, `Jimmy Dean`, `Jo Stafford`, `Joan Jett & The Blackhearts`, `Joao Gilberto`, `Joel Corry`, `John Fred & The Playboy Band`, `John Legend`, `John Mayer`, `John Williams`, `Johnnie Ray`, `Johnnie Taylor`, `Johnny Cash`, `Johnny Horton`, `Johnny Mathis`, `Johnny Mercer`, `Johnny Nash`, `Joji`, `Jon Bellion`, `Jonas Blue`, `Jonas Brothers`, `Joni James`, `Jorja Smith`, `Juan Gabriel`, `Juan Luis Guerra 4.40`, `Juanes`, `Juice Newton`, `Julia Michaels`, `Justin Bieber`, `Justin Quiles`, `KALEO`, `KAROL G`, `KAYTRANADA`, `KK`, `KSI`, `KYLE`, `Kacey Musgraves`, `Kane Brown`, `Kanye West`, `Karan Aujla`, `Kate Smith`, `Katy Perry`, `Kay Kyser`, `Ke$ha`, `Kehlani`, `Kelly Clarkson`, `Kenny Chesney`, `Kenny Loggins`, `Kenny Rogers`, `Kenshi Yonezu`, `Kenya Grace`, `Kevin Gates`, `Key Glock`, `Khalid`, `Kim Carnes`, `Kim Petras`, `Kimbra`, `Kina`, `King Gnu`, `Kings of Leon`, `Kingsmen`, `Kitty Kallen`, `Kodak Black`, `Kodaline`, `Kollegah`, `Kool & The Gang`, `Kungs`, `Kygo`, `Kylie Minogue`, `LE SSERAFIM`, `LISA`, `LMFAO`, `LUDMILLA`, `La Adictiva Banda San José de Mesillas`, `La Oreja de Van Gogh`, `Labrinth`, `Lady Antebellum`, `Lady GaGa`, `Lainey Wilson`, `Lana Del Rey`, `Latto`, `Lauryn Hill`, `Lauv`, `League of Legends`, `Lee Brice`, `Leon Bridges`, `Leona Lewis`, `Lesley Gore`, `Leslie Odom Jr.`, `Liam Payne`, `Lifehouse`, `Lil Baby`, `Lil Dicky`, `Lil Durk`, `Lil Mosey`, `Lil Nas X`, `Lil Pump`, `Lil Skies`, `Lil Tjay`, `Lil Uzi Vert`, `Lil Yachty`, `Lil' Kim`, `Lil' Wayne`, `Lin-Manuel Miranda`, `Linkin Park`, `Lionel Richie`, `Lipps Inc`, `Lisa Loeb`, `Little Peggy March`, `Little Richard`, `Lofi Fruits Music`, `Lord Huron`, `Los Del Rio`, `Los Dos Carnales`, `Los Lobos`, `Los Temerarios`, `Los Tigres Del Norte`, `Los Tucanes De Tijuana`, `Lou Reed`, `Loud Luxury`, `Louis Jordan`, `Louis Tomlinson`, `Love Unlimited`, `Lovin' Spoonful`, `Luan Santana`, `Luciano`, `Luis Miguel`, `Luis R Conriquez`, `Lulu`, `Lunay`, `Lupe Fiasco`, `M`, `MAX`, `MC Hammer`, `MC Ryan SP`, `MKTO`, `Mabel`, `Machine Gun Kelly`, `Madison Beer`, `Madonna`, `Mahalini`, `Major Lazer`, `Mambo Kingz`, `Maneskin`, `Marco Antonio Solís`, `Margaret Whiting`, `Maria Becerra`, `Mario`, `Mario Lanza`, `Mark Ronson`, `Maroon 5`, `Marshmello`, `Martin Garrix`, `Mary Ford`, `Mary J Blige`, `Mary J. Blige`, `Mary Wells`, `Matoma`, `Mau y Ricky`, `Meek Mill`, `Megadeth`, `Melanie`, `Melanie Martinez`, `Melendi`, `Men At Work`, `Metro Boomin`, `Michael Bublé`, `Michael Jackson`, `Michael McDonald`, `Michael Sembello`, `Miguel`, `Mike Posner`, `Miley Cyrus`, `Milky Chance`, `Minnie Riperton`, `Miracle Tones`, `Miranda Lambert`, `Mohit Chauhan`, `Mon Laferte`, `Moneybagg Yo`, `Monsta X`, `Mora`, `Morad`, `Morat`, `Mother Mother`, `Motley Crue`, `Ms. Lauryn Hill`, `Mumford & Sons`, `Muse`, `Mya`, `Myke Towers`, `NCT 127`, `NCT DREAM`, `NEFFEX`, `Nadin Amizah`, `Nancy Sinatra`, `Nat King Cole`, `Nate Smith`, `Natti Natasha`, `Nayer`, `Neil Diamond`, `Neil Sedaka`, `Nekfeu`, `Nelly`, `New Vaudeville Band`, `Next`, `Nickelback`, `Nicki Minaj`, `Nicki Nicole`, `Nicky Jam`, `Nina Simone`, `Ninho`, `Nipsey Hussle`, `Nirvana`, `Niska`, `No Doubt`, `Norah Jones`, `Normani`, `OMI`, `ONE OK ROCK`, `Oasis`, `Official HIGE DANdism`, `Offset`, `Old Dominion`, `Oliver Heldens`, `Olivia Rodrigo`, `Omah Lay`, `One Direction`, `Otis Redding`, `OutKast`, `Owl City`, `P Diddy`, `P!nk`, `PLK`, `PNL`, `Pamungkas`, `Passenger`, `Pat Boone`, `Patsy Cline`, `Patti LaBelle`, `Patti Page`, `Paul & Paula`, `Paul Revere & the Raiders`, `Paul Robeson`, `Paul Russell`, `Paul Whiteman`, `Paula Abdul`, `Peaches & Herb`, `Pearl Jam`, `Pee Wee Hunt`, `Pee Wee King`, `Pentatonix`, `Percy Faith`, `Percy Sledge`, `Peso Pluma`, `Peter Cetera`, `Peter Gabriel`, `Peter, Paul & Mary`, `Pharrell Williams`, `Pierce The Veil`, `Pineapple StormTv`, `Pink Floyd`, `Pink Sweat$`, `Piso 21`, `Pitbull`, `Plan B`, `Player`, `Polo G`, `Pop Smoke`, `Portugal. The Man`, `Pouya`, `Prince`, `Prince Royce`, `Pusha T`, `Quality Control`, `Queen`, `Quinn XCII`, `R. Kelly`, `RAF Camora`, `RAYE`, `REM`, `REO Speedwagon`, `Radiohead`, `Rag'n'Bone Man`, `Rage Against The Machine`, `Rahat Fateh Ali Khan`, `Rainbow Kitten Surprise`, `Rammstein`, `Rauw Alejandro`, `Ray Charles`, `Ray Parker Jr`, `Ray Stevens`, `Red Foley`, `Red Hot Chili Peppers`, `Red Velvet`, `Regard`, `Regina Belle`, `Reik`, `Rels B`, `Rema`, `Ricardo Arjona`, `Rich The Kid`, `Rick Astley`, `Rick Dees & his Cast of Idiots`, `Rick Ross`, `Rick Springfield`, `Ricky Martin`, `Ricky Nelson`, `Rihanna`, `Rita Ora`, `Ritchie Valens`, `Rizky Febian`, `Rob Thomas`, `Roberta Flack`, `Robin Schulz`, `Robin Thicke`, `Rod Stewart`, `Rod Wave`, `Roddy Ricch`, `Roger Miller`, `Romeo Santos`, `Rosemary Clooney`, `Roxette`, `Roy Acuff`, `Roy Orbison`, `Rudimental`, `Ruel`, `Ruth B.`, `Ryan Lewis`, `SCH`, `SEVENTEEN`, `SWV`, `Sabaton`, `Sabrina Carpenter`, `Sachet Tandon`, `Sachin-Jigar`, `Sade`, `Sam Cooke`, `Sam Feldt`, `Sam Hunt`, `Sam Smith`, `Sam The Sham & The Pharaohs`, `Sammy Davis Jr`, `Sammy Kaye`, `Santana`, `Sasha Alex Sloan`, `Savage Garden`, `Saweetie`, `Scorpions`, `Sean Kingston`, `Sean Paul`, `Sebastian Yatra`, `Sech`, `Seeb`, `Sezen Aksu`, `Sfera Ebbasta`, `Shaggy`, `Shania Twain`, `Shawn Mendes`, `Sheena Easton`, `Shinedown`, `Shubh`, `Sia`, `Sid Sriram`, `Sidhu Moose Wala`, `Silk`, `Silver Convention`, `Simon & Garfunkel`, `Sinead O'Connor`, `Sir Mix-a-Lot`, `Sister Sledge`, `Ski Mask The Slump God`, `Skillet`, `Skrillex`, `Sleeping At Last`, `Smokey Robinson`, `Snoop Dogg`, `Snow Patrol`, `Soda Stereo`, `Sonu Nigam`, `Sophie Ellis-Bextor`, `Spencer Davis Group`, `Spice Girls`, `Stan Getz`, `Starland Vocal Band`, `Stephen Sanchez`, `Steve Aoki`, `Steve Lacy`, `Steve Winwood`, `Stevie B`, `Sting`, `Stormzy`, `Strawberry Alarm Clock`, `Stray Kids`, `Stromae`, `Sublime`, `Sum 41`, `Summer Walker`, `Supertramp`, `Survivor`, `Swedish House Mafia`, `System Of A Down`, `T-Pain`, `T.I.`, `TAEYEON`, `TKKG`, `TLC`, `TOMORROW X TOGETHER`, `TOTO`, `TWICE`, `Tag Team`, `Tainy`, `Tammi Terrell`, `Tanishk Bagchi`, `Tate McRae`, `Taylor Swift`, `Tears For Fears`, `Tems`, `Tennessee Ernie Ford`, `Terence Trent D'Arby`, `Teresa Brewer`, `Terry Jacks`, `The Ames Brothers`, `The Animals`, `The B52s`, `The Bangles`, `The Beatles`, `The Black Eyed Peas`, `The Black Keys`, `The Box Tops`, `The Chainsmokers`, `The Chiffons`, `The Chordettes`, `The Clash`, `The Coasters`, `The Commodores`, `The Cowsills`, `The Cranberries`, `The Crew-Cuts`, `The Cure`, `The Detroit Spinners`, `The Diamonds`, `The Doobie Brothers`, `The Doors`, `The Drifters`, `The Emotions`, `The Eurythmics`, `The Fireballs`, `The Flamingos`, `The Foundations`, `The Four Seasons`, `The Fray`, `The Game`, `The Go Gos`, `The Goo Goo Dolls`, `The Head And The Heart`, `The Hollies`, `The Ink Spots`, `The Isley Brothers`, `The Jackson 5`, `The Kid LAROI`, `The Killers`, `The Kingston Trio`, `The Kooks`, `The Lemon Pipers`, `The Living Tombstone`, `The Lumineers`, `The Mamas & The Papas`, `The Marvelettes`, `The McCoys`, `The Mills Brothers`, `The Miracles`, `The Monkees`, `The Moody Blues`, `The National`, `The Neighbourhood`, `The Notorious B.I.G.`, `The O'Jays`, `The Offspring`, `The Osmonds`, `The Partridge Family`, `The Penguins`, `The Pet Shop Boys`, `The Platters`, `The Righteous Brothers`, `The Rolling Stones`, `The Ronettes`, `The Score`, `The Script`, `The Seekers`, `The Shangri-Las`, `The Smashing Pumpkins`, `The Staple Singers`, `The Strokes`, `The Supremes`, `The Temptations`, `The Turtles`, `The Vamps`, `The Verve`, `The Village People`, `The Weavers`, `The White Stripes`, `The Young Rascals`, `The Zombies`, `Thelma Houston`, `Thomas Rhett`, `Three Days Grace`, `Three Dog Night`, `Three Man Down`, `Timbaland`, `Timmy Trumpet`, `Toby Keith`, `Tom Jones`, `Tom Petty and the Heartbreakers`, `Tommy Dorsey`, `Tommy Edwards`, `Tommy James & the Shondells`, `Tone Loc`, `Toni Braxton`, `Topic`, `Tory Lanez`, `Tove Lo`, `Trevor Daniel`, `Trey Songz`, `Trippie Redd`, `Trueno`, `Tulsi Kumar`, `Tulus`, `Twenty One Pilots`, `Two Feet`, `Ty Dolla $ign`, `Tyga`, `Tyler Hubbard`, `U2`, `UB40`, `UZI`, `Ufo361`, `Upchurch`, `V`, `Vampire Weekend`, `Van McCoy`, `Van Morrison`, `Vance Joy`, `Vanessa Carlton`, `Vanessa Williams`, `Vera Lynn`, `Vernon Dalhart`, `Vicente Fernandez`, `Vishal-Shekhar`, `Volbeat`, `WILLOW`, `Wale`, `Wallows`, `Weezer`, `Wham!`, `Whitney Houston`, `Why Don't We`, `Wilbert Harrison`, `Wilson Phillips`, `Wiz Khalifa`, `Woody Guthrie`, `Wyclef Jean`, `XXXTENTACION`, `Xavi`, `YG`, `YNW Melly`, `YOASOBI`, `Yandel`, `Years & Years`, `Yeat`, `Yo Gotti`, `Young Dolph`, `Young Miko`, `Young Thug`, `YoungBoy Never Broke Again`, `Yung Gravy`, `Yuuri`, `Yuvan Shankar Raja`, `ZAYN`, `ZZ Top`, `Zac Brown Band`, `Zach Bryan`, `Zara Larsson`, `aespa`, `benny blanco`, `blink-182`, `d4vd`, `deadmau5`, `girl in red`, `gnash`, `iann dior`, `will.i.am`], genre: `Acid House.Acid Jazz.Acid Rock.Acoustic.Acoustic Blues.Afro-Pop.Afrobeat.Alt-Rock.Alternative.Ambient.American Trad Rock.Americana.Anime.Arena Rock.Art-Rock.Avant-Garde.Avant-Punk.Baladas y Boleros.Barbershop.Baroque.Bebop.Big Band.Black Metal.Blue Note.Bluegrass.Blues.Boogaloo.Bop.Bossa Nova.Bounce.Brazilian Funk.Breakbeat.Britpop.CCM.Cajun.Cantopop.Celtic.Celtic Folk.Chamber Music.Chant.Chanukah.Chicago Blues.Chicago House.Chicano.Children’s Music.Chill.Choral.Christian.Christmas.Classical.Club.College Rock.Conjunto.Cool Jazz.Country.Crunk.Dance.Dancehall.Death Metal.Deep House.Delta Blues.Detroit Techno.Dirty South.Disco.Disney.Dixieland.Doo-wop.Downtempo.Dream Pop.Drill.Drinking Songs.Drone.Drum'n'bass.Dub.Dubstep.EDM.Early Music.East Coast Rap.Easter.Easy Listening.Eclectic.Electric Blues.Electro.Electronic.Electronica.Emo.Enka.Environmental.Ethio-jazz.Experimental.Experimental Rock.Flamenco.Folk.Folk-Rock.Forro.French Pop.Funk.Fusion.Gangsta Rap.Garage.German Folk.German Pop.Glam Rock.Gospel.Goth.Grime.Grindcore.Groove.Grunge.Hair Metal.Halloween.Happy.Hard Bop.Hard Dance.Hard Rock.Hardcore.Hardcore Punk.Hardcore Rap.Hardstyle.Healing.Heavy Metal.High Classical.Hip Hop.Holiday.Honky Tonk.House.IDM.Impressionist.Indie.Industrial.Instrumental.J-Dance.J-Idol.J-Pop.J-Punk.J-Rock.J-Ska.J-Synth.Jackin House.Jam Bands.Japanese Pop.Jazz.Jungle.K-Pop.Karaoke.Kayokyoku.Kids.Kitsch.Klezmer.Krautrock.Latin.Latin Jazz.Latin Rap.Local.Lounge.Lullabies.MPB.Mainstream Jazz.Malay.Mandopop.March.Mariachi.Mawwal.Medieval.Meditation.Metal.Metalcore.Minimal Techno.Minimalism.Modern.Motown.Mugham.Musicals.Musique Concrète.Nature.Neo-Soul.Nerdcore.New Acoustic.New Age.New Mex.New Wave.No Wave.Noise.Nordic.Novelty.OPM.Oi!.Old School Rap.Opera.Orchestral.Original Score.Outlaw Country.Pagode.Party.Piano.Polka.Pop.Pop Film.Pop Latino.Post Dubstep.Power Pop.Praise & Worship.Progressive House.Progressive Rock.Proto-punk.Psych Rock.Psychedelic.Punk.Punk Rock.Qawwali.Quiet Storm.R&B.Ragtime.Rainy Day.Rap.Reggae.Reggaeton.Regional Mexicano.Relaxation.Renaissance.Retro.Rock.Rockabilly.Rocksteady.Romance.Romantic.Roots Reggae.Roots Rock.SKA.Sad.Salsa.Samba.Second Line.Sertanejo.Shaabi.Shoegaze.Sleep.Smooth Jazz.Soft Rock.Soul.Soundtrack.Southern Gospel.Southern Rock.Space Rock.Stage And Screen.Steampunk.Summer.Surf.Swamp Pop.Swing.Synth Pop.Tango.Techno.Teen Pop.Tejano.Tex-Mex.Thanksgiving.Traditional.Trance.Trip Hop.Tropical.Underground Rap.Urban.Urban Cowboy.West Coast Rap.Western Swing.World.Worldbeat.Zydeco`.split(`.`), song_name: [`(Everything I Do) I Do it For You`, `(Ghost) Riders in the Sky`, `(I Can't Get No) Satisfaction`, `(I've Got a Gal In) Kalamazoo`, `(I've Had) the Time of My Life`, `(It's No) Sin`, `(Just Like) Starting Over`, `(Let Me Be Your) Teddy Bear`, `(Put Another Nickel In) Music! Music! Music!`, `(Sexual) Healing`, `(Sittin' On) the Dock of the Bay`, `(They Long to Be) Close to You`, `(You Keep Me) Hangin' On`, `(You're My) Soul & Inspiration`, `(Your Love Keeps Lifting Me) Higher & Higher`, `12th Street Rag`, `1999`, `19th Nervous Breakdown`, `50 Ways to Leave Your Lover`, `9 to 5`, `96 Tears`, `A Boy Named Sue`, `A Hard Day's Night`, `A String of Pearls`, `A Thousand Miles`, `A Tree in the Meadow`, `A Whiter Shade of Pale`, `A Whole New World (Aladdin's Theme)`, `A Woman in Love`, `A-Tisket A-Tasket`, `ABC`, `Abracadabra`, `Ac-cent-tchu-ate the Positive`, `Addicted to Love`, `After You've Gone`, `Afternoon Delight`, `Again`, `Against All Odds (Take a Look At Me Now)`, `Ain't Misbehavin'`, `Ain't No Mountain High Enough`, `Ain't No Sunshine`, `Ain't That a Shame`, `Airplanes`, `All Along the Watchtower`, `All I Have to Do is Dream`, `All I Wanna Do`, `All My Lovin' (You're Never Gonna Get It)`, `All Night Long (All Night)`, `All Out of Love`, `All Shook Up`, `All You Need is Love`, `Alone`, `Alone Again (Naturally)`, `Always On My Mind`, `American Pie`, `American Woman`, `Angie`, `Another Brick in the Wall (part 2)`, `Another Day in Paradise`, `Another Night`, `Another One Bites the Dust`, `Apologize`, `April Showers`, `Aquarius/Let The Sunshine In`, `Are You Lonesome Tonight?`, `Arthur's Theme (Best That You Can Do)`, `As Time Goes By`, `At Last`, `At the Hop`, `Auf Wiederseh'n Sweetheart`, `Baby Baby`, `Baby Come Back`, `Baby Got Back`, `Baby Love`, `Baby One More Time`, `Bad Day`, `Bad Girls`, `Bad Moon Rising`, `Bad Romance`, `Bad, Bad Leroy Brown`, `Baker Street`, `Ball of Confusion (That's What the World is Today)`, `Ballad of the Green Berets`, `Ballerina`, `Band On the Run`, `Band of Gold`, `Battle of New Orleans`, `Be Bop a Lula`, `Be My Baby`, `Be My Love`, `Beat It`, `Beautiful Day`, `Beauty & the Beast`, `Because I Love You (The Postman Song)`, `Because You Loved Me`, `Because of You`, `Before The Next Teardrop Falls`, `Begin the Beguine`, `Behind Closed Doors`, `Being With You`, `Believe`, `Ben`, `Bennie & the Jets`, `Besame Mucho`, `Best of My Love`, `Bette Davis Eyes`, `Big Bad John`, `Big Girls Don't Cry`, `Billie Jean`, `Bitter Sweet Symphony`, `Black Or White`, `Black Velvet`, `Blaze of Glory`, `Bleeding Love`, `Blue Suede Shoes`, `Blue Tango`, `Blueberry Hill`, `Blurred Lines`, `Body & Soul`, `Bohemian Rhapsody`, `Boogie Oogie Oogie`, `Boogie Woogie Bugle Boy`, `Boom Boom Pow`, `Born in the USA`, `Born to Be Wild`, `Born to Run`, `Boulevard of Broken Dreams`, `Brand New Key`, `Brandy (You're A Fine Girl)`, `Breaking Up is Hard to Do`, `Breathe`, `Bridge Over Troubled Water`, `Brother Louie`, `Brother, Can You Spare a Dime?`, `Brown Eyed Girl`, `Brown Sugar`, `Build Me Up Buttercup`, `Burn`, `Buttons & Bows`, `Bye Bye Love`, `Bye Bye, Blackbird`, `Bye, Bye, Bye`, `Caldonia Boogie (What Makes Your Big Head So Hard)`, `California Dreamin'`, `California Girls`, `Call Me`, `Call Me Maybe`, `Can You Feel the Love Tonight`, `Can't Buy Me Love`, `Can't Get Enough of Your Love, Babe`, `Can't Help Falling in Love`, `Candle in the Wind '97`, `Candy Man`, `Car Wash`, `Careless Whisper`, `Cars`, `Cat's in the Cradle`, `Cathy's Clown`, `Celebration`, `Centerfold`, `Chain of Fools`, `Chances Are`, `Change the World`, `Chapel of Love`, `Chattanooga Choo Choo`, `Chattanoogie Shoe-Shine Boy`, `Check On It`, `Cheek to Cheek`, `Cherish`, `Cherry Pink & Apple Blossom White`, `Cold, Cold Heart`, `Colors of the Wind`, `Come On Eileen`, `Come On-a My House`, `Come Together`, `Coming Up`, `Cracklin' Rosie`, `Crazy`, `Crazy For You`, `Crazy Little Thing Called Love`, `Crazy in Love`, `Creep`, `Crimson & Clover`, `Crocodile Rock`, `Cry`, `Cry Like a Baby`, `Crying`, `Da Doo Ron Ron (When He Walked Me Home)`, `Dance to the Music`, `Dancing Queen`, `Dancing in the Dark`, `Dancing in the Street`, `Dardanella`, `Daydream Believer`, `December 1963 (Oh What a Night)`, `Delicado`, `Dilemma`, `Disco Duck`, `Disco Lady`, `Disturbia`, `Dizzy`, `Do That to Me One More Time`, `Do Wah Diddy Diddy`, `Do Ya Think I'm Sexy?`, `Do You Love Me?`, `Don't Be Cruel`, `Don't Fence Me In`, `Don't Go Breaking My Heart`, `Don't Leave Me This Way`, `Don't Let the Stars Get in Your Eyes`, `Don't Let the Sun Go Down On Me`, `Don't Speak`, `Don't Stop 'Til You Get Enough`, `Don't Worry Be Happy`, `Don't You (Forget About Me)`, `Don't You Want Me`, `Doo Wop (That Thing)`, `Down`, `Down Hearted Blues`, `Down Under`, `Downtown`, `Dreamlover`, `Dreams`, `Drop it Like It's Hot`, `Drops of Jupiter (Tell Me)`, `Duke of Earl`, `E.T.`, `Earth Angel`, `Ebony & Ivory`, `Eight Days a Week`, `Empire State Of Mind`, `End of the Road`, `Endless Love`, `Escape (The Pina Colada Song)`, `Eve of Destruction`, `Every Breath You Take`, `Every Little Thing She Does is Magic`, `Everybody Loves Somebody`, `Everybody Wants to Rule the World`, `Everyday People`, `Eye of the Tiger`, `Faith`, `Fallin'`, `Fame`, `Family Affair`, `Fantasy`, `Fast Car`, `Feel Good Inc`, `Feel Like Making Love`, `Fire & Rain`, `Firework`, `Flashdance. What a Feeling`, `Fly Robin Fly`, `Foolish Games`, `Footloose`, `For What It's Worth (Stop, Hey What's That Sound)`, `Fortunate Son`, `Frankenstein`, `Freak Me`, `Freebird`, `Frenesi`, `Funkytown`, `Gangsta's Paradise`, `Georgia On My Mind`, `Georgy Girl`, `Get Back`, `Get Down Tonight`, `Get Off of My Cloud`, `Ghostbusters`, `Gimme Some Lovin'`, `Girls Just Wanna Have Fun`, `Give Me Everything`, `Gives You Hell`, `Glamorous`, `Glory of Love`, `Go Your Own Way`, `God Bless America`, `God Bless the Child`, `Gold Digger`, `Gonna Make You Sweat (Everybody Dance Now)`, `Good Lovin'`, `Good Times`, `Good Vibrations`, `Goodbye Yellow Brick Road`, `Goodnight, Irene`, `Got to Give it Up`, `Grease`, `Great Balls of Fire`, `Greatest Love of All`, `Green Onions`, `Green River`, `Green Tambourine`, `Grenade`, `Groove is in the Heart`, `Groovin'`, `Gypsies, Tramps & Thieves`, `Hair`, `Hang On Sloopy`, `Hanging by a Moment`, `Hanky Panky`, `Happy Days Are Here Again`, `Happy Together`, `Harbour Lights`, `Hard to Say I'm Sorry`, `Harper Valley PTA`, `Have You Ever Really Loved a Woman?`, `He'll Have to Go`, `He's So Fine`, `He's a Rebel`, `Heart of Glass`, `Heart of Gold`, `Heartbreak Hotel`, `Hello Dolly`, `Hello, I Love You, Won't You Tell Me Your Name?`, `Help Me, Rhonda`, `Help!`, `Here Without You`, `Here in My Heart`, `Hero`, `Hey Baby`, `Hey Jude`, `Hey Paula`, `Hey There`, `Hey There Delilah`, `Hey Ya!`, `Higher Love`, `Hips don't lie`, `Hit the Road, Jack`, `Hold On`, `Hollaback Girl`, `Honey`, `Honky Tonk`, `Honky Tonk Woman`, `Horse With No Name`, `Hot Child In The City`, `Hot Stuff`, `Hotel California`, `Hound Dog`, `House of the Rising Sun`, `How Deep is Your Love?`, `How Do I Live?`, `How Do You Mend a Broken Heart`, `How High the Moon`, `How Much is That Doggy in the Window?`, `How Will I Know`, `How You Remind Me`, `How to Save a Life`, `Hungry Heart`, `Hurt So Good`, `I Believe I Can Fly`, `I Can Dream, Can't I?`, `I Can Help`, `I Can See Clearly Now`, `I Can't Get Next to You`, `I Can't Get Started`, `I Can't Go For That (No Can Do)`, `I Can't Help Myself (Sugar Pie, Honey Bunch)`, `I Can't Stop Loving You`, `I Don't Want to Miss a Thing`, `I Fall to Pieces`, `I Feel Fine`, `I Feel For You`, `I Feel Love`, `I Get Around`, `I Got You (I Feel Good)`, `I Got You Babe`, `I Gotta Feeling`, `I Heard it Through the Grapevine`, `I Honestly Love You`, `I Just Called to Say I Love You`, `I Just Wanna Be Your Everything`, `I Kissed A Girl`, `I Love Rock 'n' Roll`, `I Need You Now`, `I Only Have Eyes For You`, `I Shot the Sheriff`, `I Still Haven't Found What I'm Looking For`, `I Swear`, `I Think I Love You`, `I Walk the Line`, `I Wanna Dance With Somebody (Who Loves Me)`, `I Wanna Love You`, `I Want You Back`, `I Want to Hold Your Hand`, `I Want to Know What Love Is`, `I Went to Your Wedding`, `I Will Always Love You`, `I Will Follow Him`, `I Will Survive`, `I Write the Songs`, `I'll Be Missing You`, `I'll Be There`, `I'll Make Love to You`, `I'll Never Smile Again`, `I'll Take You There`, `I'll Walk Alone`, `I'll be seeing you`, `I'm Looking Over a Four Leaf Clover`, `I'm So Lonesome I Could Cry`, `I'm Sorry`, `I'm Walking Behind You`, `I'm Your Boogie Man`, `I'm Yours`, `I'm a Believer`, `I've Heard That Song Before`, `If (They Made Me a King)`, `If I Didn't Care`, `If You Don't Know Me By Now`, `If You Leave Me Now`, `Imagine`, `In Da Club`, `In the End`, `In the Ghetto`, `In the Mood`, `In the Summertime`, `In the Year 2525 (Exordium & Terminus)`, `Incense & Peppermints`, `Indian Reservation (The Lament Of The Cherokee Reservation Indian)`, `Instant Karma`, `Iris`, `Ironic`, `Irreplaceable`, `It Had to Be You`, `It's All in the Game`, `It's My Party`, `It's Now Or Never`, `It's Still Rock 'n' Roll to Me`, `It's Too Late`, `Jack & Diane`, `Jailhouse Rock`, `Jessie's Girl`, `Jive Talkin'`, `Johnny B Goode`, `Joy to the World`, `Judy in Disguise (With Glasses)`, `Jump`, `Jumpin' Jack Flash`, `Just Dance`, `Just My Imagination (Running Away With Me)`, `Just the Way You Are`, `Kansas City`, `Karma Chameleon`, `Keep On Loving You`, `Killing Me Softly With His Song`, `King of the Road`, `Kiss`, `Kiss & Say Goodbye`, `Kiss From a Rose`, `Kiss Me`, `Kiss On My List`, `Kiss You All Over`, `Knock On Wood`, `Knock Three Times`, `Kokomo`, `Kryptonite`, `Kung Fu Fighting`, `La Bamba`, `Lady`, `Lady Marmalade (Voulez-Vous Coucher Aver Moi Ce Soir?)`, `Last Train to Clarksville`, `Layla`, `Le Freak`, `Leader of the Pack`, `Lean On Me`, `Leaving, on a Jet Plane`, `Let Me Call You Sweetheart`, `Let Me Love You`, `Let it Be`, `Let it Snow! Let it Snow! Let it Snow!`, `Let's Dance`, `Let's Get it On`, `Let's Groove`, `Let's Hear it For the Boy`, `Let's Stay Together`, `Light My Fire`, `Lights`, `Like a Prayer`, `Like a Rolling Stone`, `Like a Virgin`, `Little Darlin'`, `Little Things Mean a Lot`, `Live & Let Die`, `Livin' La Vida Loca`, `Livin' On a Prayer`, `Living For the City`, `Locked Out Of Heaven`, `Lola`, `Lonely Boy`, `Long Cool Woman in a Black Dress`, `Long Tall Sally`, `Look Away`, `Lookin' Out My Back Door`, `Lose Yourself`, `Losing My Religion`, `Louie Louie`, `Love Child`, `Love Hangover`, `Love In This Club`, `Love Is Blue (L'Amour Est Bleu)`, `Love Letters in the Sand`, `Love Me Do`, `Love Me Tender`, `Love Shack`, `Love Theme From 'A Star is Born' (Evergreen)`, `Love Train`, `Love Will Keep Us Together`, `Love is a Many Splendoured Thing`, `Love to Love You Baby`, `Love's Theme`, `Loving You`, `Low`, `Macarena`, `Mack the Knife`, `Maggie May`, `Magic`, `Magic Carpet Ride`, `Make Love to Me`, `Make it With You`, `Makin' Whoopee`, `Mama Told Me Not to Come`, `Man in the Mirror`, `Manana (Is Soon Enough For Me)`, `Maneater`, `Maniac`, `Maybellene`, `Me & Bobby McGee`, `Me & Mrs Jones`, `Memories Are Made of This`, `Mercy Mercy Me (The Ecology)`, `Mickey`, `Midnight Train to Georgia`, `Minnie the Moocher`, `Miss You`, `Miss You Much`, `Mister Sandman`, `Mmmbop`, `Mona Lisa`, `Monday Monday`, `Money For Nothing`, `Mony Mony`, `Mood Indigo`, `Moonlight Cocktail`, `Moonlight Serenade`, `More Than Words`, `More Than a Feeling`, `Morning Train (Nine to Five)`, `Mr Big Stuff`, `Mr Brightside`, `Mr Tambourine Man`, `Mrs Brown You've Got a Lovely Daughter`, `Mrs Robinson`, `Mule Train`, `Music`, `My Blue Heaven`, `My Boyfriend's Back`, `My Eyes Adored You`, `My Girl`, `My Guy`, `My Heart Will Go On`, `My Life`, `My Love`, `My Man`, `My Prayer`, `My Sharona`, `My Sweet Lord`, `Na Na Hey Hey (Kiss Him Goodbye)`, `Nature Boy`, `Near You`, `Need You Now`, `Need You Tonight`, `Never Gonna Give You Up`, `Night & Day`, `Night Fever`, `Nights in White Satin`, `No One`, `No Scrubs`, `Nobody Does it Better`, `Nothin' on You`, `Nothing Compares 2 U`, `Nothing's Gonna Stop Us Now`, `Ode To Billie Joe`, `Oh Happy Day`, `Oh My Papa (O Mein Papa)`, `Oh, Pretty Woman`, `Ol' Man River`, `Ole Buttermilk Sky`, `On Bended Knee`, `On My Own`, `On the Atchison, Topeka & the Santa Fe`, `One`, `One Bad Apple`, `One More Try`, `One O'Clock Jump`, `One Sweet Day`, `One of These Nights`, `One of Us`, `Only The Lonely (Know The Way I Feel)`, `Only You (And You Alone)`, `Open Arms`, `Over There`, `Over the Rainbow`, `Paint it Black`, `Papa Don't Preach`, `Papa Was a Rolling Stone`, `Papa's Got a Brand New Bag`, `Paper Doll`, `Paper Planes`, `Paperback Writer`, `Party Rock Anthem`, `Peg o' My Heart`, `Peggy Sue`, `Pennies From Heaven`, `Penny Lane`, `People`, `People Got to Be Free`, `Personality`, `Philadelphia Freedom`, `Physical`, `Piano Man`, `Pick Up the Pieces`, `Pistol Packin' Mama`, `Play That Funky Music`, `Please Mr Postman`, `Poker Face`, `Pon De Replay`, `Pony Time`, `Pop Muzik`, `Prisoner of Love`, `Private Eyes`, `Promiscuous`, `Proud Mary`, `Purple Haze`, `Purple Rain`, `Puttin' on the Ritz`, `Que sera sera (Whatever will be will be)`, `Queen of Hearts`, `Rag Doll`, `Rag Mop`, `Rags to Riches`, `Raindrops Keep Falling On My Head`, `Rapture`, `Ray of Light`, `Reach Out (I'll Be There)`, `Red Red Wine`, `Rehab`, `Respect`, `Return to Sender`, `Reunited`, `Revolution`, `Rhapsody in Blue`, `Rhinestone Cowboy`, `Rich Girl`, `Riders On the Storm`, `Right Back Where We Started From`, `Ring My Bell`, `Ring of Fire`, `Rock Around the Clock`, `Rock With You`, `Rock Your Baby`, `Rock the Boat`, `Rock the Casbah`, `Roll Over Beethoven`, `Roll With It`, `Rolling In The Deep`, `Rosanna`, `Roses Are Red`, `Royals`, `Ruby Tuesday`, `Rudolph, the Red-Nosed Reindeer`, `Rum & Coca-Cola`, `Runaround Sue`, `Runaway`, `Running Scared`, `Rush Rush`, `Sailing`, `Save the Best For Last`, `Save the Last Dance For Me`, `Say It Right`, `Say My Name`, `Say Say Say`, `Say You, Say Me`, `School's Out`, `Seasons in the Sun`, `Secret Love`, `Sentimental Journey`, `Sexyback`, `Sh-Boom (Life Could Be a Dream)`, `Shadow Dancing`, `Shake Down`, `Shake You Down`, `She Drives Me Crazy`, `She Loves You`, `She's a Lady`, `Shining Star`, `Shop Around`, `Shout`, `Silly Love Songs`, `Since U Been Gone`, `Sing, Sing, Sing (With A Swing)`, `Singing The Blues`, `Single Ladies (Put A Ring On It)`, `Sir Duke`, `Sixteen Tons`, `Sledgehammer`, `Sleep Walk`, `Sleepy Lagoon`, `Slow Poke`, `Smells Like Teen Spirit`, `Smoke Gets in Your Eyes`, `Smoke On the Water`, `Smoke! Smoke! Smoke! (That Cigarette)`, `Smooth`, `So Much in Love`, `Soldier Boy`, `Some Enchanted Evening`, `Some of These Days`, `Somebody That I Used to Know`, `Somebody to Love`, `Someday`, `Somethin' Stupid`, `Something`, `Soul Man`, `Spanish Harlem`, `Spill the Wine`, `Spinning Wheel`, `Spirit in the Sky`, `St George & the Dragonette`, `St Louis Blues`, `Stagger Lee`, `Stairway to Heaven`, `Stand By Me`, `Stardust`, `Stars & Stripes Forever`, `Stay (I Missed You)`, `Stayin' Alive`, `Stop! in the Name of Love`, `Stormy Weather (Keeps Rainin' All the Time)`, `Straight Up`, `Strange Fruit`, `Stranger On the Shore`, `Strangers in the Night`, `Strawberry Fields Forever`, `Streets of Philadelphia`, `Stronger`, `Stuck On You`, `Sugar Shack`, `Sugar Sugar`, `Summer in the City`, `Summertime Blues`, `Sunday, Monday or Always`, `Sunshine Superman`, `Sunshine of Your Love`, `Superstar`, `Superstition`, `Surfin' USA`, `Suspicious Minds`, `Swanee`, `Sweet Caroline (Good Times Never Seemed So Good)`, `Sweet Child O' Mine`, `Sweet Dreams (Are Made of This)`, `Sweet Georgia Brown`, `Sweet Home Alabama`, `Sweet Soul Music`, `Swinging On a Star`, `T For Texas (Blue Yodel No 1)`, `TSOP (The Sound of Philadelphia)`, `Take Me Home, Country Roads`, `Take My Breath Away`, `Take On Me`, `Take The 'A' Train`, `Take a Bow`, `Tammy`, `Tangerine`, `Tears in Heaven`, `Tears of a Clown`, `Temperature`, `Tennessee Waltz`, `Tequila`, `Tha Crossroads`, `Thank You (Falettinme be Mice Elf Again)`, `That Lucky Old Sun (Just Rolls Around Heaven All Day)`, `That Old Black Magic`, `That'll Be the Day`, `That's Amore`, `That's What Friends Are For`, `That's the Way (I Like It)`, `That's the Way Love Goes`, `The Boy is Mine`, `The Boys of Summer`, `The Christmas Song (Chestnuts Roasting On An Open Fire)`, `The End of the World`, `The First Time Ever I Saw Your Face`, `The Girl From Ipanema`, `The Glow-Worm`, `The Great Pretender`, `The Gypsy`, `The Hustle`, `The Joker`, `The Last Dance`, `The Letter`, `The Loco-Motion`, `The Long & Winding Road`, `The Love You Save`, `The Morning After`, `The Power of Love`, `The Prisoner's Song`, `The Reason`, `The Rose`, `The Sign`, `The Song From Moulin Rouge (Where Is Your Heart)`, `The Sounds of Silence`, `The Streak`, `The Sweet Escape`, `The Thing`, `The Tide is High`, `The Tracks of My Tears`, `The Twist`, `The Wanderer`, `The Way We Were`, `The Way You Look Tonight`, `The Way You Move`, `Theme From 'A Summer Place'`, `Theme From 'Greatest American Hero' (Believe It Or Not)`, `Theme From 'Shaft'`, `There goes my baby`, `These Boots Are Made For Walking`, `Third Man Theme`, `This Diamond Ring`, `This Guy's in Love With You`, `This Land is Your Land`, `This Love`, `This Ole House`, `This Used to Be My Playground`, `Three Coins in the Fountain`, `Three Times a Lady`, `Thrift Shop`, `Thriller`, `Ticket to Ride`, `Tie a Yellow Ribbon 'round the Old Oak Tree`, `Tiger Rag`, `Tighten Up`, `Tik-Toc`, `Till I Waltz Again With You`, `Till The End of Time`, `Time After Time`, `Time of the Season`, `To Sir, with Love`, `Tom Dooley`, `Tonight's the Night (Gonna Be Alright)`, `Too Close`, `Too Young`, `Tossing & Turning`, `Total Eclipse of the Heart`, `Touch Me`, `Toxic`, `Travellin' Band`, `Travellin' Man`, `Truly Madly Deeply`, `Turn! Turn! Turn! (To Everything There is a Season)`, `Tutti Frutti`, `Twist & Shout`, `Two Hearts`, `U Can't Touch This`, `U Got it Bad`, `Umbrella`, `Un-Break My Heart`, `Unbelievable`, `Unchained Melody`, `Uncle Albert (Admiral Halsey)`, `Under the Boardwalk`, `Under the Bridge`, `Unforgettable`, `Up Around the Bend`, `Up Up & Away`, `Up Where We Belong`, `Upside Down`, `Use Somebody`, `Vaya Con Dios (may God Be With You)`, `Venus`, `Vision of Love`, `Viva La Vida`, `Vogue`, `Volare`, `Wabash Cannonball`, `Waiting For a Girl Like You`, `Wake Me Up Before You Go Go`, `Wake Up Little Susie`, `Walk Don't Run`, `Walk Like a Man`, `Walk Like an Egyptian`, `Walk On By`, `Walk On the Wild Side`, `Walk This Way`, `Wannabe`, `Want Ads`, `Wanted`, `War`, `Waterfalls`, `Wayward Wind`, `We Are Family`, `We Are Young`, `We Are the Champions`, `We Are the World`, `We Belong Together`, `We Built This City`, `We Can Work it Out`, `We Didn't Start the Fire`, `We Found Love`, `We Got The Beat`, `We Will Rock You`, `We've Only Just Begun`, `Weak`, `Wedding Bell Blues`, `West End Blues`, `West End Girls`, `What Goes Around Comes Around`, `What a Fool Believes`, `What'd I Say`, `What's Going On?`, `What's Love Got to Do With It?`, `Whatcha Say`, `Wheel of Fortune`, `When Doves Cry`, `When You Wish Upon a Star`, `When a Man Loves a Woman`, `Where Did Our Love Go`, `Where is the Love?`, `Whip It`, `Whispering`, `White Christmas`, `White Rabbit`, `Whole Lotta Love`, `Whole Lotta Shakin' Goin' On`, `Whoomp! (There it Is)`, `Why Do Fools Fall in Love?`, `Why Don't You Believe Me?`, `Wichita Lineman`, `Wicked Game`, `Wild Thing`, `Wild Wild West`, `Will It Go Round In Circles`, `Will You Love Me Tomorrow`, `Winchester Cathedral`, `Wind Beneath My Wings`, `Wipe Out`, `Wishing Well`, `With Or Without You`, `Without Me`, `Without You`, `Woman`, `Won't Get Fooled Again`, `Wooly Bully`, `Working My Way Back to You`, `YMCA`, `Yakety Yak`, `Yeah!`, `Yellow Rose of Texas`, `Yesterday`, `You Ain't Seen Nothin' Yet`, `You Always Hurt the One You Love`, `You Are the Sunshine of My Life`, `You Belong With Me`, `You Belong to Me`, `You Can't Hurry Love`, `You Don't Bring Me Flowers`, `You Don't Have to Be a Star (To Be in My Show)`, `You Light Up My Life`, `You Make Me Feel Brand New`, `You Make Me Feel Like Dancing`, `You Really Got Me`, `You Send Me`, `You Sexy Thing`, `You Were Meant for Me`, `You make Me Wanna`, `You'll Never Know`, `You're Beautiful`, `You're So Vain`, `You're Still the One`, `You're the One That I Want`, `You've Got a Friend`, `You've Lost That Lovin' Feelin'`, `Your Cheatin' Heart`, `Your Song`] }, person: { bio_part: `activist.artist.author.blogger.business owner.coach.creator.designer.developer.dreamer.educator.engineer.entrepreneur.environmentalist.film lover.filmmaker.foodie.founder.friend.gamer.geek.grad.inventor.leader.model.musician.nerd.parent.patriot.person.philosopher.photographer.public speaker.scientist.singer.streamer.student.teacher.traveler.veteran.writer`.split(`.`), bio_pattern: [`{{person.bio_part}}`, `{{person.bio_part}}, {{person.bio_part}}`, `{{person.bio_part}}, {{person.bio_part}}, {{person.bio_part}}`, `{{person.bio_part}}, {{person.bio_part}}, {{person.bio_part}} {{internet.emoji}}`, `{{word.noun}} {{person.bio_supporter}}`, `{{word.noun}} {{person.bio_supporter}}  {{internet.emoji}}`, `{{word.noun}} {{person.bio_supporter}}, {{person.bio_part}}`, `{{word.noun}} {{person.bio_supporter}}, {{person.bio_part}} {{internet.emoji}}`], bio_supporter: [`advocate`, `devotee`, `enthusiast`, `fan`, `junkie`, `lover`, `supporter`], first_name: { generic: `Addison.Adell.Adrien.Alejandrin.Alexie.Alexis.Alexys.Ali.Alva.Alvis.Amani.Amari.Angel.Ara.Arden.Ari.Ariel.Arlie.Armani.Asa.Ashton.Aubrey.Audie.August.Austyn.Avery.Baby.Bailey.Bell.Berry.Bethel.Blair.Brook.Brown.Burdette.Burnice.Cali.Carey.Carroll.Cary.Casey.Chandler.Charley.Chesley.Clair.Claudie.Clemmie.Cleo.Cordie.Coty.Cruz.Dakota.Dallas.Dannie.Darby.Darian.Dee.Dell.Delta.Demetris.Devan.Devon.Devyn.Dominique.Dorian.Dusty.Eden.Elisha.Emery.Emmanuelle.Emory.Estel.Florida.Floy.Francis.Frankie.Garnet.Garnett.Germaine.Golden.Guadalupe.Hadley.Harley.Hassie.Haven.Hazle.Hollis.Ira.Ivory.Jacky.Jaden.Jadyn.Jaeden.Jaiden.Jalyn.Jamey.Jamie.Jammie.Jan.Jaycee.Jaylan.Jaylin.Jayme.Jennings.Jensen.Jess.Jessie.Jessy.Joany.Jody.Johnnie.Jordan.Jordane.Jude.Jules.Justice.Kacey.Karson.Kasey.Kaya.Kayden.Kendall.Kennedy.Kenyatta.Kerry.Kris.Kristian.Lane.Larue.Lavern.Lavon.Layne.Lee.Lennie.Leone.Linnie.London.Lonie.Loren.Lou.Loy.Loyal.Lue.Lupe.Marion.Marley.Marlin.Maxie.Maximillia.Merl.Merle.Merlin.Merritt.Michale.Michel.Milan.Miller.Mina.Monroe.Monserrate.Montana.Morgan.Mossie.Mozell.Murl.Murphy.Myrl.Nakia.Nicola.Nikita.Nova.Ocie.Oda.Odie.Ollie.Oma.Onie.Orie.Ova.Paris.Pat.Paxton.Payton.Peyton.Pink.Presley.Providenci.Quinn.Raleigh.Reagan.Reese.Regan.Reilly.Rickie.Riley.River.Robbie.Robin.Roma.Romaine.Rowan.Royal.Ryann.Ryley.Sage.Sammie.Sammy.Schuyler.Shanon.Shayne.Shea.Sheridan.Sidney.Sincere.Skye.Skylar.Stevie.Sunny.Taylor.Teagan.Telly.Terry.Tommie.Torey.Toy.Tristin.Unique.Urban.Valentine.Van.Vernie.Zion`.split(`.`), female: `Aaliyah.Abagail.Abbey.Abbie.Abbigail.Abby.Abigail.Abigale.Abigayle.Ada.Adah.Adaline.Addie.Adela.Adele.Adelia.Adeline.Adella.Adelle.Adriana.Adrianna.Adrienne.Afton.Aglae.Agnes.Agustina.Aida.Aileen.Aimee.Aisha.Aiyana.Alaina.Alana.Alanis.Alanna.Alayna.Alba.Alberta.Albertha.Albina.Alda.Aleen.Alejandra.Alena.Alene.Alessandra.Alessia.Aletha.Alexa.Alexandra.Alexandrea.Alexandria.Alexandrine.Alexane.Alexanne.Alfreda.Alia.Alice.Alicia.Alisa.Alisha.Alison.Alivia.Aliya.Aliyah.Aliza.Alize.Allene.Allie.Allison.Ally.Alma.Alta.Althea.Alvena.Alvera.Alverta.Alvina.Alyce.Alycia.Alysa.Alysha.Alyson.Alyssa.Alysson.Amalia.Amanda.Amara.Amaya.Amber.Amelia.Amelie.Amely.America.Amie.Amina.Amira.Amiya.Amparo.Amy.Amya.Ana.Anabel.Anabelle.Anahi.Anais.Anastasia.Andrea.Andreane.Andreanne.Angela.Angelica.Angelina.Angeline.Angelita.Angie.Anika.Anissa.Anita.Aniya.Aniyah.Anjali.Ann.Anna.Annabel.Annabell.Annabelle.Annalise.Annamae.Annamarie.Anne.Annetta.Annette.Annie.Ansley.Antoinette.Antonetta.Antonette.Antonia.Antonietta.Antonina.Anya.April.Araceli.Aracely.Ardella.Ardith.Arely.Ariane.Arianna.Arielle.Arlene.Arvilla.Aryanna.Asha.Ashlee.Ashleigh.Ashley.Ashly.Ashlynn.Ashtyn.Asia.Assunta.Astrid.Athena.Aubree.Audra.Audreanne.Audrey.Augusta.Aurelia.Aurelie.Aurore.Autumn.Ava.Avis.Ayana.Ayla.Aylin.Bailee.Barbara.Baylee.Beatrice.Beaulah.Becky.Belinda.Bella.Belle.Berenice.Bernadette.Bernadine.Berneice.Bernice.Berniece.Bernita.Berta.Bertha.Beryl.Bessie.Beth.Bethany.Betsy.Bette.Bettie.Betty.Bettye.Beulah.Beverly.Bianka.Billie.Birdie.Blanca.Blanche.Bobbie.Bonita.Bonnie.Brandi.Brandy.Breana.Breanna.Breanne.Brenda.Brenna.Bria.Briana.Brianne.Bridget.Bridgette.Bridie.Brielle.Brigitte.Brionna.Brisa.Britney.Brittany.Brooke.Brooklyn.Bryana.Bulah.Caitlyn.Caleigh.Calista.Callie.Camila.Camilla.Camille.Camryn.Camylle.Candace.Candice.Candida.Cara.Carissa.Carla.Carlee.Carley.Carli.Carlie.Carlotta.Carmel.Carmela.Carmella.Carmen.Carol.Carolanne.Carole.Carolina.Caroline.Carolyn.Carolyne.Carrie.Casandra.Cassandra.Cassandre.Cassidy.Cassie.Catalina.Caterina.Catharine.Catherine.Cathrine.Cathryn.Cathy.Cayla.Cecelia.Cecile.Cecilia.Celestine.Celia.Celine.Chanel.Chanelle.Charity.Charlene.Charlotte.Chasity.Chaya.Chelsea.Chelsey.Chelsie.Cheryl.Cheyanne.Cheyenne.Chloe.Christa.Christelle.Christiana.Christie.Christina.Christine.Christy.Chyna.Ciara.Cielo.Cierra.Cindy.Citlalli.Claire.Clara.Clarabelle.Clare.Clarissa.Claudia.Claudine.Clementina.Clementine.Cleora.Cleta.Clotilde.Colleen.Concepcion.Connie.Constance.Consuelo.Cora.Coralie.Cordelia.Cordia.Corene.Corine.Corrine.Cortney.Courtney.Creola.Cristal.Cristina.Crystal.Crystel.Cydney.Cynthia.Dagmar.Dahlia.Daija.Daisha.Daisy.Damaris.Dana.Daniela.Daniella.Danielle.Danika.Danyka.Daphne.Daphnee.Daphney.Dariana.Darla.Darlene.Dasia.Dawn.Dayana.Dayna.Deanna.Debbie.Deborah.Debra.Deja.Dejah.Delaney.Delfina.Delia.Delilah.Della.Delores.Delpha.Delphia.Delphine.Dena.Denise.Desiree.Dessie.Destany.Destinee.Destiney.Destini.Destiny.Diamond.Diana.Diane.Dianna.Dianne.Dina.Dixie.Dolly.Dolores.Domenica.Donna.Dora.Dorcas.Doreen.Doris.Dorothea.Dorothy.Dorris.Dortha.Dorthy.Dovie.Dulce.Earlene.Earline.Earnestine.Easter.Ebba.Ebony.Eda.Edith.Edna.Edwina.Edyth.Edythe.Effie.Eileen.Elaina.Elaine.Elda.Eldora.Eleanor.Eleanora.Eleanore.Electa.Elena.Elenor.Elenora.Eleonore.Elfrieda.Eliane.Elinor.Elinore.Elisa.Elisabeth.Elise.Elissa.Eliza.Elizabeth.Ella.Ellen.Ellie.Elmira.Elna.Elnora.Elody.Eloisa.Eloise.Elouise.Elsa.Else.Elsie.Elta.Elva.Elvera.Elvie.Elvira.Elyse.Elyssa.Elza.Emelia.Emelie.Emely.Emerald.Emie.Emilia.Emilie.Emily.Emma.Emmalee.Emmie.Emmy.Ena.Enid.Enola.Era.Erica.Ericka.Erika.Erin.Erma.Erna.Ernestina.Ernestine.Eryn.Esmeralda.Esperanza.Essie.Esta.Estefania.Estell.Estella.Estelle.Esther.Estrella.Etha.Ethel.Ethelyn.Ethyl.Ettie.Eudora.Eugenia.Eula.Eulah.Eulalia.Euna.Eunice.Eva.Evalyn.Evangeline.Eve.Eveline.Evelyn.Evie.Fabiola.Fae.Faith.Fannie.Fanny.Fatima.Fay.Faye.Felicia.Felicita.Felicity.Felipa.Fern.Ferne.Filomena.Fiona.Flavie.Fleta.Flo.Flora.Florence.Florine.Flossie.Frances.Francesca.Francisca.Freda.Frederique.Freeda.Freida.Frida.Frieda.Gabriella.Gabrielle.Gail.Gayle.Genesis.Geneva.Genevieve.Genoveva.Georgette.Georgia.Georgiana.Georgianna.Geraldine.Gerda.Gertrude.Gia.Gilda.Gillian.Gina.Ginger.Giovanna.Gisselle.Gladyce.Gladys.Glenda.Glenna.Glennie.Gloria.Golda.Grace.Gracie.Graciela.Grayce.Gregoria.Greta.Gretchen.Gudrun.Gussie.Gwen.Gwendolyn.Hailee.Hailey.Hailie.Haleigh.Haley.Halie.Halle.Hallie.Hanna.Hannah.Harmony.Harriet.Hattie.Haylee.Hayley.Haylie.Hazel.Heather.Heaven.Heidi.Helen.Helena.Helene.Helga.Hellen.Heloise.Henrietta.Henriette.Hermina.Herminia.Herta.Hertha.Hester.Hettie.Hilda.Hildegard.Hillary.Hilma.Hollie.Holly.Hope.Hortense.Hulda.Icie.Ida.Idell.Idella.Ila.Ilene.Iliana.Ima.Imani.Imelda.Imogene.Ines.Inez.Irene.Iris.Irma.Isabel.Isabell.Isabella.Isabelle.Isobel.Itzel.Iva.Ivah.Ivy.Izabella.Jacey.Jacinthe.Jackeline.Jackie.Jacklyn.Jaclyn.Jacqueline.Jacquelyn.Jacynthe.Jada.Jade.Jaida.Jailyn.Jakayla.Jana.Janae.Jane.Janelle.Janessa.Janet.Janice.Janie.Janis.Janiya.Jannie.Jany.Jaquelin.Jaqueline.Jasmin.Jasmine.Jaunita.Jayda.Jayde.Jayne.Jazlyn.Jazmin.Jazmyn.Jazmyne.Jean.Jeanette.Jeanie.Jeanne.Jeannette.Jeannie.Jena.Jenifer.Jenna.Jennie.Jennifer.Jenny.Jennyfer.Jessica.Jessika.Jessyca.Jettie.Jewel.Jewell.Jill.Jillian.Jo.Joan.Joana.Joanie.Joann.Joanna.Joanne.Joannie.Joanny.Jocelyn.Jodi.Jodie.Joelle.Johanna.Jolie.Jordyn.Josefa.Josefina.Josephine.Josiane.Josianne.Josie.Joy.Joyce.Juana.Juanita.Judith.Judy.Julia.Juliana.Julianne.Julie.Juliet.June.Justina.Justine.Kaci.Kacie.Kaela.Kaelyn.Kaia.Kailee.Kailey.Kailyn.Kaitlin.Kaitlyn.Kaleigh.Kaley.Kali.Kallie.Kamille.Kamryn.Kara.Karelle.Karen.Kari.Kariane.Karianne.Karina.Karine.Karla.Karlee.Karley.Karli.Karlie.Karolann.Kasandra.Kassandra.Katarina.Kate.Katelin.Katelyn.Katelynn.Katharina.Katherine.Katheryn.Kathleen.Kathlyn.Kathryn.Kathryne.Kathy.Katie.Katlyn.Katlynn.Katrina.Katrine.Kattie.Kay.Kaycee.Kayla.Kaylah.Kaylee.Kayleigh.Kayley.Kayli.Kaylie.Kaylin.Keara.Keeley.Keely.Keira.Kelley.Kelli.Kellie.Kelly.Kelsi.Kelsie.Kendra.Kenna.Kennedi.Kenya.Kiana.Kianna.Kiara.Kiarra.Kiera.Kiley.Kim.Kimberly.Kira.Kirsten.Kirstin.Kitty.Krista.Kristen.Kristi.Kristie.Kristin.Kristina.Kristine.Kristy.Krystal.Krystel.Krystina.Kyla.Kylee.Kyleigh.Kylie.Kyra.Lacey.Lacy.Laila.Laisha.Lana.Laney.Larissa.Latoya.Laura.Laurel.Lauren.Lauretta.Lauriane.Laurianne.Laurie.Laurine.Laury.Lauryn.Lavada.Laverna.Laverne.Lavina.Lavinia.Lavonne.Layla.Lea.Leah.Leann.Leanna.Leanne.Leatha.Leda.Leigh.Leila.Leilani.Lela.Lelah.Lelia.Lempi.Lena.Lenna.Lenora.Lenore.Leola.Leona.Leonie.Leonor.Leonora.Leora.Lera.Lesley.Leslie.Lesly.Lessie.Leta.Letha.Leticia.Letitia.Lexi.Lexie.Lexus.Lia.Liana.Libbie.Libby.Lila.Lilian.Liliana.Liliane.Lilla.Lillian.Lilliana.Lillie.Lilly.Lily.Lilyan.Lina.Linda.Lindsay.Lindsey.Linnea.Lisa.Lisette.Litzy.Liza.Lizeth.Lizzie.Lois.Lola.Lolita.Loma.Lora.Loraine.Lorena.Lorene.Lorenza.Loretta.Lori.Lorine.Lorna.Lorraine.Lottie.Louisa.Louise.Lourdes.Louvenia.Loyce.Lucia.Lucie.Lucienne.Lucile.Lucille.Lucinda.Lucy.Ludie.Luella.Luisa.Lula.Lulu.Luna.Lura.Lurline.Luz.Lyda.Lydia.Lyla.Lynda.Lynette.Lynn.Lynne.Lyric.Lysanne.Mabel.Mabelle.Mable.Macey.Maci.Macie.Mackenzie.Macy.Madaline.Madalyn.Maddison.Madeline.Madelyn.Madelynn.Madge.Madie.Madilyn.Madisen.Madison.Madisyn.Madonna.Madyson.Mae.Maegan.Maeve.Mafalda.Magali.Magdalen.Magdalena.Maggie.Magnolia.Maia.Maida.Maiya.Makayla.Makenna.Makenzie.Malika.Malinda.Mallie.Mallory.Malvina.Mamie.Mandy.Manuela.Mara.Marcelina.Marcella.Marcelle.Marcia.Margaret.Margarete.Margarett.Margaretta.Margarette.Margarita.Marge.Margie.Margot.Margret.Marguerite.Maria.Mariah.Mariam.Marian.Mariana.Mariane.Marianna.Marianne.Maribel.Marie.Mariela.Marielle.Marietta.Marilie.Marilou.Marilyn.Marilyne.Marina.Marisa.Marisol.Maritza.Marjolaine.Marjorie.Marjory.Marlee.Marlen.Marlene.Marsha.Marta.Martha.Martina.Martine.Mary.Maryam.Maryann.Maryjane.Maryse.Mathilde.Matilda.Matilde.Mattie.Maud.Maude.Maudie.Maureen.Maurine.Mavis.Maxine.May.Maya.Maybell.Maybelle.Maye.Maymie.Mayra.Mazie.Mckayla.Mckenna.Mckenzie.Meagan.Meaghan.Meda.Megan.Megane.Meggie.Meghan.Melanie.Melany.Melba.Melinda.Melisa.Melissa.Mellie.Melody.Melvina.Melyna.Melyssa.Mercedes.Meredith.Mertie.Meta.Mia.Micaela.Michaela.Michele.Michelle.Mikayla.Mildred.Millie.Mindy.Minerva.Minnie.Miracle.Miranda.Mireille.Mireya.Miriam.Missouri.Misty.Mittie.Modesta.Mollie.Molly.Mona.Monica.Monique.Monserrat.Moriah.Mozelle.Muriel.Mya.Myah.Mylene.Myra.Myriam.Myrna.Myrtice.Myrtie.Myrtis.Myrtle.Nadia.Nadine.Nancy.Nannie.Naomi.Naomie.Natalia.Natalie.Natasha.Nayeli.Nedra.Neha.Nelda.Nella.Nelle.Nellie.Neoma.Nettie.Neva.Nia.Nichole.Nicole.Nicolette.Nikki.Nina.Noelia.Noemi.Noemie.Noemy.Nola.Nona.Nora.Norene.Norma.Novella.Nya.Nyah.Nyasia.Oceane.Octavia.Odessa.Ofelia.Ola.Oleta.Olga.Olive.Olivia.Ona.Opal.Ophelia.Ora.Orpha.Otilia.Ottilie.Ozella.Paige.Palma.Pam.Pamela.Pansy.Pascale.Patience.Patricia.Patsy.Patti.Pattie.Patty.Paula.Paulette.Pauline.Pearl.Pearlie.Pearline.Peggie.Peggy.Penelope.Penny.Petra.Phoebe.Phyllis.Pinkie.Piper.Polly.Precious.Princess.Priscilla.Prudence.Queen.Queenie.Rachael.Rachel.Rachelle.Rae.Raegan.Rafaela.Raina.Ramona.Randi.Raphaelle.Raquel.Raven.Reanna.Reba.Rebeca.Rebecca.Rebeka.Rebekah.Regina.Reina.Renee.Ressie.Reta.Retha.Retta.Reva.Reyna.Rhea.Rhianna.Rhiannon.Rhoda.Rhonda.Rita.Roberta.Robyn.Rochelle.Rocio.Rosa.Rosalee.Rosalia.Rosalie.Rosalind.Rosalinda.Rosalyn.Rosamond.Rosanna.Rosario.Rose.Rosella.Roselyn.Rosemarie.Rosemary.Rosetta.Rosie.Rosina.Roslyn.Rossie.Rowena.Roxane.Roxanne.Rozella.Rubie.Ruby.Rubye.Ruth.Ruthe.Ruthie.Rylee.Ryleigh.Sabina.Sabrina.Sabryna.Sadie.Sadye.Saige.Sallie.Sally.Salma.Samanta.Samantha.Samara.Sandra.Sandrine.Sandy.Santa.Santina.Sara.Sarah.Sarai.Sarina.Sasha.Savanah.Savanna.Savannah.Scarlett.Selena.Selina.Serena.Serenity.Shaina.Shakira.Shana.Shanel.Shanelle.Shania.Shanie.Shaniya.Shanna.Shannon.Shanny.Shany.Shari.Sharon.Shawna.Shaylee.Shayna.Sheila.Shelia.Shelley.Shelly.Sheri.Sherri.Sherry.Sheryl.Shirley.Shyann.Shyanne.Sibyl.Sienna.Sierra.Sigrid.Silvia.Simone.Sister.Skyla.Sofia.Soledad.Sonia.Sonja.Sonya.Sophia.Sophie.Stacey.Stacy.Stefanie.Stella.Stephania.Stephanie.Stephany.Sue.Summer.Susan.Susana.Susanna.Susie.Suzanne.Syble.Sydnee.Sydney.Sydni.Sydnie.Sylvia.Tabitha.Talia.Tamara.Tami.Tamia.Tammy.Tania.Tanya.Tara.Taryn.Tasha.Tatum.Tatyana.Taya.Teresa.Teri.Terri.Tess.Tessie.Thalia.Thea.Thelma.Theodora.Theresa.Therese.Theresia.Thora.Tia.Tiana.Tianna.Tiara.Tierra.Tiffany.Tina.Tomasa.Toni.Tonya.Tracey.Traci.Tracy.Tressa.Tressie.Treva.Tricia.Trinity.Trisha.Trudie.Trycia.Twila.Tyra.Una.Ursula.Vada.Valentina.Valerie.Vallie.Vanessa.Veda.Velda.Vella.Velma.Velva.Vena.Vera.Verda.Verdie.Vergie.Verla.Verlie.Verna.Vernice.Verona.Veronica.Vesta.Vicenta.Vicki.Vickie.Vicky.Victoria.Vida.Vilma.Vincenza.Viola.Violet.Violette.Virgie.Virginia.Virginie.Vita.Viva.Vivian.Viviane.Vivianne.Vivien.Vivienne.Wanda.Wava.Wendy.Whitney.Wilhelmine.Willa.Willow.Wilma.Winifred.Winnifred.Winona.Yadira.Yasmeen.Yasmin.Yasmine.Yazmin.Yesenia.Yessenia.Yolanda.Yoshiko.Yvette.Yvonne.Zaria.Zelda.Zella.Zelma.Zena.Zetta.Zita.Zoe.Zoey.Zoie.Zoila.Zola.Zora.Zula`.split(`.`), male: `Aaron.Abdiel.Abdul.Abdullah.Abe.Abel.Abelardo.Abner.Abraham.Adalberto.Adam.Adan.Adelbert.Aditya.Adolf.Adolfo.Adolph.Adolphus.Adonis.Adrain.Adrian.Adriel.Agustin.Ahmad.Ahmed.Aidan.Aiden.Akeem.Al.Alan.Albert.Alberto.Albin.Alden.Alec.Alejandro.Alek.Alessandro.Alex.Alexander.Alexandre.Alexandro.Alexzander.Alf.Alfonso.Alfonzo.Alford.Alfred.Alfredo.Allan.Allen.Alonzo.Alphonso.Alton.Alvah.Alvin.Ambrose.Americo.Amir.Amos.Anastacio.Anderson.Andre.Andres.Andrew.Andy.Angelo.Angus.Anibal.Ansel.Anthony.Antone.Antonio.Antwan.Antwon.Arch.Archibald.Archie.Aric.Arjun.Arlo.Armand.Armando.Arnaldo.Arne.Arno.Arnold.Arnoldo.Arnulfo.Aron.Art.Arthur.Arturo.Arvel.Arvid.Augustine.Augustus.Aurelio.Austen.Austin.Axel.Ayden.Barney.Baron.Barrett.Barry.Bart.Bartholome.Barton.Beau.Ben.Benedict.Benjamin.Bennett.Bennie.Benny.Benton.Bernard.Bernardo.Bernhard.Bernie.Bert.Bertram.Bertrand.Bill.Billy.Blaise.Blake.Blaze.Bo.Bob.Bobby.Boris.Boyd.Brad.Braden.Bradford.Bradley.Bradly.Brady.Braeden.Brain.Brando.Brandon.Brandt.Brandyn.Brannon.Branson.Brant.Braulio.Braxton.Brayan.Brendan.Brenden.Brendon.Brennan.Brennon.Brent.Bret.Brett.Brian.Brice.Brock.Broderick.Brody.Brooks.Bruce.Bryan.Bryant.Bryce.Brycen.Bryon.Buck.Bud.Buddy.Buford.Burley.Buster.Byron.Cade.Caden.Caesar.Cale.Caleb.Calvin.Camden.Cameron.Camren.Camron.Candelario.Candido.Carl.Carleton.Carlo.Carlos.Carlton.Carmelo.Carmine.Carson.Carter.Casimer.Casimir.Casper.Ceasar.Cecil.Cedric.Cedrick.Celestino.Cesar.Chad.Chadd.Chadrick.Chaim.Chance.Charles.Charlie.Chase.Chauncey.Chaz.Chester.Chet.Chris.Christ.Christian.Christop.Christophe.Christopher.Cicero.Clarence.Clark.Claud.Claude.Clay.Clayton.Clemens.Clement.Cletus.Cleve.Cleveland.Clifford.Clifton.Clint.Clinton.Clovis.Cloyd.Clyde.Coby.Cody.Colby.Cole.Coleman.Colin.Collin.Colt.Colten.Colton.Columbus.Conner.Connor.Conor.Conrad.Constantin.Cooper.Corbin.Cordell.Corey.Cornelius.Cornell.Cortez.Cory.Coy.Craig.Crawford.Cristian.Cristobal.Cristopher.Cullen.Curt.Curtis.Cyril.Cyrus.D'angelo.Dale.Dallin.Dalton.Dameon.Damian.Damien.Damion.Damon.Dan.Dandre.Dane.Dangelo.Danial.Daniel.Danny.Dante.Daren.Darien.Darin.Dario.Darion.Darius.Darnell.Daron.Darrel.Darrell.Darren.Darrick.Darrin.Darrion.Darron.Darryl.Darwin.Daryl.Dashawn.Dave.David.Davin.Davion.Davon.Davonte.Dawson.Dax.Dayne.Dayton.Dean.Deangelo.Declan.Dedric.Dedrick.Deion.Dejon.Dejuan.Delbert.Delmer.Demarco.Demarcus.Demario.Demetrius.Demond.Denis.Dennis.Deon.Deondre.Deontae.Deonte.Dereck.Derek.Derick.Deron.Derrick.Deshaun.Deshawn.Desmond.Destin.Devante.Deven.Devin.Devonte.Dewayne.Dewey.Dewitt.Dexter.Diego.Dillan.Dillon.Dimitri.Dino.Dion.Dock.Domenic.Domenick.Domenico.Domingo.Dominic.Dominick.Don.Donald.Donato.Donavon.Donnell.Donnie.Donny.Doug.Douglas.Doyle.Drake.Drew.Duane.Dudley.Duncan.Durward.Dustin.Dwayne.Dwight.Dylan.Earl.Earnest.Easton.Ed.Edd.Eddie.Edgar.Edgardo.Edison.Edmond.Edmund.Eduardo.Edward.Edwardo.Edwin.Efrain.Efren.Einar.Eino.Eladio.Elbert.Eldon.Eldred.Eldridge.Eleazar.Eli.Elian.Elias.Eliezer.Elijah.Eliseo.Elliot.Elliott.Ellis.Ellsworth.Elmer.Elmo.Elmore.Eloy.Elroy.Elton.Elvis.Elwin.Elwyn.Emanuel.Emerson.Emil.Emile.Emiliano.Emilio.Emmanuel.Emmet.Emmett.Emmitt.Enoch.Enos.Enrico.Enrique.Ephraim.Eriberto.Eric.Erich.Erick.Erik.Erling.Ernest.Ernesto.Ernie.Ervin.Erwin.Esteban.Estevan.Ethan.Eugene.Eusebio.Evan.Evans.Everardo.Everett.Everette.Evert.Ewald.Ewell.Ezekiel.Ezequiel.Ezra.Fabian.Faustino.Fausto.Favian.Federico.Felipe.Felix.Felton.Fermin.Fernando.Fidel.Filiberto.Finn.Flavio.Fletcher.Florencio.Florian.Floyd.Ford.Forest.Forrest.Foster.Francesco.Francisco.Franco.Frank.Franklin.Franz.Fred.Freddie.Freddy.Frederic.Frederick.Frederik.Fredrick.Fredy.Freeman.Friedrich.Fritz.Furman.Gabe.Gabriel.Gaetano.Gage.Gardner.Garett.Garfield.Garland.Garret.Garrett.Garrick.Garrison.Garry.Garth.Gary.Gaston.Gavin.Gene.General.Gennaro.Geo.Geoffrey.George.Geovanni.Geovanny.Geovany.Gerald.Gerard.Gerardo.Gerhard.German.Gerry.Gerson.Gianni.Gideon.Gilbert.Gilberto.Giles.Gino.Giovani.Giovanni.Giovanny.Giuseppe.Glen.Glenn.Godfrey.Gonzalo.Gordon.Grady.Graham.Grant.Granville.Grayson.Green.Greg.Gregg.Gregorio.Gregory.Greyson.Griffin.Grover.Guido.Guillermo.Guiseppe.Gunnar.Gunner.Gus.Gust.Gustave.Gustavo.Guy.Hal.Hank.Hans.Hardy.Harmon.Harold.Harrison.Harry.Harvey.Haskell.Hassan.Hayden.Heath.Heber.Hector.Helmer.Henderson.Henri.Henry.Herbert.Herman.Hermann.Herminio.Hershel.Hilario.Hilbert.Hillard.Hilton.Hipolito.Hiram.Hobart.Holden.Homer.Horace.Horacio.Hosea.Houston.Howard.Howell.Hoyt.Hubert.Hudson.Hugh.Hugo.Humberto.Hunter.Hyman.Ian.Ibrahim.Ignacio.Ignatius.Ike.Immanuel.Irvin.Irving.Irwin.Isaac.Isac.Isadore.Isai.Isaiah.Isaias.Isidro.Ismael.Isom.Israel.Issac.Ivan.Izaiah.Jabari.Jace.Jacinto.Jack.Jackson.Jacob.Jacques.Jadon.Jaime.Jairo.Jake.Jakob.Jaleel.Jalen.Jalon.Jamaal.Jamal.Jamar.Jamarcus.Jamel.James.Jameson.Jamil.Jamir.Jamison.Janick.Jaquan.Jared.Jaren.Jarod.Jaron.Jarred.Jarrell.Jarret.Jarrett.Jarrod.Jarvis.Jasen.Jason.Jasper.Javier.Javon.Javonte.Jay.Jayce.Jayden.Jaydon.Jaylen.Jaylon.Jayson.Jed.Jedediah.Jedidiah.Jeff.Jefferey.Jeffery.Jeffrey.Jeffry.Jerad.Jerald.Jeramie.Jeramy.Jerel.Jeremiah.Jeremie.Jeremy.Jermain.Jermaine.Jermey.Jerod.Jerome.Jeromy.Jerrell.Jerrod.Jerrold.Jerry.Jesse.Jesus.Jett.Jevon.Jim.Jimmie.Jimmy.Joaquin.Joe.Joel.Joesph.Joey.Johan.Johann.Johathan.John.Johnathan.Johnathon.Johnny.Johnpaul.Johnson.Jon.Jonas.Jonatan.Jonathan.Jonathon.Jordi.Jordon.Jordy.Jorge.Jose.Joseph.Josh.Joshua.Joshuah.Josiah.Josue.Jovan.Jovani.Jovanny.Jovany.Juan.Judah.Judd.Judge.Judson.Julian.Julien.Julio.Julius.Junior.Junius.Justen.Justin.Juston.Justus.Justyn.Juvenal.Juwan.Kade.Kaden.Kadin.Kale.Kaleb.Kameron.Kamren.Kamron.Kane.Kareem.Karl.Kavon.Keagan.Keanu.Keaton.Keegan.Keenan.Keith.Kellen.Kelton.Kelvin.Ken.Kendrick.Kenneth.Kennith.Kenny.Kent.Kenton.Kenyon.Keon.Keshaun.Keshawn.Keven.Kevin.Kevon.Keyon.Keyshawn.Khalid.Khalil.Kian.Kiel.Kieran.King.Kip.Kirk.Kobe.Koby.Kody.Kolby.Kole.Korbin.Korey.Kory.Kraig.Kristofer.Kristoffer.Kristopher.Kurt.Kurtis.Kyle.Kyler.Ladarius.Lafayette.Lamar.Lambert.Lamont.Lance.Landen.Laron.Larry.Laurence.Lawrence.Lawson.Lazaro.Leif.Leland.Lemuel.Lenny.Leo.Leon.Leonard.Leonardo.Leonel.Leopold.Leopoldo.Leroy.Lester.Levi.Lew.Lewis.Liam.Lincoln.Linwood.Lionel.Lisandro.Llewellyn.Lloyd.Logan.Lon.Lonnie.Lonny.Lonzo.Lorenz.Lorenzo.Louie.Louis.Lowell.Lucas.Luciano.Lucio.Lucious.Lucius.Ludwig.Luigi.Luis.Lukas.Luke.Luther.Lyle.Mac.Mack.Magnus.Major.Malachi.Malcolm.Manley.Manuel.Marc.Marcel.Marcelino.Marcellus.Marcelo.Marco.Marcos.Marcus.Mariano.Mario.Mark.Markus.Marlon.Marques.Marquis.Marquise.Marshall.Martin.Marty.Marvin.Mason.Mateo.Mathew.Mathias.Matt.Matteo.Matthew.Maurice.Mauricio.Maverick.Max.Maxime.Maximilian.Maximillian.Maximo.Maximus.Maxwell.Maynard.Mekhi.Melvin.Mervin.Micah.Michael.Micheal.Miguel.Mike.Mikel.Miles.Milford.Milo.Milton.Misael.Mitchel.Mitchell.Modesto.Mohamed.Mohammad.Mohammed.Moises.Monte.Monty.Morris.Mortimer.Morton.Mose.Moses.Moshe.Muhammad.Murray.Mustafa.Myles.Myron.Name.Napoleon.Narciso.Nash.Nasir.Nat.Nathan.Nathanael.Nathanial.Nathaniel.Nathen.Neal.Ned.Neil.Nels.Nelson.Nestor.Newell.Newton.Nicholas.Nicholaus.Nick.Nicklaus.Nickolas.Nico.Nicolas.Nigel.Nikko.Niko.Nikolas.Nils.Noah.Noble.Noe.Noel.Nolan.Norbert.Norberto.Norman.Norris.Norval.Norwood.Obie.Odell.Okey.Olaf.Ole.Olen.Olin.Oliver.Omar.Omari.Omer.Oral.Oran.Oren.Orin.Orion.Orland.Orlando.Orlo.Orrin.Orval.Orville.Osbaldo.Osborne.Oscar.Osvaldo.Oswald.Oswaldo.Otha.Otho.Otis.Ottis.Otto.Owen.Pablo.Paolo.Parker.Pasquale.Patrick.Paul.Pedro.Percival.Percy.Perry.Pete.Peter.Phil.Philip.Phillip.Pierce.Pierre.Pietro.Porter.Preston.Price.Prince.Quentin.Quincy.Quinten.Quinton.Rafael.Raheem.Rahsaan.Rahul.Ralph.Ramiro.Ramon.Randal.Randall.Randolph.Randy.Ransom.Raoul.Raphael.Rashad.Rashawn.Rasheed.Raul.Ray.Raymond.Raymundo.Reece.Reed.Reggie.Reginald.Reid.Reinhold.Remington.Rene.Reuben.Rex.Rey.Reyes.Reymundo.Reynold.Rhett.Ricardo.Richard.Richie.Richmond.Rick.Rickey.Ricky.Rico.Rigoberto.Robb.Robert.Roberto.Rocky.Rod.Roderick.Rodger.Rodney.Rodolfo.Rodrick.Rodrigo.Roel.Rogelio.Roger.Rogers.Roland.Rolando.Rollin.Roman.Ron.Ronald.Ronaldo.Ronnie.Ronny.Roosevelt.Rory.Roscoe.Rosendo.Ross.Rowland.Roy.Royce.Ruben.Rudolph.Rudy.Rufus.Rupert.Russ.Russel.Russell.Rusty.Ryan.Ryder.Rylan.Salvador.Salvatore.Sam.Samir.Samson.Samuel.Sanford.Santiago.Santino.Santos.Saul.Savion.Scot.Scott.Scottie.Scotty.Seamus.Sean.Sebastian.Sedrick.Selmer.Sergio.Seth.Shad.Shane.Shaun.Shawn.Sheldon.Shemar.Sherman.Sherwood.Sid.Sigmund.Sigurd.Silas.Sim.Simeon.Simon.Solon.Sonny.Spencer.Stan.Stanford.Stanley.Stanton.Stefan.Stephan.Stephen.Stephon.Sterling.Steve.Steven.Stewart.Stone.Stuart.Sven.Sylvan.Sylvester.Tad.Talon.Tanner.Tate.Taurean.Tavares.Ted.Terence.Terrance.Terrell.Terrence.Terrill.Tevin.Thad.Thaddeus.Theo.Theodore.Theron.Thomas.Thurman.Tillman.Tim.Timmothy.Timmy.Timothy.Tito.Titus.Tobin.Toby.Tod.Todd.Tom.Tomas.Tommy.Toney.Tony.Torrance.Torrey.Trace.Travis.Travon.Tre.Tremaine.Tremayne.Trent.Trenton.Trever.Trevion.Trevor.Trey.Tristian.Triston.Troy.Trystan.Turner.Tyler.Tyree.Tyreek.Tyrel.Tyrell.Tyrese.Tyrique.Tyrone.Tyshawn.Tyson.Ubaldo.Ulices.Ulises.Uriah.Uriel.Valentin.Vance.Vaughn.Vern.Verner.Vernon.Vicente.Victor.Vidal.Vince.Vincent.Vincenzo.Vinnie.Virgil.Vito.Vladimir.Wade.Waino.Waldo.Walker.Wallace.Walter.Walton.Ward.Warren.Watson.Waylon.Wayne.Webster.Weldon.Wellington.Wendell.Werner.Wesley.Westley.Weston.Wilber.Wilbert.Wilbur.Wilburn.Wiley.Wilford.Wilfred.Wilfredo.Wilfrid.Wilhelm.Will.Willard.William.Willie.Willis.Willy.Wilmer.Wilson.Wilton.Winfield.Winston.Wm.Woodrow.Wyatt.Wyman.Xander.Xavier.Xzavier.Zachariah.Zachary.Zachery.Zack.Zackary.Zackery.Zakary.Zander.Zane.Zechariah`.split(`.`) }, gender: `Agender.Androgyne.Androgynous.Bigender.Cis female.Cis male.Cis man.Cis woman.Cis.Cisgender female.Cisgender male.Cisgender man.Cisgender woman.Cisgender.Demi-boy.Demi-girl.Demi-man.Demi-woman.Demiflux.Demigender.F2M.FTM.Female to male trans man.Female to male transgender man.Female to male transsexual man.Female to male.Gender fluid.Gender neutral.Gender nonconforming.Gender questioning.Gender variant.Genderflux.Genderqueer.Hermaphrodite.Intersex man.Intersex person.Intersex woman.Intersex.M2F.MTF.Male to female trans woman.Male to female transgender woman.Male to female transsexual woman.Male to female.Man.Multigender.Neither.Neutrois.Non-binary.Omnigender.Other.Pangender.Polygender.T* man.T* woman.Trans female.Trans male.Trans man.Trans person.Trans woman.Trans.Transsexual female.Transsexual male.Transsexual man.Transsexual person.Transsexual woman.Transsexual.Transgender female.Transgender person.Transmasculine.Trigender.Two* person.Two-spirit person.Two-spirit.Woman.Xenogender`.split(`.`), job_area: `Solutions.Program.Brand.Security.Research.Marketing.Directives.Implementation.Integration.Functionality.Response.Paradigm.Tactics.Identity.Markets.Group.Division.Applications.Optimization.Operations.Infrastructure.Intranet.Communications.Web.Branding.Quality.Assurance.Mobility.Accounts.Data.Creative.Configuration.Accountability.Interactions.Factors.Usability.Metrics`.split(`.`), job_descriptor: [`Lead`, `Senior`, `Direct`, `Corporate`, `Dynamic`, `Future`, `Product`, `National`, `Regional`, `District`, `Central`, `Global`, `Customer`, `Investor`, `International`, `Legacy`, `Forward`, `Internal`, `Human`, `Chief`, `Principal`], job_title_pattern: [`{{person.jobDescriptor}} {{person.jobArea}} {{person.jobType}}`], job_type: [`Supervisor`, `Associate`, `Executive`, `Liaison`, `Officer`, `Manager`, `Engineer`, `Specialist`, `Director`, `Coordinator`, `Administrator`, `Architect`, `Analyst`, `Designer`, `Planner`, `Orchestrator`, `Technician`, `Developer`, `Producer`, `Consultant`, `Assistant`, `Facilitator`, `Agent`, `Representative`, `Strategist`], last_name: { generic: `Abbott.Abernathy.Abshire.Adams.Altenwerth.Anderson.Ankunding.Armstrong.Auer.Aufderhar.Bahringer.Bailey.Balistreri.Barrows.Bartell.Bartoletti.Barton.Bashirian.Batz.Bauch.Baumbach.Bayer.Beahan.Beatty.Bechtelar.Becker.Bednar.Beer.Beier.Berge.Bergnaum.Bergstrom.Bernhard.Bernier.Bins.Blanda.Blick.Block.Bode.Boehm.Bogan.Bogisich.Borer.Bosco.Botsford.Boyer.Boyle.Bradtke.Brakus.Braun.Breitenberg.Brekke.Brown.Bruen.Buckridge.Carroll.Carter.Cartwright.Casper.Cassin.Champlin.Christiansen.Cole.Collier.Collins.Conn.Connelly.Conroy.Considine.Corkery.Cormier.Corwin.Cremin.Crist.Crona.Cronin.Crooks.Cruickshank.Cummerata.Cummings.D'Amore.Dach.Daniel.Dare.Daugherty.Davis.Deckow.Denesik.Dibbert.Dickens.Dicki.Dickinson.Dietrich.Donnelly.Dooley.Douglas.Doyle.DuBuque.Durgan.Ebert.Effertz.Emard.Emmerich.Erdman.Ernser.Fadel.Fahey.Farrell.Fay.Feeney.Feest.Feil.Ferry.Fisher.Flatley.Frami.Franecki.Franey.Friesen.Fritsch.Funk.Gerhold.Gerlach.Gibson.Gislason.Gleason.Gleichner.Glover.Goldner.Goodwin.Gorczany.Gottlieb.Goyette.Grady.Graham.Grant.Green.Greenfelder.Greenholt.Grimes.Gulgowski.Gusikowski.Gutkowski.Gutmann.Haag.Hackett.Hagenes.Hahn.Haley.Halvorson.Hamill.Hammes.Hand.Hane.Hansen.Harber.Harris.Hartmann.Harvey.Hauck.Hayes.Heaney.Heathcote.Hegmann.Heidenreich.Heller.Herman.Hermann.Hermiston.Herzog.Hessel.Hettinger.Hickle.Hilll.Hills.Hilpert.Hintz.Hirthe.Hodkiewicz.Hoeger.Homenick.Hoppe.Howe.Howell.Hudson.Huel.Huels.Hyatt.Jacobi.Jacobs.Jacobson.Jakubowski.Jaskolski.Jast.Jenkins.Jerde.Johns.Johnson.Johnston.Jones.Kassulke.Kautzer.Keebler.Keeling.Kemmer.Kerluke.Kertzmann.Kessler.Kiehn.Kihn.Kilback.King.Kirlin.Klein.Kling.Klocko.Koch.Koelpin.Koepp.Kohler.Konopelski.Koss.Kovacek.Kozey.Krajcik.Kreiger.Kris.Kshlerin.Kub.Kuhic.Kuhlman.Kuhn.Kulas.Kunde.Kunze.Kuphal.Kutch.Kuvalis.Labadie.Lakin.Lang.Langosh.Langworth.Larkin.Larson.Leannon.Lebsack.Ledner.Leffler.Legros.Lehner.Lemke.Lesch.Leuschke.Lind.Lindgren.Littel.Little.Lockman.Lowe.Lubowitz.Lueilwitz.Luettgen.Lynch.MacGyver.Macejkovic.Maggio.Mann.Mante.Marks.Marquardt.Marvin.Mayer.Mayert.McClure.McCullough.McDermott.McGlynn.McKenzie.McLaughlin.Medhurst.Mertz.Metz.Miller.Mills.Mitchell.Moen.Mohr.Monahan.Moore.Morar.Morissette.Mosciski.Mraz.Mueller.Muller.Murazik.Murphy.Murray.Nader.Nicolas.Nienow.Nikolaus.Nitzsche.Nolan.O'Connell.O'Conner.O'Hara.O'Keefe.O'Kon.O'Reilly.Oberbrunner.Okuneva.Olson.Ondricka.Orn.Ortiz.Osinski.Pacocha.Padberg.Pagac.Parisian.Parker.Paucek.Pfannerstill.Pfeffer.Pollich.Pouros.Powlowski.Predovic.Price.Prohaska.Prosacco.Purdy.Quigley.Quitzon.Rath.Ratke.Rau.Raynor.Reichel.Reichert.Reilly.Reinger.Rempel.Renner.Reynolds.Rice.Rippin.Ritchie.Robel.Roberts.Rodriguez.Rogahn.Rohan.Rolfson.Romaguera.Roob.Rosenbaum.Rowe.Ruecker.Runolfsdottir.Runolfsson.Runte.Russel.Rutherford.Ryan.Sanford.Satterfield.Sauer.Sawayn.Schaden.Schaefer.Schamberger.Schiller.Schimmel.Schinner.Schmeler.Schmidt.Schmitt.Schneider.Schoen.Schowalter.Schroeder.Schulist.Schultz.Schumm.Schuppe.Schuster.Senger.Shanahan.Shields.Simonis.Sipes.Skiles.Smith.Smitham.Spencer.Spinka.Sporer.Stamm.Stanton.Stark.Stehr.Steuber.Stiedemann.Stokes.Stoltenberg.Stracke.Streich.Stroman.Strosin.Swaniawski.Swift.Terry.Thiel.Thompson.Tillman.Torp.Torphy.Towne.Toy.Trantow.Tremblay.Treutel.Tromp.Turcotte.Turner.Ullrich.Upton.Vandervort.Veum.Volkman.Von.VonRueden.Waelchi.Walker.Walsh.Walter.Ward.Waters.Watsica.Weber.Wehner.Weimann.Weissnat.Welch.West.White.Wiegand.Wilderman.Wilkinson.Will.Williamson.Willms.Windler.Wintheiser.Wisoky.Wisozk.Witting.Wiza.Wolf.Wolff.Wuckert.Wunsch.Wyman.Yost.Yundt.Zboncak.Zemlak.Ziemann.Zieme.Zulauf`.split(`.`) }, last_name_pattern: { generic: [{ value: `{{person.last_name.generic}}`, weight: 95 }, { value: `{{person.last_name.generic}}-{{person.last_name.generic}}`, weight: 5 }] }, middle_name: { generic: `Addison.Angel.Arden.Arya.Ashton.August.Avery.Bailey.Bay.Blair.Blue.Bowie.Caylen.Dakota.Devine.Devon.Dior.Eden.Elein.Eyre.Finley.Flynn.France.Francis.Gray.Greer.Harley.Harper.Isa.Jaden.Jamie.Jazz.Jess.Jordan.Journey.Jude.Jules.Justice.Kai.Kendall.Kennedy.Lake.Lane.Lee.London.Lou.Love.Lucky.Lux.Marlowe.Medusa.Monroe.Morgan.Nova.Ocean.Phoenix.Quinn.Rain.Raye.Reagan.Rebel.Reese.Regan.Reign.Riley.River.Robin.Rowan.Royal.Sage.Saturn.Scout.Shiloh.Sky.Skylar.Skyler.Storm.Taylen.Taylor.Teagan.Winter.Zion.Zyair`.split(`.`), female: `Abigail.Adele.Alice.Alisha.Amber.Amelia.Amora.Anaïs.Anika.Anise.Annabel.Anne.Aphrodite.Aretha.Aster.Audrey.Bailee.Belle.Beth.Billie.Blanche.Bree.Brielle.Brienne.Brooke.Brooklyn.Caleen.Candice.Caprice.Carelyn.Celine.Cerise.Cia.Claire.Claudia.Clementine.Coral.Coraline.Dahlia.Dawn.Della.Demi.Denise.Diana.Ebony.Eleanor.Elizabeth.Ellen.Elodie.Eloise.Ember.Emma.Erin.Faith.Farrah.Fawn.Fayre.Fern.Frida.Genisis.Georgia.Grace.Gwen.Hazel.Helen.Hippolyta.Holly.Hope.Imani.Iowa.Ireland.Irene.Iris.Isla.Ivy.Jade.Jane.Jean.Jo.Joan.Jolie.Josie.Joy.Juliet.Juniper.Kali.Karma.Karsyn.Kat.Kate.Keva.Kylie.Lark.Layla.Leigh.Leona.Leslie.Lexi.Louise.Luna.Lynn.Lyric.Maddie.Mae.Marie.Matilda.Maude.Maybel.Meadow.Mercy.Michelle.Mirabel.Nalia.Naomi.Olive.Paige.Pearl.Penelope.Rae.Raven.Rose.Ruth.Rylie.Sasha.Serena.Sofia.Sophia.Sue.Suzanne.Sydney.Tempest.Tenley.Thea.Trinity.Valerie.Venus.Vera.Violet.Willow.Xena.Zaylee.Zoe`.split(`.`), male: `Ace.Aiden.Alex.Alexander.Ander.Anderson.Angelou.Anthony.Asher.Austin.Aziel.Bear.Beckham.Benjamin.Blaise.Blake.Buddy.Calvin.Cameron.Carter.Charles.Charlie.Christopher.Clyde.Cooper.Corey.Daniel.David.Denver.Drew.Dylan.Elijah.Elliott.Ellis.Emerson.Ethan.Ezra.Fletcher.Gabriel.Grayson.Gus.Hank.Harrison.Hayden.Hendrix.Henry.Houston.Hudson.Hugh.Isaac.Jack.Jackson.Jacob.Jakobe.James.Jaxon.Jaxtyn.Jayden.Jett.John.Joseph.Josiah.Julian.Julien.Kenji.Kobe.Kyle.Kylo.Lennon.Leo.Levi.Liam.Lincoln.Logan.Louis.Lucas.Luke.Mason.Mateo.Matthew.Maverick.Micah.Michael.Nico.Nixon.Noah.North.Oliver.Otis.Otto.Owen.Ozzy.Parker.Pax.Ray.Reeve.Rocky.Rory.Ryan.Sam.Samuel.Sawyer.Sebastian.Shawn.Sonny.Teddy.Theo.Theodore.Thomas.Truett.Walter.Warren.Watson.William.Wison.Wyatt.Ziggy`.split(`.`) }, name: [{ value: `{{person.firstName}} {{person.lastName}}`, weight: 49 }, { value: `{{person.prefix}} {{person.firstName}} {{person.lastName}}`, weight: 7 }, { value: `{{person.firstName}} {{person.lastName}} {{person.suffix}}`, weight: 7 }, { value: `{{person.prefix}} {{person.firstName}} {{person.lastName}} {{person.suffix}}`, weight: 1 }], prefix: { generic: [`Dr.`], female: [`Miss`, `Mrs.`, `Ms.`], male: [`Mr.`] }, sex: [`female`, `male`], suffix: [`Jr.`, `Sr.`, `I`, `II`, `III`, `IV`, `V`, `MD`, `DDS`, `PhD`, `DVM`], western_zodiac_sign: [`Aquarius`, `Pisces`, `Aries`, `Taurus`, `Gemini`, `Cancer`, `Leo`, `Virgo`, `Libra`, `Scorpio`, `Sagittarius`, `Capricorn`] }, phone_number: { format: { human: [`!##-!##-####`, `!##-!##-#### x###`, `!##-!##-#### x####`, `!##-!##-#### x#####`, `!##.!##.####`, `!##.!##.#### x###`, `!##.!##.#### x####`, `!##.!##.#### x#####`, `(!##) !##-####`, `(!##) !##-#### x###`, `(!##) !##-#### x####`, `(!##) !##-#### x#####`, `1-!##-!##-####`, `1-!##-!##-#### x###`, `1-!##-!##-#### x####`, `1-!##-!##-#### x#####`], international: [`+1!##!######`], mobile: [`!##!######`], national: [`(!##) !##-####`] } }, science: { chemical_element: [{ symbol: `H`, name: `Hydrogen`, atomicNumber: 1 }, { symbol: `He`, name: `Helium`, atomicNumber: 2 }, { symbol: `Li`, name: `Lithium`, atomicNumber: 3 }, { symbol: `Be`, name: `Beryllium`, atomicNumber: 4 }, { symbol: `B`, name: `Boron`, atomicNumber: 5 }, { symbol: `C`, name: `Carbon`, atomicNumber: 6 }, { symbol: `N`, name: `Nitrogen`, atomicNumber: 7 }, { symbol: `O`, name: `Oxygen`, atomicNumber: 8 }, { symbol: `F`, name: `Fluorine`, atomicNumber: 9 }, { symbol: `Ne`, name: `Neon`, atomicNumber: 10 }, { symbol: `Na`, name: `Sodium`, atomicNumber: 11 }, { symbol: `Mg`, name: `Magnesium`, atomicNumber: 12 }, { symbol: `Al`, name: `Aluminium`, atomicNumber: 13 }, { symbol: `Si`, name: `Silicon`, atomicNumber: 14 }, { symbol: `P`, name: `Phosphorus`, atomicNumber: 15 }, { symbol: `S`, name: `Sulfur`, atomicNumber: 16 }, { symbol: `Cl`, name: `Chlorine`, atomicNumber: 17 }, { symbol: `Ar`, name: `Argon`, atomicNumber: 18 }, { symbol: `K`, name: `Potassium`, atomicNumber: 19 }, { symbol: `Ca`, name: `Calcium`, atomicNumber: 20 }, { symbol: `Sc`, name: `Scandium`, atomicNumber: 21 }, { symbol: `Ti`, name: `Titanium`, atomicNumber: 22 }, { symbol: `V`, name: `Vanadium`, atomicNumber: 23 }, { symbol: `Cr`, name: `Chromium`, atomicNumber: 24 }, { symbol: `Mn`, name: `Manganese`, atomicNumber: 25 }, { symbol: `Fe`, name: `Iron`, atomicNumber: 26 }, { symbol: `Co`, name: `Cobalt`, atomicNumber: 27 }, { symbol: `Ni`, name: `Nickel`, atomicNumber: 28 }, { symbol: `Cu`, name: `Copper`, atomicNumber: 29 }, { symbol: `Zn`, name: `Zinc`, atomicNumber: 30 }, { symbol: `Ga`, name: `Gallium`, atomicNumber: 31 }, { symbol: `Ge`, name: `Germanium`, atomicNumber: 32 }, { symbol: `As`, name: `Arsenic`, atomicNumber: 33 }, { symbol: `Se`, name: `Selenium`, atomicNumber: 34 }, { symbol: `Br`, name: `Bromine`, atomicNumber: 35 }, { symbol: `Kr`, name: `Krypton`, atomicNumber: 36 }, { symbol: `Rb`, name: `Rubidium`, atomicNumber: 37 }, { symbol: `Sr`, name: `Strontium`, atomicNumber: 38 }, { symbol: `Y`, name: `Yttrium`, atomicNumber: 39 }, { symbol: `Zr`, name: `Zirconium`, atomicNumber: 40 }, { symbol: `Nb`, name: `Niobium`, atomicNumber: 41 }, { symbol: `Mo`, name: `Molybdenum`, atomicNumber: 42 }, { symbol: `Tc`, name: `Technetium`, atomicNumber: 43 }, { symbol: `Ru`, name: `Ruthenium`, atomicNumber: 44 }, { symbol: `Rh`, name: `Rhodium`, atomicNumber: 45 }, { symbol: `Pd`, name: `Palladium`, atomicNumber: 46 }, { symbol: `Ag`, name: `Silver`, atomicNumber: 47 }, { symbol: `Cd`, name: `Cadmium`, atomicNumber: 48 }, { symbol: `In`, name: `Indium`, atomicNumber: 49 }, { symbol: `Sn`, name: `Tin`, atomicNumber: 50 }, { symbol: `Sb`, name: `Antimony`, atomicNumber: 51 }, { symbol: `Te`, name: `Tellurium`, atomicNumber: 52 }, { symbol: `I`, name: `Iodine`, atomicNumber: 53 }, { symbol: `Xe`, name: `Xenon`, atomicNumber: 54 }, { symbol: `Cs`, name: `Caesium`, atomicNumber: 55 }, { symbol: `Ba`, name: `Barium`, atomicNumber: 56 }, { symbol: `La`, name: `Lanthanum`, atomicNumber: 57 }, { symbol: `Ce`, name: `Cerium`, atomicNumber: 58 }, { symbol: `Pr`, name: `Praseodymium`, atomicNumber: 59 }, { symbol: `Nd`, name: `Neodymium`, atomicNumber: 60 }, { symbol: `Pm`, name: `Promethium`, atomicNumber: 61 }, { symbol: `Sm`, name: `Samarium`, atomicNumber: 62 }, { symbol: `Eu`, name: `Europium`, atomicNumber: 63 }, { symbol: `Gd`, name: `Gadolinium`, atomicNumber: 64 }, { symbol: `Tb`, name: `Terbium`, atomicNumber: 65 }, { symbol: `Dy`, name: `Dysprosium`, atomicNumber: 66 }, { symbol: `Ho`, name: `Holmium`, atomicNumber: 67 }, { symbol: `Er`, name: `Erbium`, atomicNumber: 68 }, { symbol: `Tm`, name: `Thulium`, atomicNumber: 69 }, { symbol: `Yb`, name: `Ytterbium`, atomicNumber: 70 }, { symbol: `Lu`, name: `Lutetium`, atomicNumber: 71 }, { symbol: `Hf`, name: `Hafnium`, atomicNumber: 72 }, { symbol: `Ta`, name: `Tantalum`, atomicNumber: 73 }, { symbol: `W`, name: `Tungsten`, atomicNumber: 74 }, { symbol: `Re`, name: `Rhenium`, atomicNumber: 75 }, { symbol: `Os`, name: `Osmium`, atomicNumber: 76 }, { symbol: `Ir`, name: `Iridium`, atomicNumber: 77 }, { symbol: `Pt`, name: `Platinum`, atomicNumber: 78 }, { symbol: `Au`, name: `Gold`, atomicNumber: 79 }, { symbol: `Hg`, name: `Mercury`, atomicNumber: 80 }, { symbol: `Tl`, name: `Thallium`, atomicNumber: 81 }, { symbol: `Pb`, name: `Lead`, atomicNumber: 82 }, { symbol: `Bi`, name: `Bismuth`, atomicNumber: 83 }, { symbol: `Po`, name: `Polonium`, atomicNumber: 84 }, { symbol: `At`, name: `Astatine`, atomicNumber: 85 }, { symbol: `Rn`, name: `Radon`, atomicNumber: 86 }, { symbol: `Fr`, name: `Francium`, atomicNumber: 87 }, { symbol: `Ra`, name: `Radium`, atomicNumber: 88 }, { symbol: `Ac`, name: `Actinium`, atomicNumber: 89 }, { symbol: `Th`, name: `Thorium`, atomicNumber: 90 }, { symbol: `Pa`, name: `Protactinium`, atomicNumber: 91 }, { symbol: `U`, name: `Uranium`, atomicNumber: 92 }, { symbol: `Np`, name: `Neptunium`, atomicNumber: 93 }, { symbol: `Pu`, name: `Plutonium`, atomicNumber: 94 }, { symbol: `Am`, name: `Americium`, atomicNumber: 95 }, { symbol: `Cm`, name: `Curium`, atomicNumber: 96 }, { symbol: `Bk`, name: `Berkelium`, atomicNumber: 97 }, { symbol: `Cf`, name: `Californium`, atomicNumber: 98 }, { symbol: `Es`, name: `Einsteinium`, atomicNumber: 99 }, { symbol: `Fm`, name: `Fermium`, atomicNumber: 100 }, { symbol: `Md`, name: `Mendelevium`, atomicNumber: 101 }, { symbol: `No`, name: `Nobelium`, atomicNumber: 102 }, { symbol: `Lr`, name: `Lawrencium`, atomicNumber: 103 }, { symbol: `Rf`, name: `Rutherfordium`, atomicNumber: 104 }, { symbol: `Db`, name: `Dubnium`, atomicNumber: 105 }, { symbol: `Sg`, name: `Seaborgium`, atomicNumber: 106 }, { symbol: `Bh`, name: `Bohrium`, atomicNumber: 107 }, { symbol: `Hs`, name: `Hassium`, atomicNumber: 108 }, { symbol: `Mt`, name: `Meitnerium`, atomicNumber: 109 }, { symbol: `Ds`, name: `Darmstadtium`, atomicNumber: 110 }, { symbol: `Rg`, name: `Roentgenium`, atomicNumber: 111 }, { symbol: `Cn`, name: `Copernicium`, atomicNumber: 112 }, { symbol: `Nh`, name: `Nihonium`, atomicNumber: 113 }, { symbol: `Fl`, name: `Flerovium`, atomicNumber: 114 }, { symbol: `Mc`, name: `Moscovium`, atomicNumber: 115 }, { symbol: `Lv`, name: `Livermorium`, atomicNumber: 116 }, { symbol: `Ts`, name: `Tennessine`, atomicNumber: 117 }, { symbol: `Og`, name: `Oganesson`, atomicNumber: 118 }], unit: [{ name: `meter`, symbol: `m` }, { name: `second`, symbol: `s` }, { name: `mole`, symbol: `mol` }, { name: `ampere`, symbol: `A` }, { name: `kelvin`, symbol: `K` }, { name: `candela`, symbol: `cd` }, { name: `kilogram`, symbol: `kg` }, { name: `radian`, symbol: `rad` }, { name: `hertz`, symbol: `Hz` }, { name: `newton`, symbol: `N` }, { name: `pascal`, symbol: `Pa` }, { name: `joule`, symbol: `J` }, { name: `watt`, symbol: `W` }, { name: `coulomb`, symbol: `C` }, { name: `volt`, symbol: `V` }, { name: `ohm`, symbol: `Ω` }, { name: `tesla`, symbol: `T` }, { name: `degree Celsius`, symbol: `°C` }, { name: `lumen`, symbol: `lm` }, { name: `becquerel`, symbol: `Bq` }, { name: `gray`, symbol: `Gy` }, { name: `sievert`, symbol: `Sv` }, { name: `steradian`, symbol: `sr` }, { name: `farad`, symbol: `F` }, { name: `siemens`, symbol: `S` }, { name: `weber`, symbol: `Wb` }, { name: `henry`, symbol: `H` }, { name: `lux`, symbol: `lx` }, { name: `katal`, symbol: `kat` }] }, team: { creature: `ants.bats.bears.bees.birds.buffalo.cats.chickens.cattle.dogs.dolphins.ducks.elephants.fishes.foxes.frogs.geese.goats.horses.kangaroos.lions.monkeys.owls.oxen.penguins.people.pigs.rabbits.sheep.tigers.whales.wolves.zebras.banshees.crows.black cats.chimeras.ghosts.conspirators.dragons.dwarves.elves.enchanters.exorcists.sons.foes.giants.gnomes.goblins.gooses.griffins.lycanthropes.nemesis.ogres.oracles.prophets.sorcerors.spiders.spirits.vampires.warlocks.vixens.werewolves.witches.worshipers.zombies.druids`.split(`.`), name: [`{{location.state}} {{team.creature}}`] }, vehicle: { bicycle_type: [`Adventure Road Bicycle`, `BMX Bicycle`, `City Bicycle`, `Cruiser Bicycle`, `Cyclocross Bicycle`, `Dual-Sport Bicycle`, `Fitness Bicycle`, `Flat-Foot Comfort Bicycle`, `Folding Bicycle`, `Hybrid Bicycle`, `Mountain Bicycle`, `Recumbent Bicycle`, `Road Bicycle`, `Tandem Bicycle`, `Touring Bicycle`, `Track/Fixed-Gear Bicycle`, `Triathlon/Time Trial Bicycle`, `Tricycle`], fuel: [`Diesel`, `Electric`, `Gasoline`, `Hybrid`], manufacturer: `Aston Martin.Audi.BMW.BYD.Bentley.Bugatti.Cadillac.Chevrolet.Chrysler.Citroën.Dodge.Ferrari.Fiat.Ford.Honda.Hyundai.Jaguar.Jeep.Kia.Lamborghini.Land Rover.MG.Mahindra & Mahindra.Maruti.Maserati.Mazda.Mercedes Benz.Mini.Mitsubishi.NIO.Nissan.Peugeot.Polestar.Porsche.Renault.Rivian.Rolls Royce.Skoda.Smart.Subaru.Suzuki.Tata.Tesla.Toyota.Vauxhall.Volkswagen.Volvo`.split(`.`), model: `1.2.911.A4.A8.ATS.Accord.Alpine.Altima.Aventador.Beetle.CTS.CX-9.Camaro.Camry.Challenger.Charger.Civic.Colorado.Corvette.Countach.Cruze.Durango.El Camino.Element.Escalade.Expedition.Explorer.F-150.Fiesta.Focus.Fortwo.Golf.Grand Caravan.Grand Cherokee.Impala.Jetta.Land Cruiser.LeBaron.Malibu.Model 3.Model S.Model T.Model X.Model Y.Murcielago.Mustang.PT Cruiser.Prius.Ranchero.Roadster.Sentra.Silverado.Spyder.Taurus.V90.Volt.Wrangler.XC90.XTS`.split(`.`), type: [`Cargo Van`, `Convertible`, `Coupe`, `Crew Cab Pickup`, `Extended Cab Pickup`, `Hatchback`, `Minivan`, `Passenger Van`, `SUV`, `Sedan`, `Wagon`] }, word: { adjective: `abandoned.able.acceptable.acclaimed.accomplished.accurate.aching.acidic.actual.admired.adolescent.advanced.affectionate.afraid.aged.aggravating.aggressive.agile.agitated.agreeable.ajar.alarmed.alert.alienated.alive.all.altruistic.amazing.ambitious.ample.amused.angelic.anguished.animated.annual.another.antique.any.apprehensive.appropriate.apt.arid.artistic.ashamed.assured.astonishing.athletic.austere.authentic.authorized.avaricious.average.aware.awesome.awful.babyish.back.bad.baggy.bare.basic.beloved.beneficial.best.better.big.biodegradable.bitter.black.black-and-white.blank.blaring.bleak.blind.blond.blue.blushing.bogus.boiling.bony.boring.bossy.both.bouncy.bowed.brave.breakable.bright.brilliant.brisk.broken.brown.bruised.bulky.burdensome.burly.bustling.busy.buttery.buzzing.calculating.candid.carefree.careless.caring.cautious.cavernous.celebrated.charming.cheap.cheerful.chilly.chubby.circular.classic.clean.clear.clear-cut.close.closed.cloudy.clueless.clumsy.cluttered.coarse.colorful.colorless.colossal.comfortable.common.compassionate.competent.complete.complicated.concerned.concrete.confused.considerate.content.cool.cooperative.coordinated.corny.corrupt.courageous.courteous.crafty.crazy.creamy.creative.criminal.critical.crooked.crowded.cruel.crushing.cuddly.cultivated.cumbersome.curly.cute.damaged.damp.dapper.dark.darling.dazzling.dead.deadly.deafening.dearest.decent.decisive.deep.defenseless.defensive.deficient.definite.definitive.delectable.delicious.delirious.dense.dental.dependable.dependent.descriptive.deserted.determined.devoted.different.difficult.digital.diligent.dim.direct.dirty.discrete.disloyal.dismal.distant.distinct.distorted.doting.downright.drab.dramatic.dreary.dual.dull.dutiful.each.early.earnest.easy.ecstatic.edible.educated.elastic.elderly.electric.elegant.elementary.elliptical.eminent.emotional.empty.enchanted.enchanting.energetic.enlightened.enraged.entire.equatorial.essential.esteemed.ethical.everlasting.every.evil.exalted.excellent.excitable.excited.exhausted.exotic.expensive.experienced.expert.extra-large.extroverted.failing.faint.fair.fake.familiar.fantastic.far.far-flung.far-off.faraway.fat.fatal.fatherly.favorable.favorite.fearless.feline.filthy.fine.finished.firm.first.firsthand.fixed.flashy.flawed.flawless.flickering.flimsy.flowery.fluffy.flustered.focused.fond.foolhardy.foolish.forceful.formal.forsaken.fortunate.fragrant.frail.frank.free.french.frequent.friendly.frightened.frilly.frivolous.frizzy.front.frozen.frugal.fruitful.functional.funny.fussy.fuzzy.gaseous.general.gentle.genuine.gifted.gigantic.giving.glaring.glass.gleaming.glittering.gloomy.glorious.glossy.glum.golden.good.good-natured.gorgeous.graceful.gracious.grandiose.granular.grave.gray.great.greedy.grim.grimy.gripping.grizzled.grouchy.grounded.growing.grown.grubby.gruesome.grumpy.guilty.gullible.gummy.hairy.handsome.handy.happy.happy-go-lucky.hard-to-find.harmful.hasty.hateful.haunting.heartfelt.heavenly.heavy.hefty.helpful.helpless.hidden.hoarse.hollow.homely.honorable.honored.hopeful.hospitable.hot.huge.humble.humiliating.hungry.hurtful.husky.icy.ideal.idealistic.idolized.ignorant.ill.ill-fated.illiterate.illustrious.imaginary.imaginative.immaculate.immediate.immense.impartial.impassioned.impeccable.impish.impolite.important.impossible.impractical.impressionable.impressive.improbable.impure.inborn.incomparable.incomplete.inconsequential.indelible.indolent.inexperienced.infamous.infatuated.inferior.infinite.informal.innocent.insecure.insidious.insignificant.insistent.instructive.intelligent.intent.interesting.internal.international.intrepid.ironclad.irresponsible.jagged.jam-packed.jaunty.jealous.jittery.joyful.joyous.jubilant.judicious.juicy.jumbo.junior.juvenile.kaleidoscopic.key.knotty.knowledgeable.known.kooky.kosher.lanky.last.lasting.late.lavish.lawful.lazy.leading.lean.left.legal.light.lighthearted.likable.likely.limited.limp.limping.linear.lined.liquid.little.live.lively.livid.lone.lonely.long.long-term.lost.lovable.lovely.low.lucky.lumbering.lumpy.lustrous.mad.made-up.magnificent.majestic.major.male.mammoth.married.marvelous.massive.mature.meager.mealy.mean.measly.meaty.mediocre.medium.memorable.menacing.merry.messy.metallic.mild.milky.mindless.minor.minty.miserable.miserly.misguided.mixed.moist.monstrous.monthly.monumental.moral.motionless.muddy.muffled.multicolored.mundane.murky.mushy.musty.muted.mysterious.narrow.natural.naughty.nautical.near.neat.necessary.needy.negative.neglected.negligible.neighboring.nervous.new.next.nice.nifty.nimble.nippy.nocturnal.normal.noted.noteworthy.noxious.numb.nutritious.obedient.oblong.obvious.odd.oddball.official.oily.old.old-fashioned.only.optimal.optimistic.orange.orderly.ordinary.ornate.ornery.other.our.outgoing.outlandish.outlying.outrageous.outstanding.oval.overcooked.overdue.palatable.pale.paltry.parallel.parched.partial.passionate.pastel.peaceful.peppery.perfumed.perky.personal.pertinent.pessimistic.petty.phony.physical.pink.pitiful.plain.pleasant.pleased.pleasing.plump.pointed.pointless.polished.polite.political.poor.portly.posh.possible.potable.powerful.powerless.practical.precious.present.prestigious.pretty.pricey.prickly.primary.prime.private.probable.productive.profitable.profuse.proper.proud.prudent.punctual.puny.pure.purple.pushy.putrid.puzzled.qualified.quarrelsome.quarterly.queasy.querulous.questionable.quick.quick-witted.quiet.quintessential.quixotic.radiant.ragged.rapid.rare.raw.realistic.reasonable.recent.reckless.rectangular.red.reflecting.regal.regular.remarkable.remorseful.repentant.respectful.responsible.rewarding.rich.right.rigid.ripe.roasted.robust.rosy.rotating.rotten.rough.round.rowdy.royal.rubbery.ruddy.rundown.runny.rural.rusty.sad.salty.same.sandy.sarcastic.sardonic.scaly.scared.scary.scented.scientific.scornful.scratchy.second.second-hand.secondary.secret.self-assured.self-reliant.selfish.sentimental.separate.serene.serpentine.severe.shabby.shadowy.shady.shallow.shameful.shameless.shimmering.shiny.shocked.shoddy.short.short-term.showy.shrill.shy.sick.silent.silky.silver.similar.simple.simplistic.sinful.sizzling.skeletal.sleepy.slight.slimy.slow.slushy.small.smart.smoggy.smooth.smug.snappy.snarling.sneaky.sniveling.snoopy.sociable.soft.soggy.somber.some.sophisticated.sore.sorrowful.soulful.soupy.sour.spanish.sparkling.sparse.specific.speedy.spherical.spiffy.spirited.spiteful.splendid.spotless.square.squeaky.squiggly.stable.staid.stained.stale.standard.stark.steel.steep.sticky.stiff.stingy.stormy.straight.strange.strict.strident.striking.strong.stunning.stupendous.sturdy.stylish.subdued.submissive.substantial.subtle.suburban.sudden.sugary.sunny.super.superb.superficial.superior.supportive.sure-footed.surprised.svelte.sweet.swift.talkative.tall.tame.tangible.tasty.tattered.taut.tedious.teeming.tempting.tender.tense.tepid.terrible.that.these.thick.thin.thorny.thorough.those.thrifty.tidy.tight.timely.tinted.tiny.tired.torn.total.tough.tragic.trained.triangular.tricky.trim.trivial.troubled.true.trusting.trustworthy.trusty.turbulent.twin.ugly.ultimate.unaware.uncomfortable.uncommon.unconscious.understated.uneven.unfinished.unfit.unfortunate.unhappy.unhealthy.uniform.unimportant.unique.unkempt.unknown.unlawful.unlined.unlucky.unpleasant.unrealistic.unripe.unruly.unselfish.unsightly.unsteady.unsung.untidy.untimely.untried.untrue.unused.unusual.unwelcome.unwieldy.unwilling.unwritten.upbeat.upright.upset.urban.usable.useless.utilized.utter.vague.vain.valuable.variable.vast.velvety.vengeful.vibrant.victorious.violent.vivacious.vivid.voluminous.warlike.warm.warmhearted.warped.wasteful.waterlogged.watery.wavy.wealthy.weary.webbed.wee.weekly.weighty.weird.well-documented.well-groomed.well-lit.well-made.well-off.well-to-do.well-worn.which.whimsical.whirlwind.whispered.white.whole.whopping.wicked.wide.wide-eyed.wiggly.willing.wilted.winding.windy.winged.wise.witty.wobbly.woeful.wonderful.wordy.worldly.worse.worst.worthless.worthwhile.worthy.wrathful.wretched.writhing.wrong.wry.yearly.yellow.yellowish.young.youthful.yummy.zany.zealous.zesty`.split(`.`), adverb: `abnormally.absentmindedly.accidentally.acidly.actually.adventurously.afterwards.almost.always.angrily.annually.anxiously.arrogantly.awkwardly.badly.bashfully.beautifully.bitterly.bleakly.blindly.blissfully.boastfully.boldly.bravely.briefly.brightly.briskly.broadly.busily.calmly.carefully.carelessly.cautiously.certainly.cheerfully.clearly.cleverly.closely.coaxingly.colorfully.commonly.continually.coolly.correctly.courageously.crossly.cruelly.curiously.daily.daintily.dearly.deceivingly.deeply.defiantly.deliberately.delightfully.diligently.dimly.doubtfully.dreamily.easily.elegantly.energetically.enormously.enthusiastically.equally.especially.even.evenly.eventually.exactly.excitedly.extremely.fairly.faithfully.famously.far.fast.fatally.ferociously.fervently.fiercely.fondly.foolishly.fortunately.frankly.frantically.freely.frenetically.frightfully.fully.furiously.generally.generously.gently.gladly.gleefully.gracefully.gratefully.greatly.greedily.happily.hastily.healthily.heavily.helpfully.helplessly.highly.honestly.hopelessly.hourly.hungrily.immediately.innocently.inquisitively.instantly.intensely.intently.interestingly.inwardly.irritably.jaggedly.jealously.joshingly.jovially.joyfully.joyously.jubilantly.judgementally.justly.keenly.kiddingly.kindheartedly.kindly.kissingly.knavishly.knottily.knowingly.knowledgeably.kookily.lazily.less.lightly.likely.limply.lively.loftily.longingly.loosely.loudly.lovingly.loyally.madly.majestically.meaningfully.mechanically.merrily.miserably.mockingly.monthly.more.mortally.mostly.mysteriously.naturally.nearly.neatly.needily.nervously.never.nicely.noisily.not.obediently.obnoxiously.oddly.offensively.officially.often.only.openly.optimistically.overconfidently.owlishly.painfully.partially.patiently.perfectly.physically.playfully.politely.poorly.positively.potentially.powerfully.promptly.properly.punctually.quaintly.quarrelsomely.queasily.questionably.questioningly.quicker.quickly.quietly.quirkily.quizzically.rapidly.rarely.readily.really.reassuringly.recklessly.regularly.reluctantly.repeatedly.reproachfully.restfully.righteously.rightfully.rigidly.roughly.rudely.sadly.safely.scarcely.scarily.searchingly.sedately.seemingly.seldom.selfishly.separately.seriously.shakily.sharply.sheepishly.shrilly.shyly.silently.sleepily.slowly.smoothly.softly.solemnly.solidly.sometimes.soon.speedily.stealthily.sternly.strictly.successfully.suddenly.surprisingly.suspiciously.sweetly.swiftly.sympathetically.tenderly.tensely.terribly.thankfully.thoroughly.thoughtfully.tightly.tomorrow.too.tremendously.triumphantly.truly.truthfully.ultimately.unabashedly.unaccountably.unbearably.unethically.unexpectedly.unfortunately.unimpressively.unnaturally.unnecessarily.upbeat.upliftingly.upright.upside-down.upward.upwardly.urgently.usefully.uselessly.usually.utterly.vacantly.vaguely.vainly.valiantly.vastly.verbally.very.viciously.victoriously.violently.vivaciously.voluntarily.warmly.weakly.wearily.well.wetly.wholly.wildly.willfully.wisely.woefully.wonderfully.worriedly.wrongly.yawningly.yearly.yearningly.yesterday.yieldingly.youthfully`.split(`.`), conjunction: `after.although.and.as.because.before.but.consequently.even.finally.for.furthermore.hence.how.however.if.inasmuch.incidentally.indeed.instead.lest.likewise.meanwhile.nor.now.once.or.provided.since.so.supposing.than.that.though.till.unless.until.what.when.whenever.where.whereas.wherever.whether.which.while.who.whoever.whose.why.yet`.split(`.`), interjection: `yuck.oh.phooey.blah.boo.whoa.yowza.huzzah.boohoo.fooey.geez.pfft.ew.ah.yum.brr.hm.yahoo.aha.woot.drat.gah.meh.psst.aw.ugh.yippee.eek.gee.bah.gadzooks.duh.ha.mmm.ouch.phew.ack.uh-huh.gosh.hmph.pish.zowie.er.ick.oof.um`.split(`.`), noun: `CD.SUV.abacus.academics.accelerator.accompanist.account.accountability.acquaintance.ad.adaptation.address.adrenalin.adult.advancement.advertisement.adviser.affect.affiliate.aftermath.agreement.airbus.aircraft.airline.airmail.airman.airport.alb.alert.allegation.alliance.alligator.allocation.almighty.amendment.amnesty.analogy.angle.annual.antelope.anticodon.apparatus.appliance.approach.apricot.arcade.archaeology.armchair.armoire.asset.assist.atrium.attraction.availability.avalanche.awareness.babushka.backbone.backburn.bakeware.bandwidth.bar.barge.baritone.barracks.baseboard.basket.bathhouse.bathrobe.battle.begonia.behest.bell.bench.bend.beret.best-seller.bid.bidet.bin.birdbath.birdcage.birth.blight.blossom.blowgun.bob.bog.bonfire.bonnet.bookcase.bookend.boulevard.bourgeoisie.bowler.bowling.boyfriend.brace.bracelet.bran.breastplate.brief.brochure.brook.brush.bug.bump.bungalow.cafe.cake.calculus.cannon.cantaloupe.cap.cappelletti.captain.caption.carboxyl.cardboard.carnival.case.casement.cash.casket.cassava.castanet.catalyst.cauliflower.cellar.celsius.cemetery.ceramic.ceramics.certification.chainstay.chairperson.challenge.championship.chap.chapel.character.characterization.charlatan.charm.chasuble.cheese.cheetah.chiffonier.chops.chow.cinder.cinema.circumference.citizen.clamp.clavicle.cleaner.climb.co-producer.coal.coast.cod.coil.coin.coliseum.collaboration.collectivization.colon.colonialism.comestible.commercial.commodity.community.comparison.completion.complication.compromise.concentration.configuration.confusion.conservation.conservative.consistency.contractor.contrail.convection.conversation.cook.coordination.cop-out.cope.cork.cornet.corporation.corral.cosset.costume.couch.council.councilman.countess.courtroom.cow.creator.creature.crest.cricket.crocodile.cross-contamination.cruelty.cuckoo.curl.custody.custom.cutlet.cutover.cycle.daddy.dandelion.dash.daughter.dead.decision.deck.declaration.decongestant.decryption.deduction.deed.deer.defendant.density.department.dependency.deployment.depot.derby.descendant.descent.design.designation.desk.detective.devastation.developing.developmental.devil.diagram.digestive.digit.dime.director.disadvantage.disappointment.disclosure.disconnection.discourse.dish.disk.disposer.distinction.diver.diversity.dividend.divine.doing.doorpost.doubter.draft.draw.dream.dredger.dress.drive.drug.duffel.dulcimer.dusk.duster.dwell.e-mail.earth.ecliptic.ectoderm.edge.editor.effector.eggplant.electronics.elevation.elevator.elver.embarrassment.embossing.emergent.encouragement.entry.epic.equal.essence.eternity.ethyl.euphonium.event.exasperation.excess.executor.exhaust.expansion.expense.experience.exploration.extension.extent.exterior.eyebrow.eyeliner.farm.farmer.fat.fax.feather.fedora.fellow.fen.fencing.ferret.festival.fibre.filter.final.finding.finer.finger.fireplace.fisherman.fishery.fit.flame.flat.fledgling.flight.flint.flood.flu.fog.fold.folklore.follower.following.foodstuffs.footrest.forage.forager.forgery.fork.formamide.formation.formula.fort.fowl.fraudster.freckle.freezing.freight.fuel.fun.fund.fundraising.futon.gallery.galoshes.gastropod.gazebo.gerbil.ghost.giant.gift.giggle.glider.gloom.goat.godfather.godparent.going.goodwill.governance.government.gown.gradient.graffiti.grandpa.grandson.granny.grass.gray.gripper.grouper.guacamole.guard.guidance.guide.gym.gymnast.habit.haircut.halt.hamburger.hammock.handful.handle.handover.harp.haversack.hawk.heartache.heartbeat.heating.hello.help.hepatitis.heroine.hexagon.hierarchy.hippodrome.honesty.hoof.hope.horde.hornet.horst.hose.hospitalization.hovel.hovercraft.hubris.humidity.humor.hundred.hunger.hunt.husband.hutch.hydrant.hydrocarbon.hydrolyse.hydrolyze.hyena.hygienic.hyphenation.ice-cream.icebreaker.igloo.ignorance.illusion.impact.import.importance.impostor.in-joke.incandescence.independence.individual.information.injunction.innovation.insolence.inspection.instance.institute.instruction.instructor.integer.intellect.intent.interchange.interior.intervention.interviewer.invite.iridescence.issue.jacket.jazz.jellyfish.jet.jogging.joy.juggernaut.jump.jungle.junior.jury.kettledrum.kick.kielbasa.kinase.king.kiss.kit.knickers.knight.knitting.knuckle.label.labourer.lace.lady.lamp.language.larva.lashes.laughter.lava.lawmaker.lay.leading.league.legend.legging.legislature.lender.license.lid.lieu.lifestyle.lift.linseed.litter.loaf.lobster.longboat.lotion.lounge.louse.lox.loyalty.luck.lyre.maestro.mainstream.maintainer.majority.makeover.making.mallard.management.manner.mantua.marathon.march.marimba.marketplace.marksman.markup.marten.massage.masterpiece.mathematics.meadow.meal.meander.meatloaf.mechanic.median.membership.mentor.merit.metabolite.metal.middle.midwife.milestone.millet.minion.minister.minor.minority.mixture.mobility.molasses.mom.moment.monasticism.monocle.monster.morbidity.morning.mortise.mountain.mouser.mousse.mozzarella.muscat.mythology.napkin.necklace.nectarine.negotiation.nephew.nerve.netsuke.newsletter.newsprint.newsstand.nightlife.noon.nougat.nucleotidase.nudge.numeracy.numeric.nun.obedience.obesity.object.obligation.ocelot.octave.offset.oil.omelet.onset.opera.operating.optimal.orchid.order.ostrich.other.outlaw.outrun.outset.overcoat.overheard.overload.ownership.pacemaker.packaging.paintwork.palate.pants.pantyhose.papa.parade.parsnip.partridge.passport.pasta.patroller.pear.pearl.pecan.pendant.peninsula.pension.peony.pepper.perfection.permafrost.perp.petal.petticoat.pharmacopoeia.phrase.pick.piglet.pigpen.pigsty.pile.pillbox.pillow.pilot.pine.pinstripe.place.plain.planula.plastic.platter.platypus.pleasure.pliers.plugin.plumber.pneumonia.pocket-watch.poetry.polarisation.polyester.pomelo.pop.poppy.popularity.populist.porter.possession.postbox.precedent.premeditation.premier.premise.premium.pressure.presume.priesthood.printer.privilege.procurement.produce.programme.prohibition.promise.pronoun.providence.provider.provision.publication.publicity.pulse.punctuation.pupil.puppet.puritan.quart.quinoa.quit.railway.range.rationale.ravioli.rawhide.reach.reasoning.reboot.receptor.recommendation.reconsideration.recovery.redesign.relative.release.remark.reorganisation.repeat.replacement.reporter.representation.republican.request.requirement.reservation.resolve.resource.responsibility.restaurant.retention.retrospectivity.reward.ribbon.rim.riser.roadway.role.rosemary.roundabout.rubric.ruin.rule.runway.rust.safe.sailor.saloon.sand.sandbar.sanity.sarong.sauerkraut.saw.scaffold.scale.scarification.scenario.schedule.schnitzel.scholarship.scorn.scorpion.scout.scrap.scratch.seafood.seagull.seal.season.secrecy.secret.section.sediment.self-confidence.sermon.sesame.settler.shadowbox.shark.shipper.shore.shoulder.sideboard.siege.sightseeing.signature.silk.simple.singing.skean.skeleton.skyline.skyscraper.slide.slime.slipper.smog.smoke.sock.soliloquy.solution.solvency.someplace.sonar.sonata.sonnet.soup.soybean.space.spear.spirit.spork.sport.spring.sprinkles.squid.stall.starboard.statue.status.stay.steak.steeple.step.step-mother.sticker.stir-fry.stitcher.stock.stool.story.strait.stranger.strategy.straw.stump.subexpression.submitter.subsidy.substitution.suitcase.summary.summer.sunbeam.sundae.supplier.surface.sushi.suspension.sustenance.swanling.swath.sweatshop.swim.swine.swing.switch.switchboard.swordfish.synergy.t-shirt.tabletop.tackle.tail.tapioca.taro.tarragon.taxicab.teammate.technician.technologist.tectonics.tenant.tenement.tennis.tentacle.teriyaki.term.testimonial.testing.thigh.thongs.thorn.thread.thunderbolt.thyme.tinderbox.toaster.tomatillo.tomb.tomography.tool.tooth.toothbrush.toothpick.topsail.traditionalism.traffic.translation.transom.transparency.trash.travel.tray.trench.tribe.tributary.trick.trolley.tuba.tuber.tune-up.turret.tusk.tuxedo.typeface.typewriter.unblinking.underneath.underpants.understanding.unibody.unique.unit.utilization.valentine.validity.valley.valuable.vanadyl.vein.velocity.venom.version.verve.vestment.veto.viability.vibraphone.vibration.vicinity.video.violin.vision.vista.vol.volleyball.wafer.waist.wallaby.warming.wasabi.waterspout.wear.wedding.whack.whale.wheel.widow.wilderness.willow.window.wombat.word.worth.wriggler.yak.yarmulke.yeast.yin.yogurt.zebra.zen`.split(`.`), preposition: `a.abaft.aboard.about.above.absent.across.afore.after.against.along.alongside.amid.amidst.among.amongst.an.anenst.anti.apropos.apud.around.as.aside.astride.at.athwart.atop.barring.before.behind.below.beneath.beside.besides.between.beyond.but.by.circa.concerning.considering.despite.down.during.except.excepting.excluding.failing.following.for.forenenst.from.given.in.including.inside.into.lest.like.mid.midst.minus.modulo.near.next.notwithstanding.of.off.on.onto.opposite.out.outside.over.pace.past.per.plus.pro.qua.regarding.round.sans.save.since.than.the.through.throughout.till.times.to.toward.towards.under.underneath.unlike.until.unto.up.upon.versus.via.vice.with.within.without.worth`.split(`.`), verb: `abnegate.abscond.abseil.absolve.accentuate.accept.access.accessorise.accompany.account.accredit.achieve.acknowledge.acquire.adjourn.adjudge.admonish.adumbrate.advocate.afford.airbrush.ameliorate.amend.amount.anaesthetise.analyse.anesthetize.anneal.annex.antagonize.ape.apologise.apostrophize.appertain.appreciate.appropriate.approximate.arbitrate.archive.arraign.arrange.ascertain.ascribe.assail.atomize.attend.attest.attribute.augment.avow.axe.baa.banish.bank.baptise.battle.beard.beep.behold.belabor.bemuse.besmirch.bestride.better.bewail.bicycle.bide.bind.biodegrade.blacken.blaspheme.bleach.blend.blink.bliss.bloom.bludgeon.bobble.boggle.bolster.book.boom.bootleg.border.bore.boss.braid.brand.brandish.break.breed.broadcast.broadside.brood.browse.buck.burgeon.bus.butter.buzzing.camouflage.cannibalise.canter.cap.capitalise.capitalize.capsize.card.carouse.carp.carpool.catalog.catalyze.catch.categorise.cease.celebrate.censor.certify.char.charter.chase.chatter.chime.chip.christen.chromakey.chunder.chunter.cinch.circle.circulate.circumnavigate.clamor.clamour.claw.cleave.clinch.clinking.clone.clonk.coagulate.coexist.coincide.collaborate.colligate.colorize.colour.comb.come.commandeer.commemorate.communicate.compete.conceal.conceptualize.conclude.concrete.condense.cone.confide.confirm.confiscate.confound.confute.congregate.conjecture.connect.consign.construe.contradict.contrast.contravene.controvert.convalesce.converse.convince.convoke.coop.cop.corner.covenant.cow.crackle.cram.crank.creak.creaking.cripple.croon.cross.crumble.crystallize.culminate.culture.curry.curse.customise.cycle.dally.dampen.darn.debit.debut.decide.decode.decouple.decriminalize.deduce.deduct.deflate.deflect.deform.defrag.degenerate.degrease.delete.delight.deliquesce.demob.demobilise.democratize.demonstrate.denitrify.deny.depart.depend.deplore.deploy.deprave.depute.dereference.describe.desecrate.deselect.destock.detain.develop.devise.dial.dicker.digitize.dilate.disapprove.disarm.disbar.discontinue.disgorge.dishearten.dishonor.disinherit.dislocate.dispense.display.dispose.disrespect.dissemble.ditch.divert.dock.doodle.downchange.downshift.dowse.draft.drag.drain.dramatize.drowse.drum.dwell.economise.edge.efface.egg.eke.electrify.embalm.embed.embody.emboss.emerge.emphasise.emphasize.emulsify.encode.endow.enfold.engage.engender.enhance.enlist.enrage.enrich.enroll.entice.entomb.entrench.entwine.equate.essay.etch.eulogise.even.evince.exacerbate.exaggerate.exalt.exempt.exonerate.expatiate.explode.expostulate.extract.extricate.eyeglasses.fabricate.facilitate.factorise.factorize.fail.fall.familiarize.fashion.father.fathom.fax.federate.feminize.fence.fess.fictionalize.fiddle.fidget.fill.flash.fleck.flight.floodlight.floss.fluctuate.fluff.fly.focalise.foot.forearm.forecast.foretell.forgather.forgo.fork.form.forswear.founder.fraternise.fray.frizz.fumigate.function.furlough.fuss.gad.gallivant.galvanize.gape.garage.garrote.gasp.gestate.give.glimmer.glisten.gloat.gloss.glow.gnash.gnaw.goose.govern.grade.graduate.graft.grok.guest.guilt.gulp.gum.gurn.gust.gut.guzzle.ham.harangue.harvest.hassle.haul.haze.headline.hearten.heighten.highlight.hoick.hold.hole.hollow.holster.home.homeschool.hoot.horn.horse.hotfoot.house.hover.howl.huddle.huff.hunger.hunt.husk.hype.hypothesise.hypothesize.idle.ignite.imagineer.impact.impanel.implode.incinerate.incline.inculcate.industrialize.ingratiate.inhibit.inject.innovate.inscribe.insert.insist.inspect.institute.institutionalize.intend.intermarry.intermesh.intermix.internalise.internalize.internationalize.intrigue.inure.inveigle.inventory.investigate.irk.iterate.jaywalk.jell.jeopardise.jiggle.jive.joint.jot.jut.keel.knife.knit.know.kowtow.lack.lampoon.large.leap.lecture.legitimize.lend.libel.liberalize.license.ligate.list.lobotomise.lock.log.loose.low.lowball.machine.magnetize.major.make.malfunction.manage.manipulate.maroon.masculinize.mash.mask.masquerade.massage.masticate.materialise.matter.maul.memorise.merge.mesh.metabolise.microblog.microchip.micromanage.militate.mill.minister.minor.misappropriate.miscalculate.misfire.misjudge.miskey.mismatch.mispronounce.misread.misreport.misspend.mob.mobilise.mobilize.moisten.mooch.moor.moralise.mortar.mosh.mothball.motivate.motor.mould.mount.muddy.mummify.mutate.mystify.nab.narrate.narrowcast.nasalise.nauseate.navigate.neaten.neck.neglect.norm.notarize.object.obscure.observe.obsess.obstruct.obtrude.offend.offset.option.orchestrate.orient.orientate.outbid.outdo.outfit.outflank.outfox.outnumber.outrank.outrun.outsource.overburden.overcharge.overcook.overdub.overfeed.overload.overplay.overproduce.overreact.override.overspend.overstay.overtrain.overvalue.overwork.own.oxidise.oxidize.oxygenate.pace.pack.pale.pant.paralyse.parody.part.pause.pave.penalise.persecute.personalise.perspire.pertain.peter.pike.pillory.pinion.pip.pity.pivot.pixellate.plagiarise.plait.plan.please.pluck.ponder.popularize.portray.prance.preclude.preheat.prejudge.preregister.presell.preside.pretend.print.prioritize.probate.probe.proceed.procrastinate.profane.progress.proliferate.proofread.propound.proselytise.provision.pry.publicize.puff.pull.pulp.pulverize.purse.put.putrefy.quadruple.quaff.quantify.quarrel.quash.quaver.question.quiet.quintuple.quip.quit.rag.rally.ramp.randomize.rationalise.rationalize.ravage.ravel.react.readies.readjust.readmit.ready.reapply.rear.reassemble.rebel.reboot.reborn.rebound.rebuff.rebuild.rebuke.recede.reckon.reclassify.recompense.reconstitute.record.recount.redact.redevelop.redound.redraw.redress.reel.refer.reference.refine.reflate.refute.regulate.reiterate.rejigger.rejoin.rekindle.relaunch.relieve.remand.remark.reopen.reorient.replicate.repossess.represent.reprimand.reproach.reprove.repurpose.requite.reschedule.resort.respray.restructure.retool.retract.revere.revitalise.revoke.reword.rewrite.ride.ridge.rim.ring.rise.rival.roger.rosin.rot.rout.row.rue.rule.safeguard.sashay.sate.satirise.satirize.satisfy.saturate.savour.scale.scamper.scar.scare.scarper.scent.schematise.scheme.schlep.scoff.scoop.scope.scotch.scowl.scrabble.scram.scramble.scrape.screw.scruple.scrutinise.scuffle.scuttle.search.secularize.see.segregate.sell.sense.sensitize.sequester.serenade.serialize.serve.service.settle.sew.shaft.sham.shampoo.shanghai.shear.sheathe.shell.shinny.shirk.shoot.shoulder.shout.shovel.showboat.shred.shrill.shudder.shush.sidetrack.sign.silt.sin.singe.sit.sizzle.skateboard.ski.slake.slap.slather.sleet.slink.slip.slope.slump.smarten.smuggle.snack.sneak.sniff.snoop.snow.snowplow.snuggle.soap.solace.solder.solicit.source.spark.spattering.spectacles.spectate.spellcheck.spew.spice.spirit.splash.splay.split.splosh.splurge.spook.square.squirm.stabilise.stable.stack.stage.stake.starch.state.statement.stiffen.stigmatize.sting.stint.stoop.store.storyboard.stratify.structure.stuff.stunt.substantiate.subtract.suckle.suffice.suffocate.summarise.sun.sunbathe.sunder.sup.surge.surprise.swat.swathe.sway.swear.swelter.swerve.swill.swing.symbolise.synthesise.syringe.table.tabulate.tag.tame.tank.tankful.tarry.task.taxicab.team.telescope.tenant.terraform.terrorise.testify.think.throbbing.thump.tighten.toady.toe.tough.tousle.traduce.train.transcend.transplant.trash.treasure.treble.trek.trial.tromp.trouser.trust.tune.tut.twine.twist.typify.unbalance.uncork.uncover.underachieve.undergo.underplay.unearth.unfreeze.unfurl.unlearn.unscramble.unzip.uproot.upsell.usher.vacation.vamoose.vanish.vary.veg.venture.verify.vet.veto.volunteer.vulgarise.waft.wallop.waltz.warp.wash.waver.weary.weatherize.wedge.weep.weight.welcome.westernise.westernize.while.whine.whisper.whistle.whitewash.whup.wilt.wing.wire.wisecrack.wolf.wound.wring.writ.yak.yawn.yearn.yuppify`.split(`.`) } };
 
 // node_modules/.bun/@faker-js+faker@10.6.0/node_modules/@faker-js/faker/dist/index.js
-var fn = function(e3) {
-  return e3.Fail = `fail`, e3.Closest = `closest`, e3.Shortest = `shortest`, e3.Longest = `longest`, e3.AnyLength = `any-length`, e3;
+var fn = function(e) {
+  return e.Fail = `fail`, e.Closest = `closest`, e.Shortest = `shortest`, e.Longest = `longest`, e.AnyLength = `any-length`, e;
 }({});
 
 // packages/generator/src/generators/wasm/sample-data.ts
 function hashSeed(text) {
-  let h2 = 1779033703 ^ text.length;
-  for (let i2 = 0;i2 < text.length; i2++) {
-    h2 = Math.imul(h2 ^ text.charCodeAt(i2), 3432918353);
-    h2 = h2 << 13 | h2 >>> 19;
+  let h = 1779033703 ^ text.length;
+  for (let i = 0;i < text.length; i++) {
+    h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
+    h = h << 13 | h >>> 19;
   }
-  h2 ^= h2 >>> 16;
-  return h2 >>> 0;
+  h ^= h >>> 16;
+  return h >>> 0;
 }
 
 class Draw {
@@ -25824,153 +33232,153 @@ class Draw {
 }
 var DOMAINS = ["example.com", "example.org", "example.net"];
 var UNITS = ["each", "box", "case", "pallet", "kg", "litre"];
-function flavourOf(column, entity2) {
-  const n2 = column.toLowerCase();
-  if (/^first_?name$/.test(n2))
+function flavourOf(column, entity) {
+  const n = column.toLowerCase();
+  if (/^first_?name$/.test(n))
     return "firstName";
-  if (/^(last|sur)_?name$/.test(n2))
+  if (/^(last|sur)_?name$/.test(n))
     return "lastName";
-  if (/^(full_?name|display_?name)$/.test(n2))
+  if (/^(full_?name|display_?name)$/.test(n))
     return "person";
-  if (/^(contact|person|customer|client|employee|user|approver|owner)_name$/.test(n2))
+  if (/^(contact|person|customer|client|employee|user|approver|owner)_name$/.test(n))
     return "person";
-  if (/^(company|vendor|supplier|organisation|organization|account|insurer)_name$/.test(n2))
+  if (/^(company|vendor|supplier|organisation|organization|account|insurer)_name$/.test(n))
     return "company";
-  if (/(^|_)currency(_code)?$/.test(n2) || /(^|_)iso_currency$/.test(n2))
+  if (/(^|_)currency(_code)?$/.test(n) || /(^|_)iso_currency$/.test(n))
     return "currency";
-  if (/^(country_code|iso_country|country_iso)$/.test(n2))
+  if (/^(country_code|iso_country|country_iso)$/.test(n))
     return "countryCode";
-  if (/^(sku|code|.*_code|barcode)$/.test(n2))
+  if (/^(sku|code|.*_code|barcode)$/.test(n))
     return "code";
-  if (/(number|reference|ref|invoice_no|po_no)$/.test(n2))
+  if (/(number|reference|ref|invoice_no|po_no)$/.test(n))
     return "reference";
-  if (/^(job_?title|position|designation)$/.test(n2))
+  if (/^(job_?title|position|designation)$/.test(n))
     return "jobTitle";
-  if (/(title|subject|summary|label)$/.test(n2))
+  if (/(title|subject|summary|label)$/.test(n))
     return "title";
-  if (/(city|town)$/.test(n2))
+  if (/(city|town)$/.test(n))
     return "city";
-  if (/(country|nation)$/.test(n2))
+  if (/(country|nation)$/.test(n))
     return "country";
-  if (/^(region|state|province|county)$/.test(n2))
+  if (/^(region|state|province|county)$/.test(n))
     return "region";
-  if (/(address|street|line1|line2)$/.test(n2))
+  if (/(address|street|line1|line2)$/.test(n))
     return "address";
-  if (/^(uom|unit|unit_of_measure|measure)$/.test(n2))
+  if (/^(uom|unit|unit_of_measure|measure)$/.test(n))
     return "uom";
-  if (n2 === "name") {
-    const e3 = entity2.toLowerCase();
-    if (/(vendor|supplier|company|account|customer|client|insurer|organisation)/.test(e3))
+  if (n === "name") {
+    const e = entity.toLowerCase();
+    if (/(vendor|supplier|company|account|customer|client|insurer|organisation)/.test(e))
       return "company";
-    if (/(product|item|material|medication|part|sku)/.test(e3))
+    if (/(product|item|material|medication|part|sku)/.test(e))
       return "product";
-    if (/(user|person|staff|employee|contact|patient|owner)/.test(e3))
+    if (/(user|person|staff|employee|contact|patient|owner)/.test(e))
       return "person";
     return "title";
   }
   return "word";
 }
 function integerRange(column) {
-  const n2 = column.toLowerCase();
-  if (/(quantity|qty|count|units|items|seats|capacity)/.test(n2))
+  const n = column.toLowerCase();
+  if (/(quantity|qty|count|units|items|seats|capacity)/.test(n))
     return [1, 40];
-  if (/(stock|on_hand|inventory|level)/.test(n2))
+  if (/(stock|on_hand|inventory|level)/.test(n))
     return [0, 500];
-  if (/(age|years)/.test(n2))
+  if (/(age|years)/.test(n))
     return [1, 60];
-  if (/(duration|minutes|days|weeks|months)/.test(n2))
+  if (/(duration|minutes|days|weeks|months)/.test(n))
     return [1, 90];
-  if (/(line_?number|seq|sequence|position|order_?no)/.test(n2))
+  if (/(line_?number|seq|sequence|position|order_?no)/.test(n))
     return [1, 20];
-  if (/(percent|percentage|rate|score)/.test(n2))
+  if (/(percent|percentage|rate|score)/.test(n))
     return [0, 100];
-  if (/(attempts|retries|version)/.test(n2))
+  if (/(attempts|retries|version)/.test(n))
     return [1, 5];
   return [1, 100];
 }
 function amountRange(column) {
-  const n2 = column.toLowerCase();
-  if (/(unit_?price|price|rate|fee|cost_?per)/.test(n2))
+  const n = column.toLowerCase();
+  if (/(unit_?price|price|rate|fee|cost_?per)/.test(n))
     return [4, 480];
-  if (/(variance|discount|adjustment|tax)/.test(n2))
+  if (/(variance|discount|adjustment|tax)/.test(n))
     return [0, 90];
-  if (/(total|amount|balance|value|subtotal|claimed|settled|paid)/.test(n2))
+  if (/(total|amount|balance|value|subtotal|claimed|settled|paid)/.test(n))
     return [50, 9500];
   return [5, 1200];
 }
 function dayOffsetRange(column) {
-  const n2 = column.toLowerCase();
-  if (/(due|expected|next|valid_until|expiry|expires|scheduled)/.test(n2))
+  const n = column.toLowerCase();
+  if (/(due|expected|next|valid_until|expiry|expires|scheduled)/.test(n))
     return [1, 45];
-  if (/(created|opened|registered|joined|started|requested|submitted|captured)/.test(n2))
+  if (/(created|opened|registered|joined|started|requested|submitted|captured)/.test(n))
     return [-120, -10];
-  if (/(issued|invoice_date|order_date|ordered|billed|raised)/.test(n2))
+  if (/(issued|invoice_date|order_date|ordered|billed|raised)/.test(n))
     return [-90, -5];
-  if (/(closed|resolved|completed|decided|approved|paid|settled|received|dispatched|sent)/.test(n2))
+  if (/(closed|resolved|completed|decided|approved|paid|settled|received|dispatched|sent)/.test(n))
     return [-30, -1];
-  if (/(birth|dob)/.test(n2))
+  if (/(birth|dob)/.test(n))
     return [-16000, -700];
   return [-60, 20];
 }
 function iso(date, withTime) {
   return withTime ? date.toISOString() : date.toISOString().split("T")[0];
 }
-function stringValue(draw, column, entity2, row) {
-  const f2 = draw.faker;
-  switch (flavourOf(column, entity2)) {
+function stringValue(draw, column, entity, row) {
+  const f = draw.faker;
+  switch (flavourOf(column, entity)) {
     case "firstName":
-      return f2.person.firstName();
+      return f.person.firstName();
     case "lastName":
-      return f2.person.lastName();
+      return f.person.lastName();
     case "person":
-      return f2.person.fullName();
+      return f.person.fullName();
     case "company":
-      return f2.company.name();
+      return f.company.name();
     case "product":
-      return f2.commerce.productName();
+      return f.commerce.productName();
     case "city":
-      return f2.location.city();
+      return f.location.city();
     case "country":
-      return f2.location.country();
+      return f.location.country();
     case "countryCode":
-      return f2.location.countryCode();
+      return f.location.countryCode();
     case "region":
-      return f2.location.state();
+      return f.location.state();
     case "address":
-      return `${f2.location.streetAddress()}, ${f2.location.city()}`;
+      return `${f.location.streetAddress()}, ${f.location.city()}`;
     case "code":
-      return `${initials(entity2)}-${String(1000 + row * 7 + draw.int(0, 6)).slice(0, 4)}`;
+      return `${initials(entity)}-${String(1000 + row * 7 + draw.int(0, 6)).slice(0, 4)}`;
     case "reference":
-      return `${initials(entity2)}${new Date().getFullYear()}-${String(row + 1).padStart(4, "0")}`;
+      return `${initials(entity)}${new Date().getFullYear()}-${String(row + 1).padStart(4, "0")}`;
     case "title":
-      return `${f2.commerce.productAdjective()} ${f2.word.noun()}`;
+      return `${f.commerce.productAdjective()} ${f.word.noun()}`;
     case "jobTitle":
-      return f2.person.jobTitle();
+      return f.person.jobTitle();
     case "uom":
       return draw.pick(UNITS);
     case "currency":
-      return f2.finance.currencyCode();
+      return f.finance.currencyCode();
     default:
-      return capitalise(f2.word.noun());
+      return capitalise(f.word.noun());
   }
 }
-function initials(entity2) {
-  const letters = entity2.replace(/[^A-Za-z]/g, "");
-  const caps2 = letters.match(/[A-Z]/g);
-  return (caps2 && caps2.length >= 2 ? caps2.join("") : letters.slice(0, 3)).toUpperCase().slice(0, 4);
+function initials(entity) {
+  const letters = entity.replace(/[^A-Za-z]/g, "");
+  const caps = letters.match(/[A-Z]/g);
+  return (caps && caps.length >= 2 ? caps.join("") : letters.slice(0, 3)).toUpperCase().slice(0, 4);
 }
 function capitalise(word) {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
 function fkTarget(column, personEntity) {
-  const n2 = column.toLowerCase();
-  if (n2.endsWith("_by") || n2.endsWith("_by_id"))
+  const n = column.toLowerCase();
+  if (n.endsWith("_by") || n.endsWith("_by_id"))
     return personEntity;
-  if (PERSON_COLUMNS.has(n2))
+  if (PERSON_COLUMNS.has(n))
     return personEntity;
-  if (!n2.endsWith("_id"))
+  if (!n.endsWith("_id"))
     return;
-  return n2.slice(0, -3).replace(/(^|_)([a-z])/g, (_m, _sep, ch) => ch.toUpperCase());
+  return n.slice(0, -3).replace(/(^|_)([a-z])/g, (_m, _sep, ch) => ch.toUpperCase());
 }
 var PERSON_COLUMNS = new Set([
   "assigned_to",
@@ -25983,14 +33391,14 @@ var PERSON_COLUMNS = new Set([
   "remediation_owner_id",
   "user_id"
 ]);
-var overrideKey = (entity2, column) => `${entity2}.${column}`.toLowerCase();
+var overrideKey = (entity, column) => `${entity}.${column}`.toLowerCase();
 function buildFkOverrides(entities, relationships, personEntity) {
-  const byName = new Map(entities.map((entity2) => [entity2.name.toLowerCase(), entity2.name]));
+  const byName = new Map(entities.map((entity) => [entity.name.toLowerCase(), entity.name]));
   const overrides = new Map;
-  for (const entity2 of entities) {
-    const foreignKeys = entity2.columns.filter((column) => column.isForeignKey);
+  for (const entity of entities) {
+    const foreignKeys = entity.columns.filter((column) => column.isForeignKey);
     const claimed = new Set(foreignKeys.map((column) => fkTarget(column.columnName, personEntity)?.toLowerCase()).filter((name) => !!name && byName.has(name)));
-    const parents = relationships.filter((relationship) => relationship.targetEntity.toLowerCase() === entity2.name.toLowerCase()).map((relationship) => byName.get(relationship.sourceEntity.toLowerCase())).filter((name) => !!name);
+    const parents = relationships.filter((relationship) => relationship.targetEntity.toLowerCase() === entity.name.toLowerCase()).map((relationship) => byName.get(relationship.sourceEntity.toLowerCase())).filter((name) => !!name);
     for (const column of foreignKeys) {
       const derived = fkTarget(column.columnName, personEntity);
       if (derived && byName.has(derived.toLowerCase()))
@@ -25998,49 +33406,49 @@ function buildFkOverrides(entities, relationships, personEntity) {
       const free = parents.find((parent) => !claimed.has(parent.toLowerCase()));
       if (!free)
         continue;
-      overrides.set(overrideKey(entity2.name, column.columnName), free);
+      overrides.set(overrideKey(entity.name, column.columnName), free);
       claimed.add(free.toLowerCase());
     }
   }
   return overrides;
 }
-function resolveTarget(entity2, column, personEntity, overrides) {
-  return overrides.get(overrideKey(entity2, column.columnName)) ?? fkTarget(column.columnName, personEntity);
+function resolveTarget(entity, column, personEntity, overrides) {
+  return overrides.get(overrideKey(entity, column.columnName)) ?? fkTarget(column.columnName, personEntity);
 }
 function inDependencyOrder(entities, personEntity, overrides) {
-  const byName = new Map(entities.map((entity2) => [entity2.name, entity2]));
+  const byName = new Map(entities.map((entity) => [entity.name, entity]));
   const pending = new Map;
-  for (const entity2 of entities) {
+  for (const entity of entities) {
     const parents = new Set;
-    for (const column of entity2.columns) {
+    for (const column of entity.columns) {
       if (!column.isForeignKey)
         continue;
-      const target = resolveTarget(entity2.name, column, personEntity, overrides);
-      if (target && target !== entity2.name && byName.has(target))
+      const target = resolveTarget(entity.name, column, personEntity, overrides);
+      if (target && target !== entity.name && byName.has(target))
         parents.add(target);
     }
-    pending.set(entity2.name, parents);
+    pending.set(entity.name, parents);
   }
   const ordered = [];
   const done = new Set;
-  const emit = (entity2) => {
-    ordered.push(entity2);
-    done.add(entity2.name);
+  const emit = (entity) => {
+    ordered.push(entity);
+    done.add(entity.name);
   };
   while (ordered.length < entities.length) {
     let progress = false;
-    for (const entity2 of entities) {
-      if (done.has(entity2.name))
+    for (const entity of entities) {
+      if (done.has(entity.name))
         continue;
-      const parents = pending.get(entity2.name);
+      const parents = pending.get(entity.name);
       if ([...parents].every((parent) => done.has(parent))) {
-        emit(entity2);
+        emit(entity);
         progress = true;
       }
     }
     if (progress)
       continue;
-    const remaining = entities.filter((entity2) => !done.has(entity2.name));
+    const remaining = entities.filter((entity) => !done.has(entity.name));
     const outstanding = (name) => [...pending.get(name)].filter((parent) => !done.has(parent));
     const inCycle = (start) => {
       const seen = new Set;
@@ -26056,7 +33464,7 @@ function inDependencyOrder(entities, personEntity, overrides) {
       }
       return false;
     };
-    const candidates = remaining.filter((entity2) => inCycle(entity2.name));
+    const candidates = remaining.filter((entity) => inCycle(entity.name));
     const pool = candidates.length > 0 ? candidates : remaining;
     emit(pool[0]);
   }
@@ -26069,11 +33477,11 @@ function buildSampleData(parsed, options) {
   const nullRate = options.nullRate ?? 0.15;
   const salt = options.seed ?? "appwithai";
   const faker = new Ct({ locale: [e2, Dt] });
-  const entities = parsed.entities.map((entity2) => ({
-    name: entity2.name,
-    table: tableNameFor(entity2),
-    primaryKey: entity2.primaryKey || "id",
-    columns: entity2.attributes.map((attribute) => ({
+  const entities = parsed.entities.map((entity) => ({
+    name: entity.name,
+    table: tableNameFor(entity),
+    primaryKey: entity.primaryKey || "id",
+    columns: entity.attributes.map((attribute) => ({
       name: attribute.name,
       columnName: attribute.name,
       type: attribute.type,
@@ -26082,15 +33490,16 @@ function buildSampleData(parsed, options) {
       maxLength: attribute.maxLength,
       isForeignKey: !!attribute.isForeignKey,
       enumValues: attribute.enumValues,
-      referenceId: referenceIdFor(attribute, attribute.name === (entity2.primaryKey || "id"))
+      referenceId: referenceIdFor(attribute, attribute.name === (entity.primaryKey || "id"))
     }))
   }));
-  const personEntity = entities.find((entity2) => entity2.name === "User")?.name ?? entities.find((entity2) => /^(user|staff|employee|person|account)s?$/i.test(entity2.name))?.name;
+  const personEntity = entities.find((entity) => entity.name === "User")?.name ?? entities.find((entity) => /^(user|staff|employee|person|account)s?$/i.test(entity.name))?.name;
   const fkOverrides = buildFkOverrides(entities, parsed.relationships ?? [], personEntity);
+  const declared = new Set(entities.map((entity) => entity.name));
   const ids = new Map;
   const data = {};
-  for (const entity2 of inDependencyOrder(entities, personEntity, fkOverrides)) {
-    const full = entities.find((candidate) => candidate.name === entity2.name);
+  for (const entity of inDependencyOrder(entities, personEntity, fkOverrides)) {
+    const full = entities.find((candidate) => candidate.name === entity.name);
     if (!full)
       continue;
     const rows = [];
@@ -26117,6 +33526,7 @@ function buildSampleData(parsed, options) {
           selfIds: generatedIds,
           entityName: full.name,
           fkOverrides,
+          declared,
           claimedFks
         });
       }
@@ -26127,12 +33537,16 @@ function buildSampleData(parsed, options) {
   }
   return data;
 }
-function valueFor(column, entity2, row, draw, context) {
+function valueFor(column, entity, row, draw, context) {
   if (column.isForeignKey) {
     const target = resolveTarget(context.entityName, column, context.personEntity, context.fkOverrides);
     const pool = target === context.entityName ? context.selfIds.slice(0, row) : context.ids.get(target ?? "");
-    if (!pool || pool.length === 0)
+    if (!pool || pool.length === 0) {
+      if (column.required && !(target && context.declared.has(target))) {
+        return draw.faker.string.uuid();
+      }
       return null;
+    }
     if (column.unique) {
       const claimed = context.claimedFks.get(column.columnName) ?? new Set;
       context.claimedFks.set(column.columnName, claimed);
@@ -26147,16 +33561,16 @@ function valueFor(column, entity2, row, draw, context) {
   }
   if (column.enumValues?.length)
     return draw.pick(column.enumValues);
-  const f2 = draw.faker;
+  const f = draw.faker;
   switch (column.referenceId) {
     case ReferenceType.EMAIL:
       return emailFor(draw);
     case ReferenceType.PHONE:
-      return f2.phone.number({ style: "international" });
+      return f.phone.number({ style: "international" });
     case ReferenceType.URL:
-      return `https://www.${draw.pick(DOMAINS)}/${f2.lorem.slug(1)}`;
+      return `https://www.${draw.pick(DOMAINS)}/${f.lorem.slug(1)}`;
     case ReferenceType.COLOR:
-      return f2.color.rgb({ format: "hex", casing: "lower" });
+      return f.color.rgb({ format: "hex", casing: "lower" });
     case ReferenceType.PASSWORD:
       return "not-a-real-password";
     default:
@@ -26182,14 +33596,14 @@ function valueFor(column, entity2, row, draw, context) {
       return iso(when, column.type === "datetime");
     }
     case "json":
-      return { source: "sample", note: f2.word.noun(), index: row + 1 };
+      return { source: "sample", note: f.word.noun(), index: row + 1 };
     case "text": {
-      const flavour = flavourOf(column.columnName, entity2);
-      return flavour === "word" || flavour === "title" ? f2.lorem.sentence() : stringValue(draw, column.columnName, entity2, row);
+      const flavour = flavourOf(column.columnName, entity);
+      return flavour === "word" || flavour === "title" ? f.lorem.sentence() : stringValue(draw, column.columnName, entity, row);
     }
     default: {
-      const flavour = flavourOf(column.columnName, entity2);
-      const base = stringValue(draw, column.columnName, entity2, row);
+      const flavour = flavourOf(column.columnName, entity);
+      const base = stringValue(draw, column.columnName, entity, row);
       const selfUnique = flavour === "code" || flavour === "reference";
       const value = column.unique && !selfUnique ? `${base} ${row + 1}` : base;
       return column.maxLength && value.length > column.maxLength ? value.slice(0, column.maxLength) : value;
@@ -26197,14 +33611,14 @@ function valueFor(column, entity2, row, draw, context) {
   }
 }
 function emailFor(draw) {
-  const f2 = draw.faker;
-  const first = f2.person.firstName().toLowerCase().replace(/[^a-z]/g, "");
-  const last = f2.person.lastName().toLowerCase().replace(/[^a-z]/g, "");
+  const f = draw.faker;
+  const first = f.person.firstName().toLowerCase().replace(/[^a-z]/g, "");
+  const last = f.person.lastName().toLowerCase().replace(/[^a-z]/g, "");
   return `${first}.${last}.${draw.int(1, 999)}@${draw.pick(DOMAINS)}`;
 }
 
 // packages/generator/src/generators/wasm/wasm-app.generator.ts
-var DEFAULT_PGLITE_URL = "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.5/dist/index.js";
+var PGLITE_URL_SLOT = 'const PGLITE_URL = "";';
 function generateWasmApp(parsed, options) {
   const files = new Map;
   for (const [name, contents] of Object.entries(RUNTIME_ASSETS))
@@ -26224,8 +33638,12 @@ function generateWasmApp(parsed, options) {
   if (options.source?.trim())
     files.set("model/model.eml.mmd", options.source);
   files.set("index.html", (RUNTIME_ASSETS["index.html"] ?? "").replaceAll("__PROJECT_NAME__", escapeHtml2(options.name)).replaceAll("__PROJECT_DESCRIPTION__", escapeHtml2(options.description)).replaceAll("__PROJECT_INITIALS__", escapeHtml2(initials2(options.name))));
-  if (options.pgliteUrl && options.pgliteUrl !== DEFAULT_PGLITE_URL) {
-    files.set("host/browser-node-host.js", (RUNTIME_ASSETS["host/browser-node-host.js"] ?? "").replace(DEFAULT_PGLITE_URL, options.pgliteUrl));
+  if (options.pgliteUrl) {
+    const host = RUNTIME_ASSETS["host/browser-node-host.js"] ?? "";
+    if (!host.includes(PGLITE_URL_SLOT)) {
+      throw new Error("host/browser-node-host.js has no PGLITE_URL to set");
+    }
+    files.set("host/browser-node-host.js", host.replace(PGLITE_URL_SLOT, `const PGLITE_URL = ${JSON.stringify(options.pgliteUrl)};`));
   }
   files.set("manual.html", renderManual(parsed, {
     name: options.name,
@@ -26241,8 +33659,8 @@ function generateWasmApp(parsed, options) {
     description: options.description,
     stack: "wasm-browser",
     database: "pglite (postgresql/wasm)",
-    entities: parsed.entities.map((entity2) => entity2.name),
-    rules: parsed.rules.map((rule2) => rule2.name),
+    entities: parsed.entities.map((entity) => entity.name),
+    rules: parsed.rules.map((rule) => rule.name),
     workflows: parsed.workflows.map((workflow) => workflow.name),
     sagas: parsed.sagas.map((saga) => saga.name),
     generatedAt: new Date().toISOString(),
@@ -26317,9 +33735,10 @@ is how the generator's own tests exercise it.
 
 This application has no Bun in it and no build step: Node runs the host, the
 browser runs the same code under its own Node-API runtime, and nothing is
-compiled on the way in either direction. \`npm install\` is needed only when the
-application was generated *without* \`--vendor-pglite\`, to fetch PGlite for the
-Node host; in the browser it is fetched and cached by the browser itself.
+compiled on the way in either direction. PostgreSQL ships with the application,
+in \`vendor/pglite/\`, and is never fetched from a CDN. An application without that
+folder — one downloaded from the in-browser generator — needs \`npm install\`
+once: \`serve.mjs\` and the Node host then use the installed package.
 
 ## What is in here
 
@@ -26334,8 +33753,8 @@ Node host; in the browser it is fetched and cached by the browser itself.
 
 ## This model
 
-- **${parsed.entities.length}** entities: ${parsed.entities.map((entity2) => entity2.name).join(", ") || "—"}
-- **${parsed.rules.length}** rules${parsed.rules.length ? `: ${parsed.rules.map((rule2) => rule2.name).join(", ")}` : ""}
+- **${parsed.entities.length}** entities: ${parsed.entities.map((entity) => entity.name).join(", ") || "—"}
+- **${parsed.rules.length}** rules${parsed.rules.length ? `: ${parsed.rules.map((rule) => rule.name).join(", ")}` : ""}
 - **${parsed.workflows.length}** state machines, **${parsed.sagas.length}** sagas
 - **${parsed.hooks.length}** lifecycle hooks
 - **${parsed.rbac.operations.length + parsed.rbac.transitions.length}** access restrictions
@@ -26395,11 +33814,11 @@ function generateFromSource(options) {
     files: Object.fromEntries(generated.files),
     summary: {
       project: name,
-      entities: parsed.entities.map((entity2) => entity2.name),
+      entities: parsed.entities.map((entity) => entity.name),
       categories: parsed.categories.map((category) => category.name),
       relationships: parsed.relationships.length,
       enums: parsed.enums.length,
-      rules: parsed.rules.map((rule2) => rule2.name),
+      rules: parsed.rules.map((rule) => rule.name),
       hooks: parsed.hooks.length,
       workflows: parsed.workflows.map((workflow) => workflow.name),
       sagas: parsed.sagas.map((saga) => saga.name),
@@ -26413,7 +33832,6 @@ function generateFromSource(options) {
   };
 }
 export {
-  DEFAULT_PGLITE_URL,
   DEFAULT_SAMPLE_RECORDS,
   ModelCheckError,
   RUNTIME_BYTES,

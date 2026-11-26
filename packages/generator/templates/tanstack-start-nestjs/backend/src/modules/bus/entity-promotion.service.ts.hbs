@@ -1,16 +1,20 @@
 /**
- * Entity Promotion Service — Draft → Final
+ * Entity Promotion Service — the save pipeline: Draft → the flow, or Final
  *
- * Every business entity is saved in `draft`. Promotion is the step that runs the
- * rules and workflows associated with that record and, only if all of them
- * succeed, marks it `final`.
+ * Every business entity is saved in Draft (common/lifecycle.ts). Promotion is the
+ * step that runs the rules and workflows associated with that record and, only
+ * if all of them succeed, moves it on: to the first status of its flow when the
+ * model draws one, else to Final.
  *
  * The contract:
- *   - nothing associated  → promoted to `final` immediately, no transaction needed
- *   - everything succeeds → side effects committed and the row marked `final`, atomically
- *   - anything fails      → every side effect rolled back, the row stays `draft`, and
+ *   - nothing associated  → moved on immediately, no transaction needed
+ *   - everything succeeds → side effects committed and the record moved on, atomically
+ *   - anything fails      → every side effect rolled back, the record goes to Error, and
  *                           `doc_status_message` explains what failed and why so the
- *                           user can fix it and retry
+ *                           user can fix it and save again (which runs this again)
+ *
+ * A record part-way along its flow is not promoted: its save and its workflows
+ * are one transaction (`runInTransaction`), refused as a whole on a failure.
  *
  * The rollback boundary is deliberate. The entity row itself is committed by the
  * caller before promotion runs, so a failure never loses the user's data — it
@@ -18,21 +22,25 @@
  * writes, workflow mutations, the status flip) is transactional.
  */
 
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { sql, type Kysely } from 'kysely';
 import { InjectDatabase } from '../../database/database.service.decorator';
 import { AuditAction } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
 import { RulesService } from '../rules/rules.service';
 import type { MatchedAction } from '../rules/rules.service';
-import { WorkflowService } from '../workflow/workflow.service';
+import { WorkflowRunError, WorkflowService } from '../workflow/workflow.service';
+import { LIFECYCLE_ERROR, lifecycleOf, phaseOf, type LifecyclePhase } from '../../common/lifecycle';
+import { classify } from '../../common/errors/classify';
+import { getLogger } from '../../common/logging/logger.service';
 
 /**
- * `draft` and `final` are stored on the row. `deleted` never is — the row is
- * gone by the time it is reported, and it exists here so a caller can tell a
- * successful delete from a successful save.
+ * The record's phase, as `doc_status` stores it on every table: `draft`,
+ * `active` (part-way along its flow), `final` or `error`. `deleted` never is —
+ * the row is gone by the time it is reported, and it exists here so a caller can
+ * tell a successful delete from a successful save.
  */
-export type DocStatus = 'draft' | 'final' | 'deleted';
+export type DocStatus = LifecyclePhase | 'deleted';
 
 /**
  * Where the promotion has got to.
@@ -67,6 +75,8 @@ export interface PromotionResult {
   operation: 'create' | 'update' | 'delete';
   /** Where the record ended up. */
   docStatus: DocStatus;
+  /** The lifecycle column and the value it now holds (the state, or doc_status). */
+  lifecycle?: { column: string; value: string | null; phase: DocStatus };
   promoted: boolean;
   /** Human-readable summary — surfaced to the user verbatim when promotion fails. */
   message: string;
@@ -85,7 +95,7 @@ export interface PromotionResult {
 
 @Injectable()
 export class EntityPromotionService {
-  private readonly logger = new Logger(EntityPromotionService.name);
+  private readonly log = getLogger('entity');
 
   constructor(
     @InjectDatabase() private readonly db: Kysely<any>,
@@ -228,11 +238,25 @@ export class EntityPromotionService {
       if (isDelete) {
         await db.deleteFrom(tableName as any).where('id' as any, '=', entityId).execute();
       } else {
-        await this.setDocStatus(db, tableName, entityId, 'final', null);
+        await this.moveOn(db, tableName, entityId);
       }
     };
-    const finaliseStep = isDelete ? 'deleting the record' : 'marking the record final';
-    const finalisedMessage = isDelete ? 'Deleted' : 'Finalised';
+    // An accepted save moves the record on: into its flow when the model draws
+    // one, else to Final. The message says which.
+    const lifecycle = lifecycleOf(tableName);
+    const intoFlow = !!lifecycle?.hasMachine && lifecycle.afterDraft !== lifecycle.draft;
+    const finaliseStep = isDelete
+      ? 'deleting the record'
+      : intoFlow
+        ? `moving the record to "${lifecycle!.afterDraft}"`
+        : 'marking the record final';
+    const finalisedMessage = isDelete
+      ? 'Deleted'
+      : intoFlow
+        ? `Saved and moved to "${lifecycle!.afterDraft}"`
+        : lifecycle?.hasMachine
+          ? 'Saved'
+          : 'Finalised';
 
     // ── 2. Nothing associated → finalise directly ────────────────────────────
     if (actions.length === 0 && workflowNames.length === 0) {
@@ -241,16 +265,22 @@ export class EntityPromotionService {
       } catch (err: any) {
         return this.fail(base, startedAt, finaliseStep, err, entityData, actor);
       }
-      this.logger.log(
-        `${isDelete ? 'Deleted' : 'Promoted'} ${tableName}:${entityId} (no associated rules or workflows)`,
-      );
+      this.log.event('entity.promotion.completed', {
+        entity: tableName,
+        recordId: entityId,
+        operation: isDelete ? 'delete' : 'save',
+        outcome: isDelete ? 'deleted' : 'promoted',
+        steps: 'none',
+      });
       const result: PromotionResult = {
         ...base,
-        docStatus: isDelete ? 'deleted' : 'final',
+        ...(await this.outcome(tableName, entityId, isDelete)),
         promoted: true,
         message: isDelete
           ? 'No business rules or workflows are associated with this record, so it was deleted directly.'
-          : 'No business rules or workflows are associated with this record, so it was finalised automatically.',
+          : `No business rules or workflows are associated with this record, so it was ${
+              intoFlow ? `moved to "${lifecycle!.afterDraft}"` : lifecycle?.hasMachine ? 'saved' : 'finalised'
+            } automatically.`,
         durationMs: Date.now() - startedAt,
         state: 'completed',
       };
@@ -298,14 +328,18 @@ export class EntityPromotionService {
       .filter(Boolean)
       .join(' and ');
 
-    this.logger.log(
-      `${isDelete ? 'Deleted' : 'Promoted to final'} ${tableName}:${entityId} after ${summary}`,
-    );
+    this.log.event('entity.promotion.completed', {
+      entity: tableName,
+      recordId: entityId,
+      operation: isDelete ? 'delete' : 'save',
+      outcome: isDelete ? 'deleted' : 'promoted',
+      steps: summary,
+    });
     const result: PromotionResult = {
       ...base,
       ranRules: ruleNames,
       ranWorkflows: workflowNames,
-      docStatus: isDelete ? 'deleted' : 'final',
+      ...(await this.outcome(tableName, entityId, isDelete)),
       promoted: true,
       message: `${finalisedMessage} after successfully running ${summary}.`,
       durationMs: Date.now() - startedAt,
@@ -359,28 +393,59 @@ export class EntityPromotionService {
   ): Promise<PromotionResult> {
     const error = err?.message ?? String(err);
     const message = this.buildFailureMessage(base, failedStep, error);
+    // A workflow that failed leaves the record where it was — the save stands, the
+    // record stays a draft, and the reason is on it. Only a refusing rule sends it
+    // to Error: that is a verdict on the values, and a workflow failing is not.
+    const workflowFailure = err instanceof WorkflowRunError && base.operation !== 'delete';
 
-    this.logger.error(`Promotion failed for ${base.entityName}:${base.entityId} — ${failedStep}: ${error}`);
+    // A refusal is a verdict on the values, a process that failed under a rule's eye,
+    // or a database constraint (deleting a parent that still has children): the
+    // caller's problem, not the operator's emergency. Anything else is.
+    if (workflowFailure || classify(err, base.operation === 'delete' ? 'DELETE' : 'POST').status < 500) {
+      this.log.event('entity.promotion.refused', {
+        entity: base.entityName,
+        recordId: base.entityId,
+        reason: `${failedStep}: ${error}`,
+      });
+    } else {
+      this.log.event('entity.promotion.failed', {
+        entity: base.entityName,
+        recordId: base.entityId,
+        step: failedStep,
+        err,
+      });
+    }
 
     try {
       // A delete that rolled back leaves the record exactly as it was, status
       // included: it was never a draft, and demoting it would corrupt a
       // finalised record because someone tried to remove it.
-      if (base.operation !== 'delete') {
-        await this.setDocStatus(this.db, base.entityName, base.entityId, 'draft', message);
+      if (workflowFailure) {
+        await this.markDraft(this.db, base.entityName, base.entityId, message);
+        // The rollback took the failed run with it; Run History should still show it.
+        await this.workflowService.recordFailedRun(base.entityName, base.entityId, err);
+      } else if (base.operation !== 'delete') {
+        await this.markError(this.db, base.entityName, base.entityId, message);
       }
     } catch (statusErr: any) {
       // The record keeps its existing draft status; the response still carries the detail.
-      this.logger.error(
-        `Could not record the failure on ${base.entityName}:${base.entityId}: ${statusErr?.message ?? statusErr}`,
-      );
+      this.log.event('entity.promotion.failed', {
+        entity: base.entityName,
+        recordId: base.entityId,
+        step: 'recording the failure',
+        err: statusErr,
+      });
     }
 
     const result: PromotionResult = {
       ...base,
       // A delete that failed left the row untouched, so report the status it
       // still has rather than claiming it was demoted to a draft.
-      docStatus: base.operation === 'delete' ? 'final' : 'draft',
+      ...(base.operation === 'delete'
+        ? await this.outcome(base.entityName, base.entityId, false)
+        : workflowFailure
+          ? { docStatus: 'draft' as const, lifecycle: this.draftLifecycle(base.entityName) }
+          : { docStatus: 'error' as const, lifecycle: this.errorLifecycle(base.entityName) }),
       promoted: false,
       message,
       failedStep,
@@ -407,7 +472,7 @@ export class EntityPromotionService {
     const parts = [
       base.operation === 'delete'
         ? 'This record could not be deleted and is unchanged.'
-        : 'This record could not be finalised and has been kept as a draft.',
+        : 'This record could not be finalised and is in Error. Your changes are saved.',
     ];
     parts.push(`Failed while ${failedStep}: ${error}`);
 
@@ -442,15 +507,19 @@ export class EntityPromotionService {
     tableName: string,
     operation: 'create' | 'update' | 'delete',
   ): Promise<string[]> {
-    const normalized = tableName.toLowerCase().replace(/^bus_/, '');
-    const candidates = [normalized, `bus_${normalized}`];
-
+    // An automation built in the application files itself under the record
+    // type's own name (`SupportCase`), the model's under the table's
+    // (`bus_support_case`); with the underscores and the prefix set aside the
+    // two are the same word, which is how a multi-word record type is found.
+    const flat = tableName.toLowerCase().replace(/^bus_/, '').replace(/_/g, '');
     const rows = await this.db
       .selectFrom('sys_workflow_definitions')
       .select(['name'])
       .where((eb: any) =>
-        eb.or(candidates.map((c) => eb(sql<string>`lower(entity_name)`, '=', c))),
+        eb(sql<string>`replace(lower(entity_name), '_', '')`, 'in', [flat, `bus${flat}`]),
       )
+      // Nothing compiled means nothing to run: a handlers-only hook workflow.
+      .where('bpmn_xml', 'is not', null)
       .where((eb: any) =>
         eb.or([eb('operation', '=', operation.toUpperCase()), eb('operation', '=', 'ALL')]),
       )
@@ -469,18 +538,132 @@ export class EntityPromotionService {
       .filter(Boolean);
   }
 
-  private async setDocStatus(
-    db: Kysely<any>,
-    tableName: string,
-    entityId: string,
-    status: DocStatus,
-    message: string | null,
-  ): Promise<void> {
+  /**
+   * Move an accepted Draft on: to the first status of its flow, else to Final.
+   * Only a record still in Draft (or Error) moves — a workflow that created the
+   * record in a state of its own choosing keeps it there.
+   */
+  private async moveOn(db: Kysely<any>, tableName: string, entityId: string): Promise<void> {
+    const lifecycle = lifecycleOf(tableName);
+    if (!lifecycle || !lifecycle.hasMachine) {
+      await db
+        .updateTable(tableName as any)
+        .set({ doc_status: 'final', doc_status_message: null } as any)
+        .where('id' as any, '=', entityId)
+        .execute();
+      return;
+    }
     await db
       .updateTable(tableName as any)
-      .set({ doc_status: status, doc_status_message: message } as any)
+      .set({
+        [lifecycle.column]: lifecycle.afterDraft,
+        doc_status: phaseOf(lifecycle, lifecycle.afterDraft),
+        doc_status_message: null,
+      } as any)
       .where('id' as any, '=', entityId)
+      .where((eb: any) =>
+        eb.or([
+          eb(lifecycle.column as any, 'in', [lifecycle.draft, LIFECYCLE_ERROR]),
+          eb(lifecycle.column as any, 'is', null),
+        ]),
+      )
       .execute();
+    // A record a workflow put somewhere of its own stays there; its phase is
+    // kept in step with wherever that is.
+    const row: any = await db
+      .selectFrom(tableName as any)
+      .select([lifecycle.column] as any)
+      .where('id' as any, '=', entityId)
+      .executeTakeFirst();
+    if (row) {
+      await db
+        .updateTable(tableName as any)
+        .set({ doc_status: phaseOf(lifecycle, row[lifecycle.column]), doc_status_message: null } as any)
+        .where('id' as any, '=', entityId)
+        .execute();
+    }
+  }
+
+  /** A refused save: the record goes to Error, with the reason, and stays editable. */
+  private async markError(db: Kysely<any>, tableName: string, entityId: string, message: string): Promise<void> {
+    const lifecycle = lifecycleOf(tableName);
+    const set: Record<string, unknown> = { doc_status: 'error', doc_status_message: message };
+    if (lifecycle?.hasMachine) set[lifecycle.column] = LIFECYCLE_ERROR;
+    await db.updateTable(tableName as any).set(set as any).where('id' as any, '=', entityId).execute();
+  }
+
+  /** A save whose workflow failed: still a draft, with the reason on the record. */
+  private async markDraft(db: Kysely<any>, tableName: string, entityId: string, message: string): Promise<void> {
+    const lifecycle = lifecycleOf(tableName);
+    const set: Record<string, unknown> = { doc_status: 'draft', doc_status_message: message };
+    if (lifecycle?.hasMachine) set[lifecycle.column] = lifecycle.draft;
+    await db.updateTable(tableName as any).set(set as any).where('id' as any, '=', entityId).execute();
+  }
+
+  private draftLifecycle(tableName: string): PromotionResult['lifecycle'] {
+    const lifecycle = lifecycleOf(tableName);
+    return { column: lifecycle?.column ?? 'doc_status', value: lifecycle?.draft ?? 'draft', phase: 'draft' };
+  }
+
+  private errorLifecycle(tableName: string): PromotionResult['lifecycle'] {
+    const lifecycle = lifecycleOf(tableName);
+    return { column: lifecycle?.column ?? 'doc_status', value: LIFECYCLE_ERROR, phase: 'error' };
+  }
+
+  /** Where the record is now, read back from the row. */
+  private async outcome(
+    tableName: string,
+    entityId: string,
+    deleted: boolean,
+  ): Promise<Pick<PromotionResult, 'docStatus' | 'lifecycle'>> {
+    if (deleted) return { docStatus: 'deleted' };
+    const lifecycle = lifecycleOf(tableName);
+    const column = lifecycle?.column ?? 'doc_status';
+    try {
+      const row: any = await this.db
+        .selectFrom(tableName as any)
+        .select([column] as any)
+        .where('id' as any, '=', entityId)
+        .executeTakeFirst();
+      const value = row?.[column] == null ? null : String(row[column]);
+      const phase: DocStatus = lifecycle ? phaseOf(lifecycle, value) : ((value ?? 'final') as DocStatus);
+      return { docStatus: phase, lifecycle: { column, value, phase } };
+    } catch {
+      return { docStatus: 'final' };
+    }
+  }
+
+  /**
+   * The rules and workflows of a save, inside the caller's transaction — the
+   * save of a record part-way along its flow. Throws on the first failure, so
+   * the caller's transaction (the save itself included) rolls back as a whole.
+   */
+  async runInTransaction(
+    trx: Kysely<any>,
+    entityName: string,
+    entityId: string,
+    operation: 'update',
+    entityData: Record<string, unknown>,
+  ): Promise<{ ranRules: string[]; ranWorkflows: string[] }> {
+    const tableName = this.resolveTable(entityName);
+    const [actions, automatic] = await Promise.all([
+      this.rulesService.collectActionableActions(tableName, entityData, operation),
+      this.findWorkflowNames(tableName, operation),
+    ]);
+    const ranWorkflows = [...new Set([...automatic, ...this.workflowNamesFromActions(actions)])];
+    if (actions.length > 0) {
+      await this.rulesService.executeMatchedActions(tableName, entityId, entityData, operation, {
+        db: trx,
+        throwOnError: true,
+      });
+    }
+    if (ranWorkflows.length > 0) {
+      await this.workflowService.runLocalWorkflows(tableName, entityId, operation, entityData, {}, {
+        db: trx,
+        throwOnError: true,
+      });
+    }
+    return { ranRules: [...new Set(actions.map((a) => a.ruleName))], ranWorkflows };
   }
 
   private resolveTable(entity: string): string {

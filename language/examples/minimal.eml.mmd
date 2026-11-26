@@ -43,6 +43,12 @@ erDiagram
     %%field Post.status help: draft — visible only to its author; published — live and indexed; archived — kept for the record but taken off the site. Only the publish rule moves a post out of draft.
     %%field Post.published_at help: When the post first went live. Left empty while a post is a draft and set once on the first publish, so it stays the article's original date through later edits.
 
+    %% Form layout: headed sections of two-column rows (`|` between rows,
+    %% `,` within one; a row of one spans the full width).
+    %%section entity: Author; name: Author; help: Who writes for the site and whether they can still publish.; rows: name, email | is_active
+    %%section entity: Post; name: Post; help: The article, its address on the site, and who wrote it.; rows: title, slug | author_id | body
+    %%section entity: Post; name: Publishing; help: Whether the post is live and since when; readers only see published posts.; rows: status, published_at
+
 %% ---- Section 2: Business rule (declarative decision flow) ------------------
 %%meta name: Publish Eligibility
 %%meta kind: rules

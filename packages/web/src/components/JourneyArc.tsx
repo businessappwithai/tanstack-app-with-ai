@@ -1,10 +1,13 @@
 "use client";
 
+import { useNavigate } from "@tanstack/react-router";
 import { Code, Eye, FileText, Rocket, Wand2 } from "lucide-react";
 import React from "react";
+import { STEP_ROUTES } from "@/types/project";
 
 interface JourneyArcProps {
   currentStep: "init" | "design" | "generate" | "enhance" | "deploy";
+  projectId?: string;
 }
 
 interface JourneyStep {
@@ -47,7 +50,8 @@ const journeySteps: JourneyStep[] = [
   },
 ];
 
-export function JourneyArc({ currentStep }: JourneyArcProps) {
+export function JourneyArc({ currentStep, projectId }: JourneyArcProps) {
+  const navigate = useNavigate();
   const currentIndex = journeySteps.findIndex((s) => s.key === currentStep);
 
   return (
@@ -59,24 +63,33 @@ export function JourneyArc({ currentStep }: JourneyArcProps) {
         {journeySteps.map((step, index) => {
           const isCompleted = index < currentIndex;
           const isCurrent = step.key === currentStep;
+          const isClickable = Boolean(projectId) && isCompleted;
 
           return (
             <React.Fragment key={step.key}>
               {/* Step Node */}
               <div className="flex flex-col items-center gap-1 flex-1">
-                <div
+                <button
+                  type="button"
+                  disabled={!isClickable}
+                  onClick={() => {
+                    if (isClickable && projectId) {
+                      void navigate({ to: STEP_ROUTES[step.key], params: { id: projectId } });
+                    }
+                  }}
+                  aria-label={`${step.label}${isCompleted ? " (completed)" : isCurrent ? " (current)" : ""}`}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                     isCurrent
                       ? "bg-primary text-white ring-2 ring-primary/30"
                       : isCompleted
                         ? "bg-emerald-500/20 text-emerald-500"
                         : "bg-muted text-muted-foreground"
-                  }`}
+                  } ${isClickable ? "cursor-pointer hover:scale-110 hover:bg-emerald-500/30" : "cursor-default"}`}
                 >
                   {step.icon}
-                </div>
+                </button>
                 <div className="text-center">
-                  <div className="text-xs font-semibold text-foreground">{step.label}</div>
+                  <div className={`text-xs font-semibold ${isClickable ? "text-emerald-400" : "text-foreground"}`}>{step.label}</div>
                   <div className="text-xs text-muted-foreground">{step.description}</div>
                 </div>
               </div>

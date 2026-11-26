@@ -17,6 +17,7 @@
  *     to read the whole schema.
  */
 
+import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import { tableNameFor } from "../../naming/tables";
 import { parseModel } from "../../pipeline/parse-model";
@@ -100,11 +101,37 @@ describe("buildReportingPack", () => {
     const pack = await build();
     const query = pack.queries.find((q) => q.key === "ticket__lifecycle");
     expect(query).toBeDefined();
-    // Positions, not an alphabetical sort: a lifecycle sorted by name says
-    // nothing about where work is piling up.
-    expect(query?.sql).toContain("('new', 0), ('assigned', 1), ('resolved', 2)");
-    // LEFT JOINed, so a state nothing has reached is a zero rather than absent.
-    expect(query?.sql).toContain("LEFT JOIN");
+    // Run it, rather than reading it: positions, not an alphabetical sort — a
+    // lifecycle sorted by name says nothing about where work is piling up —
+    // and LEFT JOINed, so a state nothing has reached is a zero, not absent.
+    const pg = await PGlite.create();
+    try {
+      await pg.exec(`
+        CREATE TABLE bus_ticket (status text, deleted_at timestamptz);
+        INSERT INTO bus_ticket VALUES ('resolved', NULL), ('resolved', NULL), ('new', NULL),
+          ('new', now());
+      `);
+      const result = await pg.query<{ state: string; records: number | string }>(query?.sql ?? "");
+      expect(result.rows.map((row) => [row.state, Number(row.records)])).toEqual([
+        ["new", 1],
+        ["assigned", 0],
+        ["resolved", 2],
+      ]);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  // The Enterprise Reporting platform parses every query to decide which tables
+  // a role may read, and refuses — to everyone but its administrator — a query
+  // it cannot parse. Its parser has no CTE column list, so the form this used to
+  // emit, `WITH declared(state, position) AS (VALUES …)`, left every lifecycle
+  // report unreadable to every role.
+  it("writes no CTE column list, which the reporting platform cannot parse", async () => {
+    const pack = await build();
+    for (const query of pack.queries) {
+      expect(query.sql, query.key).not.toMatch(/\bWITH\s+\w+\s*\(/i);
+    }
   });
 
   it("names the tables the generated application actually creates", async () => {
@@ -158,6 +185,32 @@ describe("buildReportingPack", () => {
     expect(dispatcher?.tables.sort()).toEqual(["bus_site", "bus_ticket"]);
     const auditor = pack.access.roles.find((r) => r.declaredAs === "auditor");
     expect(auditor?.tables).toEqual(["bus_kyc_record"]);
+  });
+
+  it("never gives a functional role the name the platform reads as its administrator", async () => {
+    // The platform treats a role *called* admin or administrator as a system administrator,
+    // whatever it was seeded with, so a model's functional `admin` role must not take that name.
+    const model = await parseModel(
+      MODEL.replace(
+        "%%rbac role:auditor on KYCRecord.read",
+        "%%rbac role:auditor on KYCRecord.read\n%%rbac role:admin on Site.read"
+      ),
+      { projectName: "field-service", outputDir: "/tmp/unused" } as never
+    );
+    const pack = buildReportingPack(model, {
+      projectName: "field-service",
+      databaseName: "field_service",
+    });
+    const functional = pack.access.roles.find((role) => role.declaredAs === "admin");
+    expect(functional).toBeDefined();
+    expect(functional?.isAdmin).toBe(false);
+    expect(functional?.name.toLowerCase()).not.toBe("admin");
+    expect(functional?.name.toLowerCase()).not.toBe("administrator");
+    // Only the real administrator keeps the reserved name.
+    const reserved = pack.access.roles.filter((role) =>
+      ["admin", "administrator"].includes(role.name.toLowerCase())
+    );
+    expect(reserved.every((role) => role.isAdmin)).toBe(true);
   });
 
   it("gives the administrator an empty scope and the User role an empty one too", async () => {
@@ -222,5 +275,17 @@ describe("buildReportingPack", () => {
       generatedAt: "2026-01-01T00:00:00.000Z",
     });
     expect(stamped.application.generatedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
+
+describe("reserved words as column labels", () => {
+  it("quotes AS case so the platform can read which tables a query touches", async () => {
+    const { quoteReservedAliases } = await import("../pack");
+    expect(quoteReservedAliases("SELECT p.subject AS case, 1 AS n FROM bus_case p")).toBe(
+      'SELECT p.subject AS "case", 1 AS n FROM bus_case p'
+    );
+    expect(quoteReservedAliases('SELECT x AS "case", y AS cases, z AS Order')).toBe(
+      'SELECT x AS "case", y AS cases, z AS "Order"'
+    );
   });
 });

@@ -69,7 +69,7 @@ const backendDir = join(here, "..", "backend");
 
 const args = process.argv.slice(2);
 const fast = args.includes("--fast");
-const noServer = args.includes("--no-server");
+const noServer = args.includes("--no-server") || process.env.E2E_ATTACH === "1";
 const onlyIndex = args.indexOf("--only");
 const only = onlyIndex >= 0 ? args[onlyIndex + 1] : undefined;
 

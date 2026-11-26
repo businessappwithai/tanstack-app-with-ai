@@ -1,9 +1,10 @@
 /**
- * Operation access seed — the model's `%%rbac` directives, made enforceable.
+ * Access grant seed — the model's `%%rbac` directives, made enforceable.
  *
- * Each row closes one `(table, operation)` pair to one role. A pair with no
- * rows is unrestricted, so this seed only ever *narrows*, and only where the
- * model asked for it.
+ * Each row of `sys_access_grant` closes one `(table, operation)` pair, or one
+ * move of a record's lifecycle, to one role. A pair with no rows is
+ * unrestricted, so this seed only ever *narrows*, and only where the model asked
+ * for it. A user holding several roles has the union of their grants.
  *
  * Two things happen here, in order:
  *
@@ -30,7 +31,8 @@ interface TransitionAccessSeed {
   tableName: string;
   transition: string;
   statusField: string;
-  edges: Array<{ from: string; to: string }>;
+  /** `move` along a drawn edge, or `reopen` — a Final record back to Draft. */
+  edges: Array<{ from: string; to: string; kind: 'move' | 'reopen' }>;
   roles: string[];
 }
 
@@ -59,7 +61,7 @@ const TRANSITION_ACCESS: TransitionAccessSeed[] = [
     tableName: '{{tableName}}',
     transition: '{{transition}}',
     statusField: '{{statusField}}',
-    edges: [{{#each edges}}{ from: '{{from}}', to: '{{to}}' }{{#unless @last}}, {{/unless}}{{/each}}],
+    edges: [{{#each edges}}{ from: '{{from}}', to: '{{to}}', kind: '{{kind}}' }{{#unless @last}}, {{/unless}}{{/each}}],
     roles: [{{#each roles}}'{{this}}'{{#unless @last}}, {{/unless}}{{/each}}],
   },
 {{/each}}
@@ -75,14 +77,20 @@ export async function seed(db: Kysely<any>): Promise<void> {
   // 1. Roles
   // ---------------------------------------------------------------------------
   for (const roleName of RBAC_ROLES) {
-    // Case-insensitive, because the guard matches that way. The seeded roles
-    // are title-cased (`Manager`) and a model writes `role:manager`; an exact
-    // check here would create a second, near-identical role beside the real one
-    // and leave an administrator guessing which of the two to assign.
+    // The guard folds case and treats `_`, `-` and spaces alike
+    // (`entity-access.guard`), so this does too. The seeded roles are title-cased
+    // with spaces (`Airport Manager`) and a model writes `role:airport_manager`:
+    // comparing only case created a second role beside every real one — ten roles
+    // seeded, nine more written here — and left an administrator guessing which
+    // of each pair to assign.
     const existing = await db
       .selectFrom('sys_role')
       .select('sys_role_id')
-      .where(sql`lower(name)` as any, '=', roleName.toLowerCase())
+      .where(
+        sql`lower(regexp_replace(trim(name), '[[:space:]_-]+', ' ', 'g'))` as any,
+        '=',
+        roleName.trim().toLowerCase().replace(/[\s_-]+/g, ' ')
+      )
       .executeTakeFirst();
 
     if (existing) continue;
@@ -105,83 +113,70 @@ export async function seed(db: Kysely<any>): Promise<void> {
   }
 
   // ---------------------------------------------------------------------------
-  // 2. Rules
+  // 2. Grants — operations and moves, in the one table
   // ---------------------------------------------------------------------------
-  await db
-    .deleteFrom('sys_operation_access')
-    .where('entity_type', '=', 'D')
-    .execute();
+  await db.deleteFrom('sys_access_grant').where('entity_type', '=', 'D').execute();
+
+  const grant = (row: Record<string, string>) =>
+    db
+      .insertInto('sys_access_grant')
+      .values({
+        sys_access_grant_id: uuidv4(),
+        status_field: '',
+        from_state: '',
+        to_state: '',
+        ...row,
+        entity_type: 'D',
+        is_active: true,
+        created_by: 'system',
+        updated_by: 'system',
+      } as any)
+      .onConflict((oc: any) =>
+        oc.columns(['kind', 'table_name', 'action', 'from_state', 'to_state', 'role_name']).doNothing()
+      )
+      .execute();
 
   let written = 0;
   for (const rule of OPERATION_ACCESS) {
     for (const roleName of rule.roles) {
-      await db
-        .insertInto('sys_operation_access')
-        .values({
-          sys_operation_access_id: uuidv4(),
-          table_name: rule.tableName,
-          operation: rule.operation,
-          role_name: roleName,
-          entity_type: 'D',
-          is_active: true,
-          created_by: 'system',
-          updated_by: 'system',
-        } as any)
-        .onConflict((oc: any) =>
-          oc.columns(['table_name', 'operation', 'role_name']).doNothing()
-        )
-        .execute();
+      await grant({
+        kind: 'op',
+        table_name: rule.tableName,
+        action: rule.operation,
+        role_name: roleName,
+      });
       written += 1;
     }
     console.log(
       `  ✓ ${rule.tableName}.${rule.operation} restricted to: ${rule.roles.join(', ')}`
     );
   }
+  console.log(`  ✓ Seeded ${written} operation grant(s)`);
 
-  console.log(`  ✓ Seeded ${written} operation access rule(s)`);
-
-  // ---------------------------------------------------------------------------
-  // 3. Transition rules
-  // ---------------------------------------------------------------------------
-  await db
-    .deleteFrom('sys_transition_access')
-    .where('entity_type', '=', 'D')
-    .execute();
-
-  let transitionsWritten = 0;
+  // A move with no grant is open to anyone who may update the record; one with
+  // grants is the button only those roles see. A reopen with none is the
+  // administrator's alone.
+  let movesWritten = 0;
   for (const rule of TRANSITION_ACCESS) {
     for (const edge of rule.edges) {
       for (const roleName of rule.roles) {
-        await db
-          .insertInto('sys_transition_access')
-          .values({
-            sys_transition_access_id: uuidv4(),
-            table_name: rule.tableName,
-            transition: rule.transition,
-            status_field: rule.statusField,
-            from_state: edge.from,
-            to_state: edge.to,
-            role_name: roleName,
-            entity_type: 'D',
-            is_active: true,
-            created_by: 'system',
-            updated_by: 'system',
-          } as any)
-          .onConflict((oc: any) =>
-            oc
-              .columns(['table_name', 'transition', 'from_state', 'to_state', 'role_name'])
-              .doNothing()
-          )
-          .execute();
-        transitionsWritten += 1;
+        await grant({
+          kind: edge.kind,
+          table_name: rule.tableName,
+          action: rule.transition,
+          status_field: rule.statusField,
+          from_state: edge.from,
+          to_state: edge.to,
+          role_name: roleName,
+        });
+        movesWritten += 1;
       }
     }
     console.log(
-      `  ✓ ${rule.tableName}.${rule.transition} restricted to: ${rule.roles.join(', ')}`
+      `  ✓ ${rule.tableName}.${rule.transition} granted to: ${rule.roles.join(', ')}`
     );
   }
-
-  if (transitionsWritten > 0) {
-    console.log(`  ✓ Seeded ${transitionsWritten} transition access rule(s)`);
+  if (movesWritten > 0) {
+    console.log(`  ✓ Seeded ${movesWritten} move grant(s)`);
   }
 }

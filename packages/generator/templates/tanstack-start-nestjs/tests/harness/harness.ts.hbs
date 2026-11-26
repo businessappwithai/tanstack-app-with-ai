@@ -12,9 +12,13 @@
  * Project: {{project.name}}
  */
 
-import { login, type SessionUser } from "./auth.ts";
+import { randomUUID } from "node:crypto";
+import { loginShared, type SessionUser } from "./auth.ts";
 import {
+  columnsNamedByRefusals,
+  distinctParentColumns,
   type EntityMeta,
+  type FieldMeta,
   foreignKeyFields,
   parentEntityForColumn,
   topologicalEntities,
@@ -56,7 +60,7 @@ class TestHarness {
 
   private async doSetup(): Promise<void> {
     await waitForServer();
-    this.user = await login(this.client);
+    this.user = await loginShared(this.client);
   }
 
   /** Register a record for deletion at teardown. */
@@ -96,13 +100,20 @@ class TestHarness {
     if (depth > 4) return null;
 
     const foreignKeys: Record<string, string> = {};
+    const distinct = distinctParentColumns(entity, overrides);
     for (const fk of foreignKeyFields(entity)) {
       const parent = this.resolveParentEntity(fk.name);
-      if (!parent) continue;
+      if (!parent) {
+        // A required reference whose parent the model never declared (EML502):
+        // nothing to look up, and the column is NOT NULL, so give it a uuid.
+        if (fk.required) foreignKeys[fk.name] = randomUUID();
+        continue;
+      }
 
-      const existing = await this.anyRecordId(parent, depth + 1);
+      const existing = await this.parentIdFor(fk, parent, depth + 1, distinct.has(fk.name));
       if (existing) foreignKeys[fk.name] = existing;
     }
+    await this.separateComparedParents(entity, foreignKeys, depth + 1);
 
     const payload = buildRecord(entity, { foreignKeys, overrides });
     try {
@@ -120,6 +131,38 @@ class TestHarness {
   }
 
   /**
+   * Two references to one parent get two parents when a refusing rule compares them.
+   *
+   * `refuseSelfApprovedRefund` refuses `approved_by_id == requested_by_id`. Both columns point at
+   * Staff, and `parentIdFor` hands the same existing record to each, so a Refund drawn that way is
+   * refused on every update — which failed a CRUD suite on some runs and not others, depending on
+   * which staff happened to exist. Only columns that the model's own refusals name are separated,
+   * so a model whose two references may legitimately share a parent is left alone.
+   */
+  private async separateComparedParents(
+    entity: EntityMeta,
+    foreignKeys: Record<string, string>,
+    depth: number
+  ): Promise<void> {
+    const named = columnsNamedByRefusals(entity.tableName);
+    const seen = new Map<string, string>();
+    for (const fk of foreignKeyFields(entity)) {
+      const id = foreignKeys[fk.name];
+      if (!id) continue;
+      const first = seen.get(id);
+      if (!first) {
+        seen.set(id, fk.name);
+        continue;
+      }
+      if (!named.has(fk.name) || !named.has(first)) continue;
+      const parent = this.resolveParentEntity(fk.name);
+      if (!parent) continue;
+      const other = await this.parentIdFor(fk, parent, depth, true);
+      if (other) foreignKeys[fk.name] = other;
+    }
+  }
+
+  /**
    * A payload that should satisfy every validation rule: scalars from the
    * factory plus real foreign-key values resolved from existing parents.
    *
@@ -132,15 +175,43 @@ class TestHarness {
     overrides: Record<string, unknown> = {}
   ): Promise<Record<string, unknown>> {
     const foreignKeys: Record<string, string> = {};
+    const distinct = distinctParentColumns(entity, overrides);
 
     for (const fk of foreignKeyFields(entity)) {
       const parent = this.resolveParentEntity(fk.name);
-      if (!parent) continue;
-      const id = await this.anyRecordId(parent);
+      if (!parent) {
+        if (fk.required) foreignKeys[fk.name] = randomUUID();
+        continue;
+      }
+      const id = await this.parentIdFor(fk, parent, 0, distinct.has(fk.name));
       if (id) foreignKeys[fk.name] = id;
     }
+    await this.separateComparedParents(entity, foreignKeys, 0);
 
     return buildRecord(entity, { foreignKeys, overrides });
+  }
+
+  /**
+   * The parent a foreign key should point at.
+   *
+   * A unique reference is a one-to-one extension (a Doctor *is* a Staff member):
+   * each record needs a parent of its own, and reusing one answers the second
+   * create with 409. Any other reference may share a parent — unless the entity
+   * declares the reference unique *together with* others (`distinct`), where a
+   * second record on the same parent writes the same pair and is refused too.
+   */
+  async parentIdFor(
+    fk: FieldMeta,
+    parent: EntityMeta,
+    depth: number,
+    distinct = false
+  ): Promise<string | null> {
+    if (fk.unique || distinct) {
+      const created = await this.createWithParents(parent, {}, depth);
+      const id = created?.id as string | undefined;
+      return id ?? null;
+    }
+    return this.anyRecordId(parent, depth);
   }
 
   /** An existing record id for an entity, creating one if the table is empty. */

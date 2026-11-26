@@ -14,6 +14,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
@@ -65,7 +66,11 @@ export const Route = createFileRoute("/api/generate")({
             let closed = false;
             const send = (payload: Record<string, unknown>) => {
               if (closed) return;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+              try {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+              } catch {
+                closed = true;
+              }
             };
             const sendLog = (level: string, message: string) => send({ log: message, level });
             const finish = () => {
@@ -74,7 +79,11 @@ export const Route = createFileRoute("/api/generate")({
               controller.close();
             };
 
+            let stagingRoot: string | undefined;
             try {
+              const { prepareGeneration, publishGeneration } = await import(
+                "@/lib/server/project-repository"
+              );
               const { projectDb } = await import("@appwithai/core/services");
               const { parseModel } = await import("@appwithai/generator");
 
@@ -85,7 +94,12 @@ export const Route = createFileRoute("/api/generate")({
                 return finish();
               }
 
-              const finalErdCode = erdCode || project.erdCode;
+              const prepared = await prepareGeneration(projectId, access.user.id, {
+                model: erdCode || project.erdCode,
+                requestId: body.requestId ? `${body.requestId}-model` : undefined,
+                expectedCommit: body.expectedCommit,
+              });
+              const finalErdCode = prepared.model;
               if (!finalErdCode) {
                 send({ error: "No ERD code found. Please create an ERD diagram first." });
                 return finish();
@@ -112,22 +126,13 @@ export const Route = createFileRoute("/api/generate")({
               const { DEFAULT_APP_PORT } = await import("@/lib/generated-ports");
               const appPort = project.port || DEFAULT_APP_PORT;
 
-              // Where generated applications land. `DEFAULT_OUTPUT_DIR` exists
-              // so a container can point this at a mounted volume: written
-              // under the process's working directory instead, every generated
-              // application lives in the container's writable layer and is lost
-              // the moment the image is replaced.
               const cwd = process.cwd();
-              const root = process.env.DEFAULT_OUTPUT_DIR || path.join(cwd, "generated-projects");
-              const outputDir = path.join(root, projectId);
-              const modelDir = path.join(root, "models");
-              await fs.mkdir(modelDir, { recursive: true });
-
-              const slug =
-                (project.name || projectId).toLowerCase().replace(/[^a-z0-9]+/g, "-") || projectId;
-              const modelPath = path.join(modelDir, `${slug}.eml.mmd`);
+              const outputDir = prepared.directory;
+              stagingRoot = await fs.mkdtemp(path.join(path.dirname(outputDir), ".generation-"));
+              const stageOutput = path.join(stagingRoot, "application");
+              const modelPath = path.join(stagingRoot, "input.eml.mmd");
               await fs.writeFile(modelPath, finalErdCode, "utf-8");
-              sendLog("info", `Wrote model: ${modelPath}`);
+              sendLog("info", `Generating from saved model ${prepared.modelCommit.slice(0, 8)}`);
 
               const cli = await resolveCli(cwd);
               if (!cli) {
@@ -144,7 +149,7 @@ export const Route = createFileRoute("/api/generate")({
                 "--input",
                 modelPath,
                 "--output",
-                outputDir,
+                stageOutput,
                 "--name",
                 project.name || `project-${projectId}`,
                 "--description",
@@ -195,18 +200,42 @@ export const Route = createFileRoute("/api/generate")({
                 return finish();
               }
 
-              await projectDb.update(projectId, {
-                generatedPath: outputDir,
-                deploymentStatus: "completed",
+              const result = await publishGeneration(
+                projectId,
+                access.user.id,
+                prepared,
+                stageOutput,
+                {
+                  stack: finalStackType,
+                  frontendPort: appPort,
+                  backendPort: appPort + 1,
+                  database: project.databaseType === "sqlite" ? "sqlite" : "postgresql",
+                  generator: "@appwithai/generator",
+                  generatorRevision: createHash("sha256")
+                    .update(await fs.readFile(cli))
+                    .digest("hex"),
+                },
+                body.requestId
+              );
+              sendLog("success", `Code saved to local Git ${result.commit.slice(0, 8)}`);
+              if (result.stale)
+                sendLog(
+                  "warn",
+                  "The saved model changed during generation. This output is linked to its original input."
+                );
+              send({
+                complete: true,
+                path: outputDir,
+                model: path.join(outputDir, ".appwithai/generated-model.eml.mmd"),
+                ...result,
               });
-
-              sendLog("success", "Code generation complete");
-              send({ complete: true, path: outputDir, model: modelPath });
               finish();
             } catch (error) {
               console.error("Generation error:", error);
               send({ error: error instanceof Error ? error.message : "Generation failed" });
               finish();
+            } finally {
+              if (stagingRoot) await fs.rm(stagingRoot, { recursive: true, force: true });
             }
           },
         });

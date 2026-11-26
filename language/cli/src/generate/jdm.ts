@@ -15,12 +15,12 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { convertToJdm } from "../../../../packages/web/src/lib/jdm-converter.ts";
 import type {
   FlowAST,
   FlowNode,
   NodeShape,
-} from "../../../../packages/web/src/lib/mermaid-flowchart-parser.ts";
+} from "../../../../packages/editors/src/lib/mermaid-flowchart-parser.ts";
+import { convertToJdm } from "../../../../packages/web/src/lib/jdm-converter.ts";
 import type { EmlModel, EmlRule, RuleNodeShape } from "../model.ts";
 import { kebabCase } from "../util.ts";
 

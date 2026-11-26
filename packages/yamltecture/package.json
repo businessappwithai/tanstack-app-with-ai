@@ -1,0 +1,31 @@
+{
+  "name": "@appwithai/yamltecture",
+  "version": "0.1.0",
+  "description": "TypeScript port/extension of YAMLtecture concepts for AppWithAI: validated architecture graphs, queries, deterministic Mermaid, EML projections, and Git context.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./core": "./src/core/model.ts",
+    "./query": "./src/query/execute.ts",
+    "./mermaid": "./src/mermaid/flowchart.ts",
+    "./eml": "./src/eml/parser.ts",
+    "./git": "./src/git/history.ts",
+    "./zod": "./src/schema/zod.ts"
+  },
+  "scripts": {
+    "test": "bun --filter @appwithai/web test -- ../yamltecture/test",
+    "typecheck": "bun ../../scripts/require-bun.ts && bun check -p tsconfig.json",
+    "project": "bun scripts/project-eml.ts",
+    "inspect": "bun scripts/inspect-eml.ts",
+    "test:website": "bun scripts/test-website-models.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1",
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "private": true
+}

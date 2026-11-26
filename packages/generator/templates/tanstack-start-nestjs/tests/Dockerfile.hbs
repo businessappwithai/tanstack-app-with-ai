@@ -1,0 +1,23 @@
+# The end-to-end suite, as an image.
+#
+# `docker compose run --rm e2e` builds this and runs the suites against the
+# application and the reporting platform on the compose network.
+#
+# Node runs the suites (`node run.ts`, native type stripping, hence 22.18+);
+# bun is only the installer — copied in rather than installed, because
+# `oven/bun` carries no Node and `node:22-alpine` carries no bun, and this repo
+# installs with bun.
+FROM oven/bun:1.4.4-alpine AS bun
+
+FROM node:22-alpine
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /app/tests
+COPY package.json ./
+RUN bun install
+COPY . .
+# Inside compose the stack is always already running: attach, never start a server.
+ENV E2E_ATTACH=1
+# `bun run <script>`: the script text (`node run.ts --no-server`) is executed by
+# bun's shell with node on the PATH. The default attaches to the running stack.
+ENTRYPOINT ["bun", "run"]
+CMD ["test:attach"]

@@ -19,7 +19,11 @@
 | `withdrawn_on` | date | OPTIONAL | The date the student left. Set with the status; the term's invoice is not cancelled by it, which is what makes the leavers report a finance report as well as a registry one. |
 | `withdrawal_reason` | text | OPTIONAL | Why the student left, in the family's terms — relocation, transfer, financial, exclusion. Required on withdrawal, because the retention report is built from it and an unexplained leaver is the one the governors ask about. |
 | `school_email` | email | OPTIONAL | The account the student signs in with. Optional: it is issued at year 7 and some transfers arrive without one. |
-| `has_support_plan` | boolean | — | Set when the student has a formal learning-support plan. It is a flag, not the plan: the plan itself is held outside this system, and this field exists so a teacher opening the register knows to ask for it. |
+| `has_support_plan` | boolean | — | True while the student has a support plan that is active or under review; a draft or closed plan does not count. It is kept in step with the plans by the support-plan hooks and never keyed by hand, so a teacher opening the register can trust it as the prompt to read the student's plan, which sits in this system as a SupportPlan record. |
+| `on_leave_at` | datetime | OPTIONAL | When the move to on leave was recorded on this student. Recording it moves a student from enrolled to on leave: the workflows set the status, which nobody changes by hand. |
+| `enrolled_at` | datetime | OPTIONAL | When the move to enrolled was recorded on this student. Recording it moves a student from on leave or suspended to enrolled: the workflows set the status, which nobody changes by hand. |
+| `graduated_at` | datetime | OPTIONAL | When the move to graduated was recorded on this student. Recording it moves a student from enrolled to graduated: the workflows set the status, which nobody changes by hand. |
+| `withdrawn_at` | datetime | OPTIONAL | When the move to withdrawn was recorded on this student. Recording it moves a student from enrolled, on leave or suspended to withdrawn: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -34,6 +38,10 @@
 - `Student ||--o{ AdmissionApplication` — results from
 - `Student ||--o{ FeeInvoice` — billed to
 - `Student ||--o{ DisciplineIncident` — subject of
+- `Student ||--o{ ConsentRecord` — has consent
+- `Student ||--o{ SupportPlan` — supported by
+- `Student ||--o{ SafeguardingConcern` — protected by
+- `Student ||--o{ CommunicationLog` — concerns
 
 **Indexes.** `Student(status, year_group)`
 
@@ -61,7 +69,19 @@ withdrawn --> [*]
 ### `studentRecordControl` on `beforeUpdate` — **`%%action` decision table — it can act**
 
 - `requireWithdrawalReason validation-error when: status == "withdrawn" and withdrawal_reason == null message: A withdrawal needs a reason — the retention report is built from it.`
+- `requireWithdrawalReasonOnMove validation-error when: withdrawn_at != null and withdrawal_reason == null message: A withdrawal needs a reason — the retention report is built from it.`
 - `requireWithdrawalDate validation-error when: status == "withdrawn" and withdrawn_on == null message: A withdrawal needs the date the student left.`
+- `requireWithdrawalDateOnMove validation-error when: withdrawn_at != null and withdrawn_on == null message: A withdrawal needs the date the student left.`
+
+### `studentStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `moveEnrolledToOnLeave trigger-workflow when: status == "enrolled" and on_leave_at != null workflow: StudentOnLeaveMove`
+- `moveOnLeaveToEnrolled trigger-workflow when: status == "on_leave" and enrolled_at != null workflow: StudentEnrolledMove`
+- `moveSuspendedToEnrolled trigger-workflow when: status == "suspended" and enrolled_at != null workflow: StudentEnrolledMove`
+- `moveEnrolledToGraduated trigger-workflow when: status == "enrolled" and graduated_at != null workflow: StudentGraduatedMove`
+- `moveEnrolledToWithdrawn trigger-workflow when: status == "enrolled" and withdrawn_at != null workflow: StudentWithdrawnMove`
+- `moveOnLeaveToWithdrawn trigger-workflow when: status == "on_leave" and withdrawn_at != null workflow: StudentWithdrawnMove`
+- `moveSuspendedToWithdrawn trigger-workflow when: status == "suspended" and withdrawn_at != null workflow: StudentWithdrawnMove`
 
 ## Hooks
 
@@ -70,7 +90,7 @@ withdrawn --> [*]
 
 ## Cross-entity effects
 
-Suspension is written **onto** the student by the `SuspensionEscalation` saga when a conduct record records a suspension sanction — trigger `DisciplineIncident` → target `Student` → transition `enrolled|on_leave → suspended`. Withdrawal deliberately does *not* cascade: the term's invoice stands, which is the school's policy and the reason `Enrollment.withdrawn_on` is evidence rather than a trigger.
+Suspension is written **onto** the student by the `SuspensionEscalation` saga when a conduct record records a suspension sanction — trigger `DisciplineIncident` → target `Student` → transition `enrolled|on_leave → suspended`. Withdrawal deliberately does *not* cascade: the term's invoice stands, which is the school's policy and the reason `Enrollment.withdrawn_on` is evidence rather than a trigger. `has_support_plan` is written by the `SupportPlan` hooks, never keyed by hand.
 
 Sagas that touch it:
 
@@ -79,7 +99,20 @@ Sagas that touch it:
   - `C UpdateEntity field: student_id source: newStudentId`
   - `D CreateEntity entity: FeeInvoice as: newInvoiceId fields: {"student_id":"newStudentId","academic_term_id":"academic_term_id","status":"draft","total_amount":0,"amount_paid":0,"balance_due":0}`
 - **SuspensionEscalation**
-  - `B UpdateEntity entity: Student targetField: student_id field: status value: suspended`
+  - `B UpdateEntity entity: Student targetSource: student_id field: status value: suspended`
+- **StudentOnLeaveMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: on_leave`
+  - `C UpdateEntity field: enrolled_at value: null`
+  - `D UpdateEntity field: withdrawn_at value: null`
+- **StudentEnrolledMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: enrolled`
+  - `C UpdateEntity field: on_leave_at value: null`
+  - `D UpdateEntity field: graduated_at value: null`
+  - `E UpdateEntity field: withdrawn_at value: null`
+- **StudentGraduatedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: graduated`
+- **StudentWithdrawnMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: withdrawn`
 
 ## Access
 
@@ -89,10 +122,6 @@ Sagas that touch it:
 | `create` | registrar · admissions_officer |
 | `update` | registrar · principal |
 | `delete` | principal |
-| `suspend` | counsellor · principal |
-| `reinstate` | counsellor · principal |
-| `withdraw` | registrar · principal |
-| `graduate` | principal |
 
 ## Open questions
 

@@ -35,7 +35,7 @@
 # ─── certificates ───────────────────────────────────────────────────────────
 # One stage, reused by both of the real ones, so the trust store is assembled
 # identically in each and the install layer is cached once.
-FROM oven/bun:1.4.0 AS certs
+FROM oven/bun:1.4.4 AS certs
 
 # The directory always exists, so this COPY always succeeds; whether it carries
 # anything is up to whoever is building.
@@ -54,7 +54,7 @@ RUN touch /ca-bundle.crt \
     fi
 
 # ─── build ──────────────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0 AS build
+FROM oven/bun:1.4.4 AS build
 
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""
@@ -93,7 +93,7 @@ RUN bun install --frozen-lockfile --production \
  && rm -rf /root/.bun/install/cache node_modules/.cache packages/*/node_modules/.cache
 
 # ─── runtime ────────────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0
+FROM oven/bun:1.4.4
 
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""

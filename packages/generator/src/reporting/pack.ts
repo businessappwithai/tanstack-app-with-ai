@@ -102,6 +102,8 @@ export interface DashboardSpec {
   key: string;
   name: string;
   description: string;
+  /** The declared `%%rbac` role an authored `%%dashboard` is for; absent on the overview. */
+  role?: string;
   widgets: DashboardWidgetSpec[];
 }
 
@@ -130,7 +132,7 @@ export interface AccessRoleSpec {
    * do not share a user table, and this is the other one's address.
    */
   appEmail: string;
-  /** `bus_` tables this role may read. Empty means every table. */
+  /** `bus_` tables this role may read. Empty means every table for the administrator and none for any other role. */
   tables: string[];
 }
 
@@ -418,9 +420,33 @@ interface Ctx {
   charts: ChartSpec[];
 }
 
+/**
+ * Words PostgreSQL accepts after `AS` as a column label but the reporting
+ * platform's table extraction does not. That extractor is a real parse, and a
+ * statement it cannot parse is refused ("tables cannot be determined"), so
+ * `SELECT p.subject AS case` ran for nobody — administrator included — and a
+ * model with a `Case` parent lost every "per case" report and chart. Quoting
+ * the label changes nothing PostgreSQL returns (the column is still `case`).
+ */
+const RESERVED_ALIASES = [
+  "all", "analyse", "analyze", "and", "any", "array", "asc", "both", "case", "cast", "check",
+  "collate", "column", "constraint", "create", "default", "desc", "distinct", "do", "else",
+  "end", "except", "false", "fetch", "for", "foreign", "from", "grant", "group", "having", "in",
+  "initially", "intersect", "into", "leading", "limit", "not", "null", "offset", "on", "only",
+  "or", "order", "primary", "references", "select", "some", "table", "then", "to", "trailing",
+  "true", "union", "unique", "user", "using", "when", "where", "window", "with",
+];
+const RESERVED_ALIAS = new RegExp(`(\\bAS\\s+)(${RESERVED_ALIASES.join("|")})(?![\\w"])`, "gi");
+
+/** `AS case` -> `AS "case"`; an already quoted or ordinary label is untouched. */
+export function quoteReservedAliases(sql: string): string {
+  return sql.replace(RESERVED_ALIAS, (_m, as: string, word: string) => `${as}"${word}"`);
+}
+
 /** Push a query, filling in the tables it reads so no call site can forget. */
 function addQuery(ctx: Ctx, spec: Omit<SavedQuerySpec, "tables">): string {
-  ctx.queries.push({ ...spec, tables: tablesIn(spec.sql) });
+  const sql = quoteReservedAliases(spec.sql);
+  ctx.queries.push({ ...spec, sql, tables: tablesIn(sql) });
   return spec.key;
 }
 
@@ -524,13 +550,24 @@ function deriveEntity(ctx: Ctx, e: Entity): void {
       // The states come from the diagram, LEFT JOINed to the counts, so a state
       // the application has never reached shows as zero rather than vanishing.
       // A missing row and a zero row mean very different things here.
-      const valuesList = states.map((s, i) => `(${lit(s)}, ${i})`).join(", ");
+      // One SELECT per state, joined by UNION ALL — not `WITH declared(state,
+      // position) AS (VALUES …)`. Postgres runs either, but the Enterprise
+      // Reporting platform parses every query to decide which tables a role
+      // may read, its parser has no CTE column list, and a query it cannot
+      // parse is refused to every role but the administrator. So the lifecycle
+      // reports — one per state machine — ran for nobody who signed in as a
+      // role. The first row names the columns; the rest follow them.
+      const valuesList = states
+        .map((s, i) =>
+          i === 0 ? `SELECT ${lit(s)} AS state, ${i} AS position` : `SELECT ${lit(s)}, ${i}`
+        )
+        .join("\n  UNION ALL ");
       const key = `${slug}__lifecycle`;
       const q = addQuery(ctx, {
         key,
         name: `${titleOf(e)} lifecycle — ${wf.name}`,
         description: `Where ${pluralTitle(e).toLowerCase()} sit in the ${wf.name} state machine. Every state the model declares appears, including the ones nothing has reached.`,
-        sql: `WITH declared(state, position) AS (\n  VALUES ${valuesList}\n)\nSELECT d.state, COALESCE(c.records, 0) AS records\nFROM declared d\nLEFT JOIN (\n  SELECT ${statusCol} AS state, COUNT(*) AS records\n  FROM ${table}\n  WHERE ${live}\n  GROUP BY 1\n) c ON c.state = d.state\nORDER BY d.position`,
+        sql: `WITH declared AS (\n  ${valuesList}\n)\nSELECT d.state, COALESCE(c.records, 0) AS records\nFROM declared d\nLEFT JOIN (\n  SELECT ${statusCol} AS state, COUNT(*) AS records\n  FROM ${table}\n  WHERE ${live}\n  GROUP BY 1\n) c ON c.state = d.state\nORDER BY d.position`,
       });
       ctx.reports.push({
         key,
@@ -756,7 +793,60 @@ function deriveDashboards(ctx: Ctx, appName: string, appDescription?: string): D
         `The ${headline.length} entities this model puts at the centre of ${appName}, one tile each.`,
       widgets,
     },
+    ...deriveAuthoredDashboards(ctx),
   ];
+}
+
+/**
+ * `%%dashboard` directives — a role's own reports, grouped by the author.
+ *
+ * The overview above is inferred from structure and is the same for everyone.
+ * These are written for the person who opens them: the tiles are the
+ * `%%report` directives the author listed, in that order. A charted report is a
+ * chart tile, half a row wide; one without a chart is a table tile, a full row.
+ */
+function deriveAuthoredDashboards(ctx: Ctx): DashboardSpec[] {
+  const charts = new Set(ctx.charts.map((c) => c.key));
+  const reports = new Set(ctx.reports.map((r) => r.key));
+  const specs: DashboardSpec[] = [];
+
+  for (const d of ctx.model.dashboards ?? []) {
+    const widgets: DashboardWidgetSpec[] = [];
+    let x = 0;
+    let y = 0;
+    for (const name of d.reports) {
+      const key = `authored__${name}`;
+      const title = ctx.model.reports.find((r) => r.name === name)?.title ?? name;
+      if (charts.has(key)) {
+        widgets.push({ chartKey: key, title, x, y, w: 6, h: 4 });
+        x += 6;
+        if (x >= 12) {
+          x = 0;
+          y += 4;
+        }
+      } else if (reports.has(key)) {
+        if (x !== 0) {
+          x = 0;
+          y += 4;
+        }
+        widgets.push({ reportKey: key, title, x, y, w: 12, h: 4 });
+        y += 4;
+      }
+    }
+    if (widgets.length === 0) continue;
+    specs.push({
+      key: `authored__${d.name}`,
+      name: d.title,
+      description:
+        d.help?.trim() ??
+        (d.role
+          ? `${d.title} — a dashboard for the ${d.role} role, declared in the model as %%dashboard ${d.name}.`
+          : `Declared in the model as %%dashboard ${d.name}.`),
+      ...(d.role ? { role: d.role } : {}),
+      widgets,
+    });
+  }
+  return specs;
 }
 
 /**
@@ -827,6 +917,22 @@ function assertNamesUnique(ctx: Ctx, dashboards: DashboardSpec[]): void {
 }
 
 /**
+ * The platform reads a role *called* `admin` or `administrator` as a system
+ * administrator (`hasPermission` in its permissions module), whatever
+ * permissions the role was seeded with. A model may legitimately declare a
+ * functional role `admin` — the hospital model does — and under that name its
+ * reporting account could edit saved queries, users and data sources instead of
+ * only reading the tables the model's `%%rbac` admits. Those two names are
+ * therefore never used for a non-administrator; the declared spelling is kept
+ * in `declaredAs`, which is what the application's accounts and the suites match on.
+ */
+const RESERVED_PLATFORM_ROLES = new Set(["admin", "administrator"]);
+
+function reportingRoleName(name: string): string {
+  return RESERVED_PLATFORM_ROLES.has(name.trim().toLowerCase()) ? `${name} (model role)` : name;
+}
+
+/**
  * The reporting platform's roles, shaped by the model's `%%rbac`.
  *
  * Two deliberate decisions here.
@@ -875,7 +981,7 @@ function deriveAccessSpec(model: ParsedModel, options: BuildPackOptions): Access
           .map((entity) => tableNameFor(entity));
 
     return {
-      name: role.name,
+      name: role.isAdmin ? role.name : reportingRoleName(role.name),
       declaredAs: role.declaredAs,
       description: role.isAdmin
         ? "Reads every table of the attached application"
@@ -905,7 +1011,10 @@ function deriveAccessSpec(model: ParsedModel, options: BuildPackOptions): Access
    */
   for (const role of roles) {
     if (role.isAdmin) continue;
-    const expected = access.entityCounts[role.name];
+    // Looked up by the application's name for the role, which a reserved
+    // reporting name (see `reportingRoleName`) no longer matches.
+    const appName = access.roles.find((r) => r.declaredAs === role.declaredAs)?.name ?? role.name;
+    const expected = access.entityCounts[appName];
     if (expected !== undefined && expected !== role.tables.length) {
       throw new Error(
         `Reporting role "${role.name}" resolved ${role.tables.length} readable tables, ` +

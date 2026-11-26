@@ -214,7 +214,7 @@ not create (`EML150`).
 A child is still a real table with real rules, access control and a form. Only
 its *placement* changes.
 
-Four codes police it:
+Five codes police it:
 
 | Code | Severity | Fires when |
 |---|---|---|
@@ -222,6 +222,14 @@ Four codes police it:
 | `EML148` | error | the child has no foreign key back — nothing for the tab to link on |
 | `EML149` | info | an entity is *shaped* like a line item and declares no `parent:` |
 | `EML150` | warning | a declared child is named in a `%%category` |
+| `EML155` | info | a line item whose parent is itself a line item |
+
+`EML155` is an `info` too. The dictionary has two levels — a top-level entity and
+the line items in its window — so a line item whose parent is itself a line item
+is generated as a top-level entity: it keeps its foreign key and gains a window
+and a dashboard card, and the parent's page does not list it. The checker says so
+because `parent:` reads like a request for a tab. Remove the directive to accept
+that, or point it at the top-level entity to get the tab.
 
 `EML149` is an `info` and never an error, because the three questions above are
 about the business and not about the document — the checker can only name the
@@ -292,6 +300,16 @@ Three codes police it, all warnings:
 | `EML152` | an entity carries no `%%entity … help:` at all |
 | `EML153` | an entity has columns with no `%%field … help:` — reported once, naming them |
 | `EML151` | help that restates its own subject rather than describing it |
+
+They are three of the six **dictionary-completeness** codes. The other three are
+`EML119` (a reference column with no `FK` modifier), `EML146` (a status, state or
+stage column with no `%%field … enum:` binding) and `EML154` (a `%%category` with
+no `name:`). The six are warnings by severity and gaps by consequence. Every
+Application Dictionary value is mandatory in the model, `audit-model.mjs` fails a
+model that carries any of the six, and the checker's closing verdict names them
+separately from the advisory warnings. Plan each value before writing it, and
+review the whole file again after a clean run: a delivered model carries none of
+them (`applicationDictionary.completeness` in `appwithai-language.json`).
 
 `EML151` is the one worth dwelling on, because coverage can be complete and the
 help still worthless. A published model once carried 642 field descriptions of
@@ -385,6 +403,70 @@ directive the generator ignores too — which is why `EML154` reports it.
 %%category name: People and Teams; default: true; entities: User, Team
 ```
 
+## `%%section` — lay a form out in sections of two-column rows *(compiled)*
+
+```
+%%section entity: <Entity>; name: <Label>; help: <text>; rows: <column>, <column> | <column> | …; collapsed: true
+```
+
+A column says what is stored; a field says it is on the screen; a section says
+**where, and beside what**. Each `%%section` line is one headed section of one
+entity's form:
+
+| Key | Required | Compiled to |
+|---|---|---|
+| `entity` | yes | the entity's tab |
+| `name` | yes | `sys_field_group.name` — the section heading |
+| `help` | completeness (`EML177`) | `sys_field_group.description` — the sentence under the heading |
+| `rows` | yes | each field's `sys_field_group_id`, `seq_no`, `is_same_line`, `column_span` |
+| `collapsed` | no | `sys_field_group.is_collapsed_by_default` |
+
+`rows` separates rows with `|` and the columns of a row with `,`. **A row holds
+one or two columns.** Two sit side by side; one spans the full width — the place
+for a `text` column, an address, or a reference whose label is long. Sections
+render in the order they are declared and fields in row order; repeating a
+section's `entity` and `name` continues it on the next line. `help` may contain
+`;`; no other value may.
+
+**It is mandatory.** Every entity declares its sections, and every column but
+the primary key is placed in exactly one row. An entity without sections is
+generated as one flat, unheaded list in declared order (`EML170`); a column no
+row names is put in a collapsed `Other` section at the end (`EML172`, which the
+fixer repairs by appending it to the last section — a repair, not a design).
+
+How to lay a form out:
+
+- **Pair what is filled in together** — `first_name, last_name`; `start_date,
+  end_date`; `quantity, unit_price`; a reference beside the status it moves
+  through.
+- **Name a section for what the person is doing**, not the kind of column:
+  *Identity, Contact, Terms, Delivery* — never *References, Dates, Numbers*.
+- **Open with what identifies the record** — the columns its display value is
+  built from, and the one or two someone checks first.
+- **Two to six rows a section.** Eight columns is two or three sections.
+- **Last, and `collapsed: true`:** what is rarely touched — internal notes,
+  integration references, administrator-only figures.
+- **Line items too.** A `parent:` entity's sections are what its own form shows
+  when a row is opened from the parent's tab.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `EML170` | warning · completeness | the entity declares no `%%section` |
+| `EML171` | error | a `%%section` without `entity:`, `name:` or `rows:` |
+| `EML172` | warning · completeness · auto-fix | columns placed in no row |
+| `EML173` | error | the entity is not declared |
+| `EML174` | error · auto-fix | a row with more than two columns |
+| `EML175` | warning · auto-fix | a column placed twice |
+| `EML176` | error | a row names a column the entity lacks, or its primary key |
+| `EML177` | warning · completeness | a section with no `help:`, or help that restates its name |
+| `EML178` | warning · auto-fix | a row places the state field — it is shown read-only in the form's header and always in the list grid, never in the body |
+
+```
+%%section entity: Order; name: Order; help: Who placed the order and when. Where it stands is shown in the header.; rows: order_number, order_date | customer_id
+%%section entity: Order; name: Delivery; help: Where the goods go and how they travel there.; rows: shipping_address | carrier, tracking_number
+%%section entity: Order; name: Notes; help: Anything the next person handling this order should know.; rows: notes; collapsed: true
+```
+
 ## `%%index` — database index *(compiled)*
 
 ```
@@ -451,7 +533,7 @@ guards must pass; there is no OR. See
 %%guard order.total gt 1000
 ```
 
-## `%%rbac` — restrict an operation or a transition *(compiled)*
+## `%%rbac` — restrict an operation *(compiled)*
 
 ```
 %%rbac <roleExpr> on <Entity>.<op>
@@ -476,7 +558,7 @@ directives are written lower-case (`role:manager`), and an exact match would
 make such a rule unsatisfiable — locking out precisely the people it was written
 to admit, invisibly, until someone is refused.
 
-### `<op>` is a CRUD operation or a transition
+### `<op>` is a CRUD operation — never a transition
 
 **CRUD**: `create` `read` `update` `delete`, or `*` for all four. Aliases are
 accepted (`insert`/`add`, `view`/`select`/`list`, `edit`/`write`/`modify`,
@@ -488,27 +570,13 @@ accepted (`insert`/`add`, `view`/`select`/`list`, `edit`/`write`/`modify`,
 %%rbac role:admin on Customer.*
 ```
 
-**Transition**: any other name is resolved against the entity's
-`stateDiagram-v2` transition events.
-
-```
-%%workflow QuoteLifecycle entity: Quote kind: state
-stateDiagram-v2
-    draft --> pending : submit
-    pending --> approved : approve
-
-%%rbac role:sales_manager on Quote.approve
-```
-
-A generated application has **no named-transition endpoint** — moving a record
-along an edge is an ordinary status update — so the rule is stored as the
-`(from_state, to_state)` pair it covers, and the guard recognises the move by the
-states the write crosses. Both ends are kept because one event can sit on several
-edges and two events can reach the same state: restricting `approve` must not
-incidentally restrict a different event that happens to land on `approved`.
-
-An event written with spaces or dashes in the diagram (`close won`) is named in
-one token in the directive (`close_won`).
+**A move is a role's.** A record moves by its action buttons along the edges its
+`stateDiagram-v2` draws (`spec/03-workflows.md`). A target that names a move —
+its event (`%%rbac role:sales_manager on Quote.approve`), `from->to` for an edge
+with no label, or `reopen` — gives that button to those roles, and only to them.
+A role given a move may press it without being allowed to edit the record. A move
+no line names is open to whoever may update the record. A user with several roles
+has the union of what they grant.
 
 ### `read` decides which functional role an entity belongs to
 
@@ -562,7 +630,6 @@ invitation to check.
 | | |
 |---|---|
 | CRUD rules | `sys_operation_access` (table, operation, role) |
-| Transition rules | `sys_transition_access` (table, transition, status field, from, to, role) |
 | Enforcement | `EntityAccessGuard`, applied to the generated `/bus` CRUD routes |
 | Roles | every role a directive names is created in `sys_role`, with one account holding it |
 | `read` rules | additionally narrow the dictionary window scope and the entity navigation |
@@ -594,8 +661,8 @@ regeneration. Rules an administrator adds in the running application are marked
 ### Validation
 
 `EML210` malformed syntax · `EML211` names no role · `EML212` suspicious role
-expression · `EML213` undeclared entity · `EML214` the target is neither a CRUD
-operation nor a transition of that entity.
+expression · `EML213` undeclared entity · `EML214` the target is neither a CRUD operation nor a
+move the entity's flow draws.
 
 All but `EML212` are **errors**, not warnings: a `%%rbac` rule that does not
 compile is not a rule that does nothing — it is an access restriction its author

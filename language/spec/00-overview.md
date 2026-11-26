@@ -78,7 +78,7 @@ Rules section        → flowchart-parser    → jdm-converter              → 
 Workflow, hook form  → compileHooks        → handler modules + registry → service lifecycle wiring
 Workflow, state form → compileWorkflows    → BPMN                       → sys_workflow_definitions, status machine
 Workflow, saga form  → compileSagaWorkflows→ one serviceTask per %%step → sys_workflow_definitions (source: model)
-%%rbac               → compileRbac         → operation + transition rules → sys_operation_access / sys_transition_access
+%%rbac               → compileRbac         → operation rules (never a transition) → sys_operation_access
 Whole document       → rag.ts              → retrieval chunks           → pgvector model_context index
 ```
 
@@ -91,7 +91,7 @@ what a generated application contains:
 - `packages/generator/src/rules/` — `flowchart-parser.ts`, `jdm-converter.ts`, `index.ts` (`%%action`)
 - `packages/generator/src/hooks/index.ts` — `%%hook`, handler form
 - `packages/generator/src/workflows/` — `index.ts` (state, saga), `steps.ts` (`%%step`, `%%loop`)
-- `packages/generator/src/rbac/index.ts` — `%%rbac`, both the CRUD and transition forms
+- `packages/generator/src/rbac/index.ts` — `%%rbac` on CRUD operations and on the moves of a record's flow (its action buttons), `reopen` included
 
 The web app keeps its own parsers for the editors — they run in the browser and
 cannot import the generator. They read the same syntax but do not decide what is

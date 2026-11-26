@@ -117,21 +117,27 @@ export class StateMachineViewer {
       className: "awv-node-state",
     }));
 
-    /* The label carries the trigger and nothing else. A restricted move also
-       names the roles allowed to make it, and putting both on the curve made
-       the longest labels overlap the pills they point at -- so the roles are a
-       colour and a tooltip, and the panel beside the canvas lists them in full. */
+    /* The label carries the trigger and nothing else. A state is changed only
+       by background workflows, so the tooltip names the sagas that make the
+       move, and an edge nothing writes is a colour of its own: a move no
+       workflow makes is one no record will ever take. */
     const edges = machine.transitions.map((transition, index) => {
-      const roles = machine.transitionRoles[transition.from + ">" + transition.to];
+      const writers = (machine.stateWriters || {})[transition.to];
+      const closing = transition.to === "[*]";
+      const opening = transition.from === "[*]";
       return {
         id: "t" + index,
         source: transition.from,
         target: transition.to,
         label: transition.trigger || undefined,
-        title: roles
-          ? "Only " + roles.join(", ") + " may make this move"
-          : "Any role may make this move",
-        className: roles ? "is-restricted" : "",
+        title: closing
+          ? "The record's life ends here"
+          : opening
+            ? "A new record starts here — the application sets it"
+            : writers
+            ? "Moved here by " + writers.join(", ") + " — never by hand"
+            : "No background workflow moves a record here",
+        className: closing || opening || writers ? "" : "is-unwritten",
       };
     });
 

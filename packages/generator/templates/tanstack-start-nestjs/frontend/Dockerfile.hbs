@@ -1,4 +1,15 @@
-FROM oven/bun:1.4.0-alpine AS builder
+# The build stage runs on real Node, with bun copied in for the install.
+#
+# `oven/bun` has no Node: `vinxi build` (a `#!/usr/bin/env node` script) ran on
+# Bun there, which ignores NODE_OPTIONS=--max-old-space-size and climbed past
+# 10 GB bundling Monaco and the GoRules editor. Docker Desktop's default VM is
+# smaller than that, so the build died with "cannot allocate memory" — and,
+# before that, with the client bundle half-written and the SSR build failing on
+# the missing `.vite/manifest.json`. On Node the same build peaks far lower and
+# the heap is a limit we can set. The runtime stage below stays on Bun.
+FROM oven/bun:1.4.4-alpine AS bun
+FROM node:22-alpine AS builder
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 
@@ -28,10 +39,21 @@ WORKDIR /app/frontend
 # time, is where that forwarding goes.
 ARG VITE_API_URL=
 ARG VITE_APP_URL
+# Where the dictionary's Electric shape requests go. Empty means same origin
+# (/api/v1/shape through this server). Compose sets it to the API's own port:
+# each shape is a long poll, there are several, and a browser allows six HTTP/1.1
+# connections per origin — so through this origin they took every slot and every
+# chunk, navigation and API call queued behind them (a 15 s navigation timeout,
+# 10 s notification polls). A second origin is a second pool of six.
+ARG VITE_ELECTRIC_PROXY_URL=
 ENV VITE_API_URL=${VITE_API_URL}
 ENV VITE_APP_URL=${VITE_APP_URL}
+ENV VITE_ELECTRIC_PROXY_URL=${VITE_ELECTRIC_PROXY_URL}
 
-RUN bun run build
+# Raise this if the build reports "heap out of memory"; lower it on a small
+# Docker VM. Docker Desktop: Settings > Resources > Memory.
+ARG BUILD_HEAP_MB=8192
+RUN NODE_OPTIONS=--max-old-space-size=${BUILD_HEAP_MB} node ./node_modules/.bin/vinxi build
 
 # Prune to production dependencies *here* rather than re-installing in the
 # runtime stage, and for the same reason as above: the runtime stage carries no
@@ -42,7 +64,7 @@ RUN if [ -f bun.lock ]; then bun install --frozen-lockfile --production; \
     else bun install --production; fi
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0-alpine
+FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 # PORT is what the server actually binds; without it Nitro picks 3000 and the

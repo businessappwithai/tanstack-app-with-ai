@@ -1,0 +1,179 @@
+/**
+ * Optimistic locking: a save names the version it read, and a save made
+ * against a version someone else has already moved past is refused.
+ *
+ * What the form does with the refusal — offer "Reload their version" or
+ * "Overwrite with mine" — rests entirely on four things this suite holds the
+ * API to:
+ *
+ *   - a stale `If-Match` is a 409 carrying `details.code: VERSION_CONFLICT`,
+ *     not a generic error the form cannot tell apart from a duplicate key;
+ *   - two saves racing from the same version produce exactly one winner. The
+ *     backend used to compare the version and then update in a second
+ *     statement, so both passed the comparison and the second silently
+ *     replaced the first — the lost update the version column exists to stop;
+ *   - "Overwrite" — a save naming the version the conflict reported — goes
+ *     through, and is itself checked;
+ *   - a malformed header is a 400, not a `NaN` that every save then "conflicts"
+ *     with, and no header at all still saves (an API client that never read a
+ *     version is not opted into locking).
+ *
+ * And one that lets a plain HTTP client take part without reading the body: a
+ * read and a save answer with the version as an `ETag`, which is the value to
+ * send back as `If-Match`.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import { entities, firstTextField, harness } from "../harness/index.ts";
+
+interface Row {
+  id?: string;
+  version?: number;
+  [column: string]: unknown;
+}
+
+interface ErrorBody {
+  statusCode?: number;
+  details?: { code?: string; expectedVersion?: number; currentVersion?: number };
+}
+
+const stamp = (label: string) => `e2e-lock-${label}-${Date.now().toString(36)}`;
+
+describe("optimistic locking", () => {
+  beforeAll(async () => {
+    await harness.setup();
+  });
+
+  afterAll(async () => {
+    await harness.teardown();
+  });
+
+  for (const entity of entities) {
+    const text = firstTextField(entity);
+    if (!text) continue;
+    const path = (id: string) => `/bus/${entity.route}/${id}`;
+    const ifMatch = (version: unknown) => ({ "If-Match": `"${version}"` });
+
+    describe(entity.name, () => {
+      it("refuses a save made against a version someone else moved past", async () => {
+        const created = (await harness.createWithParents(entity)) as Row | null;
+        if (!created?.id) return;
+        const opened = Number(created.version);
+
+        const first = await harness.client.patch<Row>(
+          path(created.id),
+          { [text.name]: stamp("first") },
+          { headers: ifMatch(opened), allowFailure: true }
+        );
+        if (!first.ok) return; // the model's own rules may refuse any edit here
+
+        const stale = await harness.client.patch<ErrorBody>(
+          path(created.id),
+          { [text.name]: stamp("stale") },
+          { headers: ifMatch(opened), allowFailure: true }
+        );
+        expect(stale.status).toBe(409);
+        expect(stale.data.details?.code).toBe("VERSION_CONFLICT");
+        expect(stale.data.details?.expectedVersion).toBe(opened);
+        expect(stale.data.details?.currentVersion).toBe(Number(first.data.version));
+      });
+
+      it("answers a read and a save with the record's version as its ETag", async () => {
+        const created = (await harness.createWithParents(entity)) as Row | null;
+        if (!created?.id) return;
+
+        const read = await harness.client.get<Row>(path(created.id));
+        expect(read.headers.get("etag")).toBe(`"${read.data.version}"`);
+
+        const saved = await harness.client.patch<Row>(
+          path(created.id),
+          { [text.name]: stamp("etag") },
+          { headers: ifMatch(read.data.version), allowFailure: true }
+        );
+        if (!saved.ok) return; // the model's own rules may refuse any edit here
+        expect(saved.headers.get("etag")).toBe(`"${saved.data.version}"`);
+      });
+
+      it("lets exactly one of two parallel saves from the same version win", async () => {
+        const created = (await harness.createWithParents(entity)) as Row | null;
+        if (!created?.id) return;
+        const opened = Number(created.version);
+        const values = [stamp("a"), stamp("b")];
+
+        const results = await Promise.all(
+          values.map((value) =>
+            harness.client.patch<Row>(
+              path(created.id as string),
+              { [text.name]: value },
+              { headers: ifMatch(opened), allowFailure: true }
+            )
+          )
+        );
+        const statuses = results.map((r) => r.status).sort();
+        // A rule refusing both is the model working, not a locking result.
+        if (statuses.every((s) => s === 422 || s === 400)) return;
+        expect(statuses).toEqual([200, 409]);
+
+        const winner = results.find((r) => r.status === 200);
+        const stored = await harness.client.get<Row>(path(created.id));
+        expect(stored.data[text.name]).toBe(winner?.data[text.name]);
+        expect(Number(stored.data.version)).toBe(opened + 1);
+      });
+
+      it("overwrites when the save names the version the conflict reported", async () => {
+        const created = (await harness.createWithParents(entity)) as Row | null;
+        if (!created?.id) return;
+        const opened = Number(created.version);
+
+        const theirs = await harness.client.patch<Row>(
+          path(created.id),
+          { [text.name]: stamp("theirs") },
+          { headers: ifMatch(opened), allowFailure: true }
+        );
+        if (!theirs.ok) return;
+
+        const conflict = await harness.client.patch<ErrorBody>(
+          path(created.id),
+          { [text.name]: stamp("mine") },
+          { headers: ifMatch(opened), allowFailure: true }
+        );
+        expect(conflict.status).toBe(409);
+
+        const mine = stamp("mine-again");
+        const overwrite = await harness.client.patch<Row>(
+          path(created.id),
+          { [text.name]: mine },
+          { headers: ifMatch(conflict.data.details?.currentVersion), allowFailure: true }
+        );
+        expect(overwrite.status).toBe(200);
+        expect(overwrite.data[text.name]).toBe(mine);
+      });
+
+      it("refuses a malformed If-Match and still saves without one", async () => {
+        const created = (await harness.createWithParents(entity)) as Row | null;
+        if (!created?.id) return;
+
+        const malformed = await harness.client.patch<{ message?: string }>(
+          path(created.id),
+          { [text.name]: stamp("bad-header") },
+          { headers: { "If-Match": "not-a-version" }, allowFailure: true }
+        );
+        expect(malformed.status).toBe(400);
+        expect(String(malformed.data.message)).toContain("If-Match");
+
+        // Without a header the save is unconditional. The model's own
+        // validation or rules may still refuse the value this suite invents —
+        // that is the model working — but never as a version conflict.
+        const unconditional = await harness.client.patch<Row>(
+          path(created.id),
+          { [text.name]: stamp("no-header") },
+          { allowFailure: true }
+        );
+        expect(unconditional.status).not.toBe(409);
+      });
+    });
+  }
+});

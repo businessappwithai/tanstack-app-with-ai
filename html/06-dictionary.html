@@ -116,6 +116,17 @@
   </figcaption>
 </figure>
 
+<h3>The state field is placed by the dictionary, not by the model</h3>
+<p>
+  An entity with a state machine keeps its state in <code>status</code> (else <code>state</code>, else
+  <code>stage</code>), and that one column is system-managed. Its field is never on the form — it is shown
+  read-only as a badge in the record's header — and it is always a column of the list grid, whatever an
+  administrator does to grid visibility. Its <code>sys_column</code> row is read-only and not updateable, so
+  a person's write that changes it is refused with <code>STATE_FIELD_SYSTEM_MANAGED</code>. A
+  <code>%%section</code> row that places it is a checker warning (<code>EML178</code>), and the fixer takes
+  it out.
+</p>
+
 <h2>Business Rules</h2>
 <p>
   The rules your model declared, plus a validation rule per entity, all live and editable. An operations
@@ -188,17 +199,18 @@
 
 <h2>Roles</h2>
 <p>
-  Access control is generated too. Four roles are seeded, and the guards the state machines declare on
-  their transitions — <code>[Manager]</code>, <code>[Administrator]</code> — resolve against this list
-  rather than against strings scattered through service code.
+  Access control is generated too. Four roles are seeded, and the roles a model's <code>%%rbac</code> lines
+  name resolve against this list rather than against strings scattered through service code. They decide
+  what a person may read, create, update or delete; they never grant a state transition, because only
+  background workflows move a record from one state to the next.
 </p>
 
 <figure>
   <img src="img/51-crm-roles.png" alt="The Role Management screen listing four roles: Administrator, marked Master and Active, described as system administrator with full access to all modules; Analyst, Standard and Active, reviews and analyses application data; Manager, Standard and Active, manages operations and team assignments; and User, Standard and Active, standard user with basic access.">
   <figcaption>
-    <b>Four roles, seeded with the application.</b> One master and three standard. A transition guarded by
-    <code>[Manager]</code> in the model is a permission check against this row at runtime — which is why
-    chapter 03's state machines could name roles without anyone wiring them up.
+    <b>Four roles, seeded with the application.</b> One master and three standard. A role an
+    <code>%%rbac</code> line names is a permission check against this row at runtime — which is why a model
+    can name roles without anyone wiring them up.
   </figcaption>
 </figure>
 

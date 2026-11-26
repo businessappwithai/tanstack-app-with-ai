@@ -8,6 +8,7 @@
  */
 
 import {
+  BadRequestException,
   ConflictException,
   Controller,
   Get,
@@ -22,14 +23,44 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
-  Logger,
   UseGuards,
   Req,
+  Res,
+  HttpException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { BusService } from './bus.service';
+import { TransitionService } from './transition.service';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { EntityAccessGuard } from '../auth/guards/entity-access.guard';
+import { getLogger } from '../../common/logging/logger.service';
+
+/**
+ * The record version an `If-Match` header names, for optimistic locking.
+ *
+ * The form sends the version it loaded the record at; the update is refused
+ * with 409 if anyone has saved the record since. Accepts the shapes clients
+ * actually send — `"v3"`, `"3"`, `3`, and a weak `W/"3"` — and refuses anything
+ * else with 400. It used to `parseInt` whatever arrived, so a malformed header
+ * became `NaN`, which never equals a version, and every save with it was
+ * reported as somebody else's edit.
+ */
+function parseIfMatch(ifMatch?: string): number | undefined {
+  if (ifMatch === undefined || ifMatch.trim() === '' || ifMatch.trim() === '*') return undefined;
+  const match = /^(?:W\/)?"?v?(\d+)"?$/i.exec(ifMatch.trim());
+  if (!match) {
+    throw new BadRequestException(`If-Match must name a record version, such as "3"; got ${ifMatch}`);
+  }
+  return Number(match[1]);
+}
+
+/**
+ * A record answered with its version as an ETag — the value a client sends
+ * back as `If-Match` to save against the version it read.
+ */
+function setEtag(reply: any, record: any): void {
+  if (reply && record && record.version != null) reply.header('ETag', `"${record.version}"`);
+}
 
 @ApiTags('bus')
 @ApiBearerAuth()
@@ -39,10 +70,28 @@ import { EntityAccessGuard } from '../auth/guards/entity-access.guard';
 @UseGuards(SessionAuthGuard, EntityAccessGuard)
 @Controller('bus')
 export class BusController {
-  private readonly logger = new Logger(BusController.name);
 
-  constructor(private readonly busService: BusService) {
-    this.logger.log('BusController initialized');
+  constructor(
+    private readonly busService: BusService,
+    private readonly transitions: TransitionService,
+  ) {
+  }
+
+  /**
+   * Serve the application manual as a dynamically generated HTML page.
+   * The manual is built from live application dictionary data (sys_table,
+   * sys_column, sys_field, sys_workflow_transitions, sys_rule_definitions,
+   * sys_access_grant) so it always reflects the current state of the DB.
+   * GET /bus/manual
+   */
+  @Get('manual')
+  @ApiOperation({ summary: 'Application manual as HTML, built from live dictionary data' })
+  @ApiResponse({ status: 200, description: 'Self-contained HTML manual' })
+  async manual(@Res() res: any) {
+    const html = await this.busService.renderManualHtml();
+    res.header('Content-Type', 'text/html; charset=utf-8');
+    res.header('Cache-Control', 'no-store');
+    res.send(html);
   }
 
   /**
@@ -61,18 +110,29 @@ export class BusController {
     @Query('orderDir') orderDir?: 'asc' | 'desc',
     @Query('search') search?: string,
     @Query() query?: Record<string, any>,
+    @Req() req?: any,
   ) {
-    const methodName = 'findAll';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}, page: ${page}, limit: ${limit}, orderBy: ${orderBy}, orderDir: ${orderDir}, search: ${search}`);
 
     // Extract filters from query params (exclude pagination params)
-    const { page: _p, limit: _l, orderBy: _ob, orderDir: _od, search: _s, ...rawFilters } = query || {};
+    const { page: _p, limit: _l, orderBy: _ob, orderDir: _od, search: _s, awaiting, ...rawFilters } =
+      query || {};
 
     // Parse filter parameters with format: filter.fieldName=operator:value
     const parsedFilters = this.parseFilters(rawFilters);
 
+    // `?awaiting=me` — the records waiting for this person: in a state they have
+    // a move out of, and assigned to them or to no one.
+    if (awaiting === 'me') {
+      const waiting = await this.transitions.awaitingStates(entity, {
+        id: req?.user?.id ?? null,
+        capabilities: req?.capabilities,
+      });
+      parsedFilters[waiting.column] = { operator: 'in', value: waiting.states };
+      const me = req?.user?.sysUserId;
+      if (me) parsedFilters.assigned_to = { operator: '= or null', value: me };
+    }
+
     if (Object.keys(parsedFilters).length > 0) {
-      this.logger.debug(`[${methodName}] Filters: ${JSON.stringify(parsedFilters)}`);
     }
 
     let searchFields: string[] | undefined;
@@ -86,7 +146,6 @@ export class BusController {
 
     const result = await this.busService.findAll(entity, { page, limit, orderBy, orderDir, search, searchFields }, parsedFilters);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, returned ${result.data.length} records (total: ${result.meta.total})`);
     return result;
   }
 
@@ -140,7 +199,6 @@ export class BusController {
               parsed[fieldName] = { operator: '=', value };
           }
 
-          this.logger.debug(`[parseFilters] Parsed filter: ${fieldName} with operator ${operator}`);
         } else {
           // No operator specified: an exact match on the value as given.
           parsed[fieldName] = { operator: '=', value };
@@ -165,12 +223,9 @@ export class BusController {
   @ApiParam({ name: 'entity', description: 'Entity name' })
   @ApiResponse({ status: 200, description: 'Returns entity metadata from Application Dictionary' })
   async getMetadata(@Param('entity') entity: string) {
-    const methodName = 'getMetadata';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}`);
 
     const result = await this.busService.getEntityMetadata(entity);
 
-    this.logger.debug(`[${methodName}] Success - entity: ${entity}, returned ${result.columns.length} columns`);
     return result;
   }
 
@@ -182,12 +237,9 @@ export class BusController {
   @ApiOperation({ summary: 'Get fields for form display (ordered by seq_no)' })
   @ApiParam({ name: 'entity', description: 'Entity name' })
   async getFormFields(@Param('entity') entity: string) {
-    const methodName = 'getFormFields';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}`);
 
     const result = await this.busService.getFormFields(entity);
 
-    this.logger.debug(`[${methodName}] Success - entity: ${entity}, returned ${result.length} form fields`);
     return result;
   }
 
@@ -199,12 +251,9 @@ export class BusController {
   @ApiOperation({ summary: 'Get fields for grid display (ordered by seq_no_grid)' })
   @ApiParam({ name: 'entity', description: 'Entity name' })
   async getGridFields(@Param('entity') entity: string) {
-    const methodName = 'getGridFields';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}`);
 
     const result = await this.busService.getGridFields(entity);
 
-    this.logger.debug(`[${methodName}] Success - entity: ${entity}, returned ${result.length} grid fields`);
     return result;
   }
 
@@ -221,13 +270,12 @@ export class BusController {
   async findOne(
     @Param('entity') entity: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) reply?: any,
   ) {
-    const methodName = 'findOne';
-    this.logger.debug(`[${methodName}] Request - entity: ${entity}, id: ${id}`);
 
     const result = await this.busService.findById(entity, id);
+    setEtag(reply, result);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}`);
     return result;
   }
 
@@ -244,15 +292,11 @@ export class BusController {
     @Param('entity') entity: string,
     @Body() data: Record<string, any>,
   ) {
-    const methodName = 'create';
-    this.logger.log(`[${methodName}] Request - entity: ${entity}`);
-    this.logger.debug(`[${methodName}] Request body: ${JSON.stringify(data)}`);
 
     // Validate data against dictionary metadata
     await this.busService.validateData(entity, data, 'create');
     const result = await this.busService.create(entity, data);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, created id: ${result.id}`);
     return result;
   }
 
@@ -273,15 +317,10 @@ export class BusController {
     @Body() data: Record<string, any>,
     @Headers('if-match') ifMatch?: string,
     @Req() req?: any,
+    @Res({ passthrough: true }) reply?: any,
   ) {
-    const methodName = 'update';
-    // Extract version from If-Match header
-    const version = ifMatch
-      ? parseInt(ifMatch.replace(/"/g, '').replace('v', ''), 10)
-      : undefined;
+    const version = parseIfMatch(ifMatch);
 
-    this.logger.log(`[${methodName}] Request - entity: ${entity}, id: ${id}, expectedVersion: ${version}`);
-    this.logger.debug(`[${methodName}] Request body: ${JSON.stringify(data)}`);
 
     // Capture before-value for audit trail
     if (req) {
@@ -291,8 +330,8 @@ export class BusController {
     // Validate data against dictionary metadata
     await this.busService.validateData(entity, data, 'update');
     const result = await this.busService.update(entity, id, data, version);
+    setEtag(reply, result);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}, new version: ${result.version}`);
     return result;
   }
 
@@ -300,6 +339,141 @@ export class BusController {
    * Partially update a record
    * PATCH /bus/:entity/:id
    */
+  /**
+   * The moves the caller may make on this record now — its action buttons.
+   * GET /bus/:entity/:id/actions
+   */
+  @Get(':entity/:id/actions')
+  @ApiOperation({ summary: "The record's action buttons for the caller" })
+  @ApiParam({ name: 'entity', description: 'Entity name' })
+  @ApiParam({ name: 'id', description: 'Record UUID' })
+  async actions(
+    @Param('entity') entity: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req?: any,
+  ) {
+    return this.transitions.availableActions(entity, id, {
+      id: req?.user?.id ?? null,
+      name: req?.user?.name ?? null,
+      capabilities: req?.capabilities,
+    });
+  }
+
+  /**
+   * Press a move: `{ "event": "close_won" }` or `{ "to": "closed_won" }`, with
+   * the version the record was read at as If-Match (428 without it).
+   *
+   * With `data` — the form as it stands — the press is two transactions. The
+   * first saves the form, the record staying in its current status. The second
+   * is the move: it runs the workflows bound to the status it reaches and moves
+   * the record only if every one succeeds. A failure in the second undoes only
+   * the move: what was typed stays saved, the status stays where it was, and the
+   * refusal says so (`details.phase: "workflow"`, the new `details.version`). A
+   * refusal in the first saves nothing (`details.phase: "save"`).
+   * POST /bus/:entity/:id/transition
+   */
+  @Post(':entity/:id/transition')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Move a record along its lifecycle' })
+  @ApiParam({ name: 'entity', description: 'Entity name' })
+  @ApiParam({ name: 'id', description: 'Record UUID' })
+  @ApiResponse({ status: 200, description: 'Moved; the record and where it went' })
+  @ApiResponse({ status: 403, description: "TRANSITION_FORBIDDEN — the caller's roles do not grant it" })
+  @ApiResponse({ status: 409, description: 'INVALID_TRANSITION or VERSION_CONFLICT' })
+  @ApiResponse({ status: 422, description: 'A rule refused it, or a workflow it runs failed' })
+  @ApiResponse({ status: 428, description: 'No If-Match' })
+  async transition(
+    @Param('entity') entity: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      event?: string;
+      to?: string;
+      assignTo?: string | null;
+      assignRole?: string | null;
+      data?: Record<string, any>;
+    },
+    @Headers('if-match') ifMatch?: string,
+    @Req() req?: any,
+    @Res({ passthrough: true }) reply?: any,
+  ) {
+    let version = parseIfMatch(ifMatch);
+    if (version === undefined) {
+      // A move made against a version nobody read could undo what someone else
+      // just did; the button always knows which version it was drawn for.
+      throw new HttpException(
+        {
+          message: 'A move needs the version the record was read at, as If-Match.',
+          error: 'Precondition Required',
+          details: { code: 'PRECONDITION_REQUIRED' },
+        },
+        428,
+      );
+    }
+    if (!body?.event && !body?.to) {
+      throw new BadRequestException('Name the move: { "event": … } or { "to": … }.');
+    }
+    // Transaction one: save the form, in the status the record is in. It commits
+    // before the move starts, so a failing workflow cannot take it back.
+    let afterSave = false;
+    if (body.data && Object.keys(body.data).length > 0) {
+      const saved = await this.inPhase('save', () =>
+        this.saveBeforeMove(entity, id, body.data!, version!),
+      );
+      version = Number(saved.version);
+      afterSave = true;
+    }
+
+    // Transaction two: the move and the workflows bound to the status it reaches.
+    let result;
+    try {
+      result = await this.transitions.move(
+        entity,
+        id,
+        { event: body.event, to: body.to, version, assignTo: body.assignTo, assignRole: body.assignRole, afterSave },
+        { id: req?.user?.id ?? null, name: req?.user?.name ?? null, capabilities: req?.capabilities },
+      );
+    } catch (error) {
+      // The save stands. Say so, with the version it left, so the form can carry on.
+      if (afterSave) throw this.withPhase(error, 'workflow', { version, saved: true });
+      throw error;
+    }
+    setEtag(reply, result.record);
+    return { ...result.record, lifecycle: result.lifecycle, ranWorkflows: result.ranWorkflows };
+  }
+
+  /**
+   * The first transaction of a press: validate and save the form, as the form's own
+   * save does (a PATCH — the values it holds, not a full replacement).
+   */
+  private async saveBeforeMove(entity: string, id: string, data: Record<string, any>, version: number) {
+    await this.busService.validateData(entity, data, 'patch');
+    return this.busService.update(entity, id, data, version);
+  }
+
+  /** Run `work`; a refusal it throws says which half of the press it came from. */
+  private async inPhase<T>(phase: 'save' | 'workflow', work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      throw this.withPhase(error, phase);
+    }
+  }
+
+  /**
+   * The same refusal, with `details.phase` added. The status code and every field
+   * it already carried are kept; only an HTTP refusal is rewritten.
+   */
+  private withPhase(error: unknown, phase: 'save' | 'workflow', extra: Record<string, unknown> = {}) {
+    if (!(error instanceof HttpException)) return error;
+    const response = error.getResponse();
+    const body = typeof response === 'string' ? { message: response } : (response as Record<string, any>);
+    return new HttpException(
+      { ...body, details: { ...(body.details ?? {}), ...extra, phase } },
+      error.getStatus(),
+    );
+  }
+
   @Post(':entity/:id/promote')
   @ApiOperation({ summary: 'Retry the draft → final promotion for a record' })
   @ApiParam({ name: 'entity', description: 'Entity name' })
@@ -326,14 +500,10 @@ export class BusController {
     @Body() data: Record<string, any>,
     @Headers('if-match') ifMatch?: string,
     @Req() req?: any,
+    @Res({ passthrough: true }) reply?: any,
   ) {
-    const methodName = 'patch';
-    const version = ifMatch
-      ? parseInt(ifMatch.replace(/"/g, '').replace('v', ''), 10)
-      : undefined;
+    const version = parseIfMatch(ifMatch);
 
-    this.logger.log(`[${methodName}] Request - entity: ${entity}, id: ${id}, expectedVersion: ${version}`);
-    this.logger.debug(`[${methodName}] Request body: ${JSON.stringify(data)}`);
 
     // Capture before-value for audit trail
     if (req) {
@@ -343,8 +513,8 @@ export class BusController {
     // Validate partial data against dictionary metadata
     await this.busService.validateData(entity, data, 'patch');
     const result = await this.busService.update(entity, id, data, version);
+    setEtag(reply, result);
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}, new version: ${result.version}`);
     return result;
   }
 
@@ -360,10 +530,7 @@ export class BusController {
   @ApiResponse({ status: 201, description: 'Dictionary records created or already existed' })
   @ApiResponse({ status: 404, description: 'No sys_table record found — register the table first' })
   async setupDictionary(@Param('entity') entity: string) {
-    const methodName = 'setupDictionary';
-    this.logger.log(`[${methodName}] Request - entity: ${entity}`);
     const result = await this.busService.setupEntityDictionary(entity);
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, created: ${result.created.length} records`);
     return result;
   }
 
@@ -387,8 +554,6 @@ export class BusController {
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req?: any,
   ) {
-    const methodName = 'delete';
-    this.logger.log(`[${methodName}] Request - entity: ${entity}, id: ${id}`);
 
     // Capture before-value for audit trail
     if (req) {
@@ -415,9 +580,11 @@ export class BusController {
      * which is also what tells a client to go and remove the children first.
      */
     if (!promotion.promoted) {
-      this.logger.warn(
-        `[${methodName}] Refused - entity: ${entity}, id: ${id}: ${promotion.message ?? 'the delete did not complete'}`,
-      );
+      getLogger('entity').event('entity.promotion.refused', {
+        entity,
+        recordId: id,
+        reason: promotion.message ?? 'the delete did not complete',
+      });
       throw new ConflictException({
         message: promotion.message ?? `Could not delete ${entity} ${id}`,
         deleted: false,
@@ -425,7 +592,6 @@ export class BusController {
       });
     }
 
-    this.logger.log(`[${methodName}] Success - entity: ${entity}, id: ${id}`);
     return { deleted: promotion.promoted, promotion };
   }
 

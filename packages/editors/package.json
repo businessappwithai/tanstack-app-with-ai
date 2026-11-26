@@ -1,0 +1,31 @@
+{
+  "name": "@appwithai/editors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The business-rule and workflow editors — one source for the modelling tool's Logic step and for every generated application, which receives it as source at generation time.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@gorules/jdm-editor": "^1.52.0",
+    "@monaco-editor/loader": "^1.7.0",
+    "@xyflow/react": "^12.11.2",
+    "clsx": "^2.1.1",
+    "dayjs": "1.11.20",
+    "lucide-react": "^1.27.0",
+    "monaco-editor": "^0.57.0",
+    "rc-picker": "4.6.15",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.4.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0 || ^19.0.0",
+    "react-dom": "^18.2.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.2.0"
+  }
+}

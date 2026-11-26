@@ -1,0 +1,43 @@
+/**
+ * Status flows an administrator can redraw.
+ *
+ * A row of `sys_workflow_definitions` with `kind = 'state'` is a status flow drawn
+ * in Rules and workflows. It used to be a picture: the runtime read every flow from
+ * the compiled `common/lifecycle.ts`. Now it is the flow of record for its table —
+ * `lifecycle` holds what the diagram compiles to (the same shape `lifecycle.ts`
+ * holds), and the backend runs it in place of the model's. A table with no such
+ * row runs the model's flow, so deleting the row is how a flow goes back.
+ *
+ * Any change to the table sends `pg_notify('lifecycle_changed')`, and every backend
+ * instance reloads its flows (LifecycleStore), as `access_changed` does for grants.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { Kysely, sql } from 'kysely';
+
+export async function up(db: Kysely<any>): Promise<void> {
+  await sql`ALTER TABLE sys_workflow_definitions ADD COLUMN IF NOT EXISTS lifecycle JSONB`.execute(db);
+
+  await sql`
+    CREATE OR REPLACE FUNCTION sys_lifecycle_changed() RETURNS trigger AS $$
+    BEGIN
+      PERFORM pg_notify('lifecycle_changed', TG_TABLE_NAME);
+      RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql
+  `.execute(db);
+  await sql`DROP TRIGGER IF EXISTS trg_sys_workflow_definitions_lifecycle ON sys_workflow_definitions`.execute(db);
+  await sql`
+    CREATE TRIGGER trg_sys_workflow_definitions_lifecycle
+    AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON sys_workflow_definitions
+    FOR EACH STATEMENT EXECUTE FUNCTION sys_lifecycle_changed()
+  `.execute(db);
+}
+
+export async function down(db: Kysely<any>): Promise<void> {
+  await sql`DROP TRIGGER IF EXISTS trg_sys_workflow_definitions_lifecycle ON sys_workflow_definitions`.execute(db);
+  await sql`DROP FUNCTION IF EXISTS sys_lifecycle_changed()`.execute(db);
+  await sql`ALTER TABLE sys_workflow_definitions DROP COLUMN IF EXISTS lifecycle`.execute(db);
+}

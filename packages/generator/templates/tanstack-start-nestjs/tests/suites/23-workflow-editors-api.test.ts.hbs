@@ -1,0 +1,210 @@
+/**
+ * What the rules & workflows screen writes: the API behind it.
+ *
+ * The screen is the modelling tool's own `LogicWorkbench`; in a running application its
+ * host saves through `/rules` and `/workflow-definitions`. A lifecycle or process is an
+ * automation row; a status flow is a `state` row the application follows in place of the
+ * model's flow for that record type (`GET /lifecycles` says which it follows), and whose
+ * definition the executor must never try to run. This suite holds the API to that.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import { harness } from "../harness/index.ts";
+
+interface Definition {
+  id: string;
+  name: string;
+  kind: string;
+  entity_name: string;
+  is_active: boolean;
+  mermaid_code?: string | null;
+  bpmn_xml?: string | null;
+}
+
+interface Edges {
+  data?: Record<string, Array<{ statusField: string; from: string; to: string }>>;
+}
+
+interface Flow {
+  column: string;
+  hasMachine: boolean;
+  afterDraft: string;
+  terminal: string[];
+  edges: Array<{ from: string; to: string; event: string; label: string }>;
+  values: string[];
+}
+
+const token = Date.now().toString(36);
+const slug = token.replace(/[^a-z0-9]/gi, "").toLowerCase();
+// A record type the model gave no status flow: there is no column to keep one in.
+const unknownEntity = `E2eMachine${slug}`;
+// The table of that record type, for what this suite files without a flow.
+const scratchTable = `bus_e2e_machine${slug}`;
+// The state this suite adds, and takes away again.
+const held = `e2e_hold_${slug}`;
+
+/** A flow as a diagram, the way the editor writes one. */
+const diagramOf = (flow: Flow, ...extra: string[]) =>
+  [
+    "stateDiagram-v2",
+    `  [*] --> ${flow.afterDraft}`,
+    ...flow.edges.map((edge) => `  ${edge.from} --> ${edge.to}${edge.event ? ` : ${edge.event}` : ""}`),
+    ...extra.map((line) => `  ${line}`),
+    ...flow.terminal.map((state) => `  ${state} --> [*]`),
+  ].join("\n");
+
+describe("rules & workflows API", () => {
+  const created: string[] = [];
+  let table = "";
+  let original: Flow | undefined;
+
+  beforeAll(async () => {
+    await harness.setup();
+    // A table with a flow from the model that nobody has redrawn yet.
+    const flows = (await harness.client.get<Record<string, Flow>>("/lifecycles")).data ?? {};
+    const stored = await harness.client.get<{ items: Definition[] }>("/workflow-definitions?kind=state&limit=200");
+    const redrawn = new Set((stored.data.items ?? []).map((item) => item.entity_name));
+    table = Object.keys(flows).find((name) => flows[name]?.hasMachine && !redrawn.has(name)) ?? "";
+    original = flows[table];
+  });
+
+  afterAll(async () => {
+    for (const id of created) {
+      await harness.client.delete(`/workflow-definitions/${id}`, { allowFailure: true });
+    }
+    await harness.teardown();
+  });
+
+  const edgesOf = async () => {
+    const response = await harness.client.get<Edges & Record<string, unknown>>(
+      `/workflows/transitions?table=${table}`
+    );
+    const body = response.data as unknown as { byTable?: Record<string, unknown[]> } & Edges;
+    return ((body.byTable ?? body.data ?? {})[table] ?? []) as Array<{ from: string; to: string }>;
+  };
+  const flowOf = async () => (await harness.client.get<Record<string, Flow>>("/lifecycles")).data?.[table];
+
+  it("refuses a status flow for a record type the model gave none", async () => {
+    const refused = await harness.client.post<{ message?: string }>(
+      "/workflow-definitions",
+      {
+        kind: "state",
+        name: `Lifecycle ${token}`,
+        entityName: unknownEntity,
+        mermaid: "stateDiagram-v2\n  [*] --> open\n  open --> [*]",
+      },
+      { allowFailure: true }
+    );
+    expect(refused.status).toBe(400);
+  });
+
+  it("runs a redrawn flow in place of the model's", async () => {
+    if (!original) return;
+    const made = await harness.client.post<Definition>("/workflow-definitions", {
+      kind: "state",
+      name: `Lifecycle ${token}`,
+      entityName: table,
+      mermaid: diagramOf(
+        original,
+        `${original.afterDraft} --> ${held} : e2e hold`,
+        `${held} --> ${original.afterDraft} : e2e resume`
+      ),
+    });
+    expect(made.ok).toBe(true);
+    created.push(made.data.id);
+    expect(made.data.kind).toBe("state");
+    // A flow is followed, not run: the executor has nothing to start.
+    expect(made.data.bpmn_xml ?? null).toBeNull();
+
+    const flow = await flowOf();
+    expect(flow?.values).toContain(held);
+    expect(flow?.edges.some((edge) => edge.event === "e2e_hold" && edge.to === held)).toBe(true);
+    expect((await edgesOf()).some((edge) => edge.from === held)).toBe(true);
+  });
+
+  it("keeps a status flow out of the automation listing", async () => {
+    const listed = await harness.client.get<{ items: Definition[] }>(
+      "/workflow-definitions?kind=automation&limit=200"
+    );
+    expect(listed.data.items.some((item) => item.entity_name === table && item.kind === "state")).toBe(false);
+  });
+
+  it("refuses a second flow for the same record type", async () => {
+    if (!original) return;
+    const again = await harness.client.post<{ message?: string }>(
+      "/workflow-definitions",
+      { kind: "state", name: `Second ${token}`, entityName: table, mermaid: diagramOf(original) },
+      { allowFailure: true }
+    );
+    expect(again.status).toBe(400);
+  });
+
+  it("puts the model's flow back when the redrawn one is removed", async () => {
+    const id = created[0];
+    if (!id || !original) return;
+    const removed = await harness.client.delete(`/workflow-definitions/${id}`);
+    expect(removed.ok).toBe(true);
+    created.length = 0;
+    expect(await flowOf()).toEqual(original);
+    expect((await edgesOf()).some((edge) => edge.from === held)).toBe(false);
+  });
+
+  it("keeps a rule's title beside the identifier it is filed under", async () => {
+    const jdm = JSON.stringify({
+      hitPolicy: "first",
+      inputs: [{ id: "i1", name: "status", field: "status" }],
+      outputs: [{ id: "o1", name: "Output", field: "action" }],
+      rules: [{ _id: "r1", i1: "", o1: "allow" }],
+    });
+    const made = await harness.client.post<{ id: string; title?: string; ruleName: string }>(
+      "/rules",
+      {
+        entityName: scratchTable,
+        ruleName: `titled${token.replace(/[^a-z0-9]/gi, "")}`,
+        operation: "CREATE",
+        title: "A rule with words",
+        jdmContent: jdm,
+      },
+      { allowFailure: true }
+    );
+    if (!made.ok) return; // the model's own rules may refuse this entity; the title is what is held here
+    expect(made.data.title).toBe("A rule with words");
+    const renamed = await harness.client.put<{ title?: string }>(`/rules/${made.data.id}`, {
+      title: "Another way to say it",
+    });
+    expect(renamed.data.title).toBe("Another way to say it");
+    // This entity's rules only: the unfiltered list is capped at 200 and an
+    // installation that has been tested a few times holds more than that, so
+    // whether the new rule was on the page depended on the order it came back in.
+    const listed = await harness.client.get<Array<{ id: string; title?: string }> | { rules?: Array<{ id: string; title?: string }> }>(`/rules?entityName=${encodeURIComponent(scratchTable)}&limit=200`);
+    const rows = Array.isArray(listed.data) ? listed.data : (listed.data.rules ?? []);
+    expect(rows.find((row) => row.id === made.data.id)?.title).toBe("Another way to say it");
+    await harness.client.delete(`/rules/${made.data.id}`, { allowFailure: true });
+    await harness.client.delete(`/rules/${made.data.id}?permanent=true`, { allowFailure: true });
+  });
+
+  it("stores a process as an automation, compiled for the engine", async () => {
+    const made = await harness.client.post<Definition>("/workflow-definitions", {
+      kind: "automation",
+      name: `Process ${token}`,
+      entityName: unknownEntity,
+      operation: "CREATE",
+      triggerType: "rule",
+      isActive: false,
+      mermaid: [
+        "flowchart TD",
+        "%%workflow Process kind: saga entity: " + unknownEntity + " trigger: rule operation: CREATE",
+        "Start([Start]) --> s1[Wait]",
+        "%%step s1 type: Formula operation: set left: 1 as: x",
+        "s1 --> End([End])",
+      ].join("\n"),
+    });
+    expect(made.ok).toBe(true);
+    created.push(made.data.id);
+    expect(made.data.kind).toBe("automation");
+    expect(made.data.mermaid_code).toContain("%%step s1");
+  });
+});

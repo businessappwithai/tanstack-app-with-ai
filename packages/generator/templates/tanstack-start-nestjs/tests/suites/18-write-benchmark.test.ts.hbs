@@ -121,6 +121,7 @@ describe("write benchmark", () => {
         if (ids.length === 0) return;
 
         let removed = 0;
+        let refused = 0;
         for (const id of ids) {
           const response = await timed(
             "delete (benchmark)",
@@ -128,8 +129,12 @@ describe("write benchmark", () => {
             entity.route
           );
           if (response.ok) removed++;
+          // A refusal the model asked for is not a failure of the API: a record
+          // that other records require (a pack its workflow gave a payment on
+          // create) or one that is Final and locked is answered 409, not 5xx.
+          else if (response.status === 409) refused++;
         }
-        expect(removed).toBeGreaterThan(0);
+        expect(removed + refused).toBe(ids.length);
       });
     });
   }

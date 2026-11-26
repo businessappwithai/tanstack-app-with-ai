@@ -221,6 +221,22 @@ returned on the response under \`_rules\`.
 
 ${ruleLines}
 
+## Two people editing one record
+
+Every record carries a \`version\`, starting at 1 and raised by every save. A
+read answers with it as an \`ETag\`; send it back as \`If-Match\` on \`PUT\` and a
+save against a record someone else has changed since is refused with **409**
+and \`details.code: "VERSION_CONFLICT"\` (with \`expectedVersion\` and
+\`currentVersion\`), instead of overwriting their change. Re-read the record to
+see what they did, then save again against the new version — or send that
+version to overwrite on purpose. Without \`If-Match\` a save is unconditional.
+
+\`\`\`sh
+curl -i localhost:3000/api/<collection>/<id>               # ETag: "3"
+curl -X PUT -H 'If-Match: "3"' -H 'Content-Type: application/json' \\
+  -d '{"name":"…"}' localhost:3000/api/<collection>/<id>   # 200, or 409 if it moved
+\`\`\`
+
 ## Workflows
 
 State transitions are enforced on update (illegal transitions return HTTP 409).

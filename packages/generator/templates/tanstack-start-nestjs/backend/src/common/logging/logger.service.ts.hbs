@@ -33,6 +33,13 @@ import * as nodePath from 'path';
 import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 
+import { categoryForStatus, FALLBACK_CODE } from '../errors/app-error';
+import { describeLevels, type ChannelLevelReport } from './level-control';
+import { runShutdownHooks } from './shutdown';
+import { keepDebug, parseTraceparent, sampleRate } from './trace-context';
+import { initTracing, startServerSpan, tracingEnabled } from '../tracing/tracing';
+import { ERROR_CATEGORIES } from '../errors/catalogue';
+
 /* -------------------------------------------------------------------------- */
 /*  The specification                                                          */
 /* -------------------------------------------------------------------------- */
@@ -188,6 +195,9 @@ export type LogFields = Record<string, unknown>;
 export interface RequestContext {
   requestId?: string;
   userId?: string | null;
+  /** From the caller's W3C `traceparent` header (or the active OpenTelemetry span). */
+  traceId?: string;
+  spanId?: string;
   /**
    * Who the audit trail records for this request.
    *
@@ -297,10 +307,42 @@ function getRoot(): PinoLogger {
   return root;
 }
 
+/** Read once: the sampling rate does not change while the process runs. */
+const DEBUG_SAMPLE_RATE = sampleRate(process.env.LOG_SAMPLE_DEBUG);
+
+/**
+ * The active OpenTelemetry span's ids, when an SDK is registered and `@opentelemetry/api` is
+ * installed. It is not a dependency of this application: it is looked up once, only when
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` or `LOG_TRACE_IDS=true` is set, and its absence is not an
+ * error. Install it and register an SDK to turn this on.
+ */
+let otelApi: any;
+let otelTried = false;
+
+function activeTrace(): { traceId: string; spanId: string } | undefined {
+  if (!otelTried) {
+    otelTried = true;
+    if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.LOG_TRACE_IDS === 'true') {
+      try {
+        otelApi = require('@opentelemetry/api');
+      } catch {
+        otelApi = undefined;
+      }
+    }
+  }
+  const span = otelApi?.trace?.getActiveSpan?.();
+  const ids = span?.spanContext?.();
+  if (!ids?.traceId || /^0+$/.test(ids.traceId)) return undefined;
+  return { traceId: ids.traceId, spanId: ids.spanId };
+}
+
 function wrap(logger: PinoLogger, channel: string, level: ConfiguredLevel): ChannelLogger {
   return {
     channel,
-    level,
+    // Read from the Pino child, so an override set through the endpoint is what this reports.
+    get level(): ConfiguredLevel {
+      return (logger.level as ConfiguredLevel) ?? level;
+    },
 
     event(id: string, fields: LogFields = {}): void {
       const declared = EVENTS.get(id);
@@ -317,7 +359,15 @@ function wrap(logger: PinoLogger, channel: string, level: ConfiguredLevel): Chan
 
       // Request context first, so an explicit field always wins over it.
       const context = currentRequestContext();
-      const merged: LogFields = { ...context, ...fields };
+
+      // Debug and trace lines may be sampled (LOG_SAMPLE_DEBUG); a request is kept or dropped
+      // whole. Anything at warn or above is never asked.
+      if ((declared.level === 'debug' || declared.level === 'trace') && !keepDebug(context.requestId, DEBUG_SAMPLE_RATE)) {
+        return;
+      }
+
+      const trace = context.traceId ? undefined : activeTrace();
+      const merged: LogFields = { ...context, ...(trace ?? {}), ...fields };
 
       // Checked against the merged object: a field the context supplies is
       // present, and reporting it as missing would be wrong.
@@ -348,9 +398,85 @@ export function getLogger(channel: string): ChannelLogger {
   if (cached) return cached;
 
   const level = resolveLevel(channel);
-  const logger = wrap(getRoot().child({ channel }, { level }), channel, level);
+  const child = getRoot().child({ channel }, { level });
+  channelChildren.set(channel, child);
+  const logger = wrap(child, channel, level);
   cache.set(channel, logger);
   return logger;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Changing a level while running                                             */
+/* -------------------------------------------------------------------------- */
+
+/** The Pino child behind each channel, so its level can be changed in place. */
+const channelChildren = new Map<string, PinoLogger>();
+
+/** Levels set through the endpoint. In memory only: a restart returns to the configured ones. */
+const overrides = new Map<string, string>();
+
+/** Every channel the spec declares, its configured level and what it logs at now. */
+export function getChannelLevels(): ChannelLevelReport[] {
+  return describeLevels(
+    spec.channels,
+    (channel) => (getLogger(channel).level as string) ?? resolveLevel(channel),
+    overrides,
+  ).map((row) => ({ ...row, persisted: persisted.has(row.channel) }));
+}
+
+/** Channels whose override is also stored in the database. */
+const persisted = new Set<string>();
+
+export function markPersisted(channel: string, isPersisted: boolean): void {
+  if (isPersisted) persisted.add(channel);
+  else persisted.delete(channel);
+}
+
+/**
+ * Make the stored overrides the ones in force. A channel that was stored and no longer is goes
+ * back to its configured level (another instance reset it); an override that was only ever in
+ * memory is left alone.
+ */
+export function applyStoredLevels(rows: Array<{ channel: string; level: ConfiguredLevel }>): void {
+  const stored = new Map(rows.map((row) => [row.channel, row.level]));
+  for (const channel of [...persisted]) {
+    if (!stored.has(channel)) {
+      resetChannelLevel(channel);
+      persisted.delete(channel);
+    }
+  }
+  for (const [channel, level] of stored) {
+    if (!CHANNELS.has(channel)) continue;
+    if (overrides.get(channel) !== level) setChannelLevel(channel, level);
+    persisted.add(channel);
+  }
+}
+
+export interface LevelChange {
+  channel: string;
+  from: string;
+  to: string;
+}
+
+/** Null when the spec declares no such channel. */
+export function setChannelLevel(channel: string, level: ConfiguredLevel): LevelChange | null {
+  if (!CHANNELS.has(channel)) return null;
+  const logger = getLogger(channel);
+  const from = String(logger.level);
+  channelChildren.get(channel)!.level = level;
+  overrides.set(channel, level);
+  return { channel, from, to: level };
+}
+
+/** Back to what the spec and the environment say. Null when the channel is unknown. */
+export function resetChannelLevel(channel: string): LevelChange | null {
+  if (!CHANNELS.has(channel)) return null;
+  const logger = getLogger(channel);
+  const from = String(logger.level);
+  const configured = resolveLevel(channel);
+  channelChildren.get(channel)!.level = configured;
+  overrides.delete(channel);
+  return { channel, from, to: configured };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -402,14 +528,33 @@ export class AppLoggerService implements NestLoggerService {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Report the two failures that otherwise leave no trace: an exception nobody
- * caught and a rejection nobody handled.
+ * Write whatever is buffered. Output is asynchronous in production (see
+ * `getRoot`), so a process that exits straight after logging its last words
+ * would lose exactly the lines that explain why.
+ */
+export function flushLogs(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!root) return resolve();
+    try {
+      root.flush(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+/**
+ * Report the failures that otherwise leave no trace: an exception nobody
+ * caught, a rejection nobody handled, and the signal that stops the process.
  *
- * Both are fatal and both exit. A process that logs the error and carries on is
- * in a state nobody reasoned about; the supervisor restarting it is the correct
- * outcome and this line is what says why. SIGTERM is recorded too — it is how
- * every orchestrator asks a container to stop, and "why did it restart" is
- * unanswerable without it.
+ * The two are not the same size of problem. An uncaught exception leaves the
+ * process in a state nobody reasoned about, so it is fatal and it exits —
+ * after the line has been written, which is the order that matters. A promise
+ * rejected with no handler is almost always one request's side effect (a
+ * notification that failed to send, a background step that threw); it is
+ * reported at error with its cause and the process keeps serving. SIGTERM is
+ * recorded too — it is how every orchestrator asks a container to stop, and
+ * "why did it restart" is unanswerable without it.
  */
 export function installProcessLogging(): void {
   const log = getLogger('app');
@@ -417,18 +562,17 @@ export function installProcessLogging(): void {
 
   process.on('uncaughtException', (err) => {
     log.event('app.uncaught', { err });
-    process.exit(1);
+    void flushLogs().then(() => process.exit(1));
   });
 
   process.on('unhandledRejection', (reason) => {
-    log.event('app.uncaught', { err: reason });
-    process.exit(1);
+    log.event('app.unhandled_rejection', { err: reason });
   });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       log.event('app.shutdown', { signal, uptimeMs: Date.now() - startedAt });
-      process.exit(0);
+      void Promise.allSettled([flushLogs(), runShutdownHooks()]).then(() => process.exit(0));
     });
   }
 }
@@ -436,6 +580,18 @@ export function installProcessLogging(): void {
 /* -------------------------------------------------------------------------- */
 /*  HTTP                                                                       */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * A caller may supply its own request id, so a line here and a line in the
+ * front end can be joined up. It is written into every log line and echoed in
+ * a response header, so it is accepted only as the plain token it should be: a
+ * header value with a newline in it would otherwise forge a second log line.
+ */
+const REQUEST_ID = /^[A-Za-z0-9._:-]{8,64}$/;
+
+function acceptRequestId(supplied: unknown): string {
+  return typeof supplied === 'string' && REQUEST_ID.test(supplied) ? supplied : randomUUID();
+}
 
 /** Anything slower than this is worth a warning of its own. */
 const LATENCY_BUDGET_MS = Number(process.env.HTTP_SLOW_REQUEST_MS ?? 1000);
@@ -466,11 +622,46 @@ export function installHttpLogging(fastify: {
 
   fastify.addHook('onRequest', async (request: any, reply: any) => {
     request.__logStartedAt = Date.now();
-    request.__logRequestId = request.headers?.['x-request-id'] ?? randomUUID();
+    request.__logRequestId = acceptRequestId(request.headers?.['x-request-id']);
 
     // Everything logged for the rest of this request carries the id, without
     // any of it having to be handed one.
-    beginRequestContext({ requestId: request.__logRequestId, userId: null });
+    // A caller's trace, when it sent one, so these lines can be found from the trace.
+    let trace: { traceId: string; spanId: string } | null = parseTraceparent(
+      request.headers?.['traceparent'],
+    );
+
+    // The context is entered BEFORE the first await. `enterWith` inside an async hook only reaches
+    // what runs in this hook's own continuation; entered after `await initTracing()` it never
+    // reached the guards or services, and the audit trail lost the user who made the write.
+    beginRequestContext({
+      requestId: request.__logRequestId,
+      userId: null,
+      ...(trace && { traceId: trace.traceId, spanId: trace.spanId }),
+    });
+    request.__logTrace = trace;
+
+    // With a collector configured (OTEL_EXPORTER_OTLP_ENDPOINT) the request is a server span.
+    // Its ids replace the caller's, so a trace and its log lines share one id.
+    if (tracingEnabled()) {
+      await initTracing();
+      const route = request.routeOptions?.url ?? request.routerPath ?? request.url ?? 'unknown';
+      const span = startServerSpan(
+        `${request.method} ${route}`,
+        {
+          'http.request.method': String(request.method),
+          'http.route': String(route),
+          'request.id': request.__logRequestId,
+        },
+        request.headers ?? {},
+      );
+      if (span) {
+        request.__logSpan = span;
+        trace = { traceId: span.traceId, spanId: span.spanId };
+        request.__logTrace = trace;
+        setRequestContext({ traceId: span.traceId, spanId: span.spanId });
+      }
+    }
 
     try {
       reply.header('x-request-id', request.__logRequestId);
@@ -484,6 +675,11 @@ export function installHttpLogging(fastify: {
     const durationMs = Date.now() - (request.__logStartedAt ?? Date.now());
     const status = reply.statusCode ?? 0;
 
+    (request.__logSpan as { end: (r: { status: number; err?: unknown }) => void } | undefined)?.end({
+      status,
+      err: request.__logError,
+    });
+
     // The route pattern, not the concrete URL: `/api/bus/:entity` aggregates,
     // `/api/bus/compound/9f3c…` is a distinct "message" per record and cannot
     // be grouped by anything.
@@ -492,7 +688,20 @@ export function installHttpLogging(fastify: {
       method: request.method ?? 'unknown',
       path,
       requestId: request.__logRequestId ?? null,
+      // This hook can run outside the request's async context, so the ids are read off the request.
+      ...(request.__logTrace && {
+        traceId: request.__logTrace.traceId,
+        spanId: request.__logTrace.spanId,
+      }),
     };
+
+    // What the exception filter decided this was. A response it never saw — a
+    // better-auth route, a 404 for a path nothing matched — is classified from
+    // its status alone.
+    const classified = request.__logClassified as { category: string; code: string } | undefined;
+    const errorCategory = classified?.category ?? categoryForStatus(status);
+    const errorCode =
+      classified?.code ?? FALLBACK_CODE[errorCategory as keyof typeof FALLBACK_CODE];
 
     if (status >= 500) {
       // The exception filter stashes what it caught, because this hook is the
@@ -504,14 +713,28 @@ export function installHttpLogging(fastify: {
         status,
         durationMs,
         err: request.__logError ?? null,
+        errorCategory,
+        errorCode,
       });
     } else if (status >= 400) {
-      log.event('http.request.client_error', {
+      // The category decides how loud a refusal is. A missing record or a stale
+      // save is expected traffic and is written at info; a bad payload, a
+      // refused credential or a throttled caller is worth a warning.
+      const quiet =
+        ERROR_CATEGORIES[errorCategory as keyof typeof ERROR_CATEGORIES]?.level === 'info';
+      const fields = {
         ...base,
         status,
         durationMs,
         reason: `HTTP ${status}`,
-      });
+        errorCategory,
+        errorCode,
+      };
+      if (quiet) {
+        log.event('http.request.refused', fields);
+      } else {
+        log.event('http.request.client_error', fields);
+      }
     } else {
       log.event('http.request.completed', { ...base, status, durationMs });
     }

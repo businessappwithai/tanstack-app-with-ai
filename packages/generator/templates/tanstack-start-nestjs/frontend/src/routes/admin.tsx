@@ -18,6 +18,7 @@
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
 import { Component, type ErrorInfo, lazy, type ReactNode, Suspense, useState } from 'react';
 import { Sparkles } from 'lucide-react';
+import { getClientLogger, reportClientError } from '@/lib/logger'
 
 export const Route = createFileRoute('/admin')({
   // Redirect non-admin users before the component tree renders
@@ -78,7 +79,17 @@ class AssistantBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[admin] the model assistant failed to load:', error, info.componentStack);
+    reportClientError({
+      level: 'error',
+      source: 'boundary',
+      component: 'admin/model-assistant',
+      message: error.message || 'the model assistant failed to load',
+      stack: error.stack,
+    })
+    getClientLogger('admin').error('the model assistant failed to load', {
+      message: error.message,
+      componentStack: info.componentStack,
+    })
     this.props.onFailure();
   }
 

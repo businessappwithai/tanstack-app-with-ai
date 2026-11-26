@@ -11,7 +11,9 @@
 
 import { faker } from "@faker-js/faker";
 import { config } from "./config.ts";
+import { refusals, stateMachines } from "./model.ts";
 import {
+  compositeUniqueColumns,
   type EntityMeta,
   type FieldMeta,
   foreignKeyFields,
@@ -43,6 +45,27 @@ let uniqueCounter = 0;
 function nextUniqueSalt(): string {
   uniqueCounter += 1;
   return `${RUN_ID}${uniqueCounter.toString(36)}`;
+}
+
+/** Where this run's distinct numbers start: a second run against the same rows must not replay them. */
+const NUMBER_BASE = 1000 + Math.floor(Math.random() * 500_000);
+
+/**
+ * A value for a column that is one half of a unique pair.
+ *
+ * `VoyageCall(voyage_id, sequence_number) unique` is satisfied by a number nobody
+ * used on that voyage. A counter gives one for free, and a string column is salted
+ * the way a unique one is. A closed vocabulary or a date has nothing to vary, so
+ * those take their ordinary value.
+ */
+function distinctValue(field: FieldMeta, uniqueSalt?: string | number): unknown {
+  if (field.enumValues && field.enumValues.length > 0) return fakeValue(field, uniqueSalt);
+  if (field.type === "integer" || field.type === "decimal") {
+    uniqueCounter += 1;
+    const next = NUMBER_BASE + uniqueCounter;
+    if (field.maxValue === undefined || next <= field.maxValue) return next;
+  }
+  return fakeValue({ ...field, unique: true }, uniqueSalt);
 }
 
 /**
@@ -96,7 +119,11 @@ const BY_NAME: Array<[RegExp, () => unknown]> = [
   [/url|website|link|homepage/i, () => faker.internet.url()],
   [/username|(^|_)(login|handle)(_|$)/i, () => faker.internet.username().toLowerCase()],
   [/password/i, () => faker.internet.password({ length: 16 })],
-  [/avatar|image|photo|picture|thumbnail/i, () => faker.image.url()],
+  // A path on the application's own host, never a remote image: faker.image.url()
+  // names picsum.photos or loremflickr, which a screen showing the record loads.
+  [/avatar|image|photo|picture|thumbnail/i, () =>
+    `/images/${faker.string.alphanumeric({ length: 10, casing: "lower" })}.png`,
+  ],
   [/slug/i, () => faker.lorem.slug()],
   [/description|summary|notes?|comment|body|content|remarks/i, () => faker.lorem.sentences(2)],
   [/price|amount|total|cost|salary|fee|balance|revenue/i, () =>
@@ -219,6 +246,9 @@ export function fakeValue(field: FieldMeta, uniqueSalt?: string | number): unkno
     if (!matchesType(candidate, field.type)) continue;
 
     let value = candidate;
+    if (typeof value === "number" && field.maxValue !== undefined && value > field.maxValue) {
+      value = Math.round(field.maxValue * 100) / 100;
+    }
     if (field.unique && typeof value === "string") {
       const salt = uniqueSalt === undefined ? nextUniqueSalt() : scopedSalt(uniqueSalt);
       value = value.includes("@") ? value.replace("@", `+${salt}@`) : `${value}-${salt}`;
@@ -227,6 +257,9 @@ export function fakeValue(field: FieldMeta, uniqueSalt?: string | number): unkno
   }
 
   let value = byType(field);
+  if (typeof value === "number" && field.maxValue !== undefined && value > field.maxValue) {
+    value = Math.round(field.maxValue * 100) / 100;
+  }
   if (field.unique && typeof value === "string") {
     const salt = uniqueSalt === undefined ? nextUniqueSalt() : scopedSalt(uniqueSalt);
     value = `${value}-${salt}`;
@@ -245,19 +278,306 @@ export interface BuildOptions {
   uniqueSalt?: string | number;
 }
 
-/** Build one create-payload for an entity. */
+// ── the model's own refusals ─────────────────────────────────
+
+type Token = { kind: "num" | "str" | "id" | "op" | "paren"; text: string };
+
+type Node =
+  | { t: "lit"; v: unknown }
+  | { t: "id"; name: string }
+  | { t: "not"; x: Node }
+  | { t: "neg"; x: Node }
+  | { t: "bin"; op: string; l: Node; r: Node };
+
+function tokenize(source: string): Token[] | null {
+  const tokens: Token[] = [];
+  const pattern =
+    /\s*(?:(\d+(?:\.\d+)?)|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|([A-Za-z_][\w.]*)|(==|!=|<=|>=|<|>|\+|-|\*|\/)|([()]))/y;
+  let at = 0;
+  while (at < source.length) {
+    if (/^\s*$/.test(source.slice(at))) break;
+    pattern.lastIndex = at;
+    const match = pattern.exec(source);
+    if (!match) return null;
+    at = pattern.lastIndex;
+    if (match[1] !== undefined) tokens.push({ kind: "num", text: match[1] });
+    else if (match[2] !== undefined) tokens.push({ kind: "str", text: match[2] });
+    else if (match[3] !== undefined) tokens.push({ kind: "str", text: match[3] });
+    else if (match[4] !== undefined) tokens.push({ kind: "id", text: match[4] });
+    else if (match[5] !== undefined) tokens.push({ kind: "op", text: match[5] });
+    else tokens.push({ kind: "paren", text: match[6] as string });
+  }
+  return tokens;
+}
+
+/**
+ * Parse a `%%action ... when:` expression.
+ *
+ * Only the shape those conditions are written in: comparisons and `+ - * /`
+ * between fields, numbers, strings, `null`, `true`, `false` and `today`, joined by
+ * `and` / `or` / `not` and parentheses. Anything else is `null` — no verdict — so a
+ * condition this cannot read never makes a record look refused.
+ */
+function parseWhen(source: string): Node | null {
+  const tokens = tokenize(source);
+  if (!tokens || tokens.length === 0) return null;
+  let at = 0;
+  const peek = () => tokens[at];
+  const isWord = (text: string) => peek()?.kind === "id" && peek()?.text === text;
+  const isOp = (...ops: string[]) => peek()?.kind === "op" && ops.includes(peek()?.text as string);
+
+  const atom = (): Node => {
+    const token = tokens[at++];
+    if (!token) throw new Error("end");
+    if (token.kind === "num") return { t: "lit", v: Number(token.text) };
+    if (token.kind === "str") return { t: "lit", v: token.text };
+    if (token.kind === "op" && token.text === "-") return { t: "neg", x: atom() };
+    if (token.kind === "paren" && token.text === "(") {
+      const inner = orExpr();
+      if (tokens[at++]?.text !== ")") throw new Error("paren");
+      return inner;
+    }
+    if (token.kind === "id") {
+      if (token.text === "null") return { t: "lit", v: null };
+      if (token.text === "true") return { t: "lit", v: true };
+      if (token.text === "false") return { t: "lit", v: false };
+      return { t: "id", name: token.text };
+    }
+    throw new Error("atom");
+  };
+  const product = (): Node => {
+    let node = atom();
+    while (isOp("*", "/")) {
+      const op = (tokens[at++] as Token).text;
+      node = { t: "bin", op, l: node, r: atom() };
+    }
+    return node;
+  };
+  const sum = (): Node => {
+    let node = product();
+    while (isOp("+", "-")) {
+      const op = (tokens[at++] as Token).text;
+      node = { t: "bin", op, l: node, r: product() };
+    }
+    return node;
+  };
+  const comparison = (): Node => {
+    const left = sum();
+    if (!isOp("==", "!=", "<", "<=", ">", ">=")) return left;
+    const op = (tokens[at++] as Token).text;
+    return { t: "bin", op, l: left, r: sum() };
+  };
+  const notExpr = (): Node => {
+    if (isWord("not")) {
+      at++;
+      return { t: "not", x: notExpr() };
+    }
+    return comparison();
+  };
+  const andExpr = (): Node => {
+    let node = notExpr();
+    while (isWord("and")) {
+      at++;
+      node = { t: "bin", op: "and", l: node, r: notExpr() };
+    }
+    return node;
+  };
+  function orExpr(): Node {
+    let node = andExpr();
+    while (isWord("or")) {
+      at++;
+      node = { t: "bin", op: "or", l: node, r: andExpr() };
+    }
+    return node;
+  }
+
+  try {
+    const node = orExpr();
+    return at === tokens.length ? node : null;
+  } catch {
+    return null;
+  }
+}
+
+function valueOf(node: Node, record: Record<string, unknown>): unknown {
+  switch (node.t) {
+    case "lit":
+      return node.v;
+    case "id": {
+      if (node.name === "today") return new Date().toISOString().slice(0, 10);
+      const value = record[node.name];
+      return value === undefined ? null : value;
+    }
+    case "not":
+      return !valueOf(node.x, record);
+    case "neg": {
+      const inner = valueOf(node.x, record);
+      return inner == null ? null : -Number(inner);
+    }
+    case "bin": {
+      if (node.op === "and") return Boolean(valueOf(node.l, record)) && Boolean(valueOf(node.r, record));
+      if (node.op === "or") return Boolean(valueOf(node.l, record)) || Boolean(valueOf(node.r, record));
+      const left = valueOf(node.l, record);
+      const right = valueOf(node.r, record);
+      if (node.op === "==") return left === right || (left == null && right == null);
+      if (node.op === "!=") return !(left === right || (left == null && right == null));
+      if (left == null || right == null) return node.op.length === 1 && "+-*/".includes(node.op) ? null : false;
+      if ("+-*/".includes(node.op) && node.op.length === 1) {
+        const a = Number(left);
+        const b = Number(right);
+        if (node.op === "+") return a + b;
+        if (node.op === "-") return a - b;
+        if (node.op === "*") return a * b;
+        return b === 0 ? null : a / b;
+      }
+      const [a, b] =
+        typeof left === "number" || typeof right === "number"
+          ? [Number(left), Number(right)]
+          : [String(left), String(right)];
+      if (node.op === "<") return a < b;
+      if (node.op === "<=") return a <= b;
+      if (node.op === ">") return a > b;
+      return a >= b;
+    }
+  }
+}
+
+const parsedRefusals = refusals.map((refusal) => ({
+  tableName: refusal.tableName,
+  node: parseWhen(refusal.when),
+}));
+
+/** Evaluate a condition over a record; `undefined` when it could not be read. */
+export function evaluateWhen(source: string, record: Record<string, unknown>): boolean | undefined {
+  const node = parseWhen(source);
+  return node ? Boolean(valueOf(node, record)) : undefined;
+}
+
+/**
+ * Make every firing `field != expression` clause false by construction.
+ *
+ * A model that says `line_amount != quantity * unit_price` is refused is saying the
+ * two must be equal, and no amount of redrawing satisfies an equality between
+ * random numbers. The field on one side is set to what the other side works out to.
+ *
+ * The clause is found through `and` and through `or`. Under `and` one false clause
+ * is enough and repairing each is harmless; under `or` every disjunct has to be
+ * false, and `gross_amount != net_amount + tax_amount or open_amount < 0 or ...`
+ * is the usual way a model states "these reconcile" with the bounds beside it.
+ * Looking only through `and` left that equality alone, so no draw ever passed and
+ * every update of the stored record was refused by the rule under test.
+ */
+function repairEqualities(
+  node: Node,
+  record: Record<string, unknown>,
+  locked: ReadonlySet<string>
+): void {
+  if (node.t === "bin" && (node.op === "and" || node.op === "or")) {
+    repairEqualities(node.l, record, locked);
+    repairEqualities(node.r, record, locked);
+    return;
+  }
+  const clause = node;
+  if (clause.t !== "bin" || clause.op !== "!=" || valueOf(clause, record) !== true) return;
+  const target = clause.l.t === "id" ? clause.l : clause.r.t === "id" ? clause.r : null;
+  // A field the caller set on purpose is not the factory's to rewrite: a test that
+  // sends an undeclared enum value is testing the refusal, not the repair.
+  if (!target || target.t !== "id" || target.name === "today" || locked.has(target.name)) return;
+  const source = target === clause.l ? clause.r : clause.l;
+  const value = valueOf(source, record);
+  if (value == null) {
+    // `final_grade != null` is refused: the field has to be empty, so leave it out.
+    if (source.t === "lit") delete record[target.name];
+    return;
+  }
+  record[target.name] = typeof value === "number" ? Math.round(value * 100) / 100 : value;
+}
+
+/** True when one of the model's refusing rules for this table fires on the record. */
+function refusedByModel(tableName: string, record: Record<string, unknown>): boolean {
+  return parsedRefusals.some(
+    (refusal) =>
+      refusal.tableName === tableName && refusal.node !== null && Boolean(valueOf(refusal.node, record))
+  );
+}
+
+/** Make what can be made right by construction, then report whether a refusal still fires. */
+function settle(
+  tableName: string,
+  record: Record<string, unknown>,
+  locked: ReadonlySet<string>
+): boolean {
+  for (const refusal of parsedRefusals) {
+    if (refusal.tableName !== tableName || !refusal.node) continue;
+    if (Boolean(valueOf(refusal.node, record))) repairEqualities(refusal.node, record, locked);
+  }
+  return refusedByModel(tableName, record);
+}
+
+/** Draws before giving up: a record the overrides alone make refusable is returned as is. */
+const REDRAWS = 40;
+
+/**
+ * Build one create-payload for an entity.
+ *
+ * A drawn record the model's own rules would refuse is repaired where an equality
+ * says how, and drawn again where it does not, because the CRUD suites update the
+ * records they create and a stored record the rules refuse can never be saved.
+ * Overrides are applied before the check, so a test that deliberately trips a rule
+ * still does.
+ */
 export function buildRecord(
   entity: EntityMeta,
   options: BuildOptions = {}
 ): Record<string, unknown> {
+  const locked = new Set([
+    ...Object.keys(options.overrides ?? {}),
+    ...Object.keys(options.foreignKeys ?? {}),
+  ]);
+  let record = drawAsStored(entity, options);
+  for (let attempt = 1; attempt < REDRAWS && settle(entity.tableName, record, locked); attempt++) {
+    record = drawAsStored(entity, options);
+  }
+  // The state is the application's to set, never a request's: it was drawn
+  // above only so the rules are checked against the record as it will be
+  // stored. Sent back, it would be a person changing the state of a record a
+  // workflow has since moved on — which the API refuses.
+  const machine = stateMachines.find((candidate) => candidate.tableName === entity.tableName);
+  if (machine && options.overrides?.[machine.statusField] === undefined) {
+    delete record[machine.statusField];
+  }
+  return record;
+}
+
+/**
+ * Draw a record the way the application will keep it.
+ *
+ * A new record starts in its state machine's initial state whatever status it was
+ * sent with, so the rules are checked against that — an enrolment drawn as
+ * `completed` and stored as `pending` is a `pending` one with a grade, and the
+ * model refuses its next update.
+ */
+function drawAsStored(entity: EntityMeta, options: BuildOptions): Record<string, unknown> {
+  const record = drawRecord(entity, options);
+  const machine = stateMachines.find((candidate) => candidate.tableName === entity.tableName);
+  if (machine?.initial && options.overrides?.[machine.statusField] === undefined) {
+    record[machine.statusField] = machine.initial;
+  }
+  return record;
+}
+
+function drawRecord(entity: EntityMeta, options: BuildOptions): Record<string, unknown> {
   const record: Record<string, unknown> = {};
   const fields = options.requiredOnly
     ? writableFields(entity).filter((f) => f.required)
     : scalarFields(entity);
 
+  const paired = compositeUniqueColumns(entity);
   for (const field of fields) {
     if (field.isForeignKey || field.name.endsWith("_id")) continue;
-    record[field.name] = fakeValue(field, options.uniqueSalt);
+    record[field.name] = paired.has(field.name)
+      ? distinctValue(field, options.uniqueSalt)
+      : fakeValue(field, options.uniqueSalt);
   }
 
   for (const fk of foreignKeyFields(entity)) {

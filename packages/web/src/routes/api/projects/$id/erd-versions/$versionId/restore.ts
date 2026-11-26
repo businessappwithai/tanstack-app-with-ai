@@ -9,29 +9,18 @@ export const Route = createFileRoute("/api/projects/$id/erd-versions/$versionId/
         if (access.response) return access.response;
 
         try {
-          const { erdVersionDb } = await import("@appwithai/core/services");
-          const versionId = params.versionId as string;
-
-          // Scoped to the project in the URL, not resolved by version id alone:
-          // the id says which version, the path says whose.
-          const version = await erdVersionDb.setCurrentVersion(versionId, params.id as string);
-
-          if (!version) {
-            return new Response(JSON.stringify({ error: "Version not found" }), {
-              status: 404,
-              headers: { "Content-Type": "application/json" },
-            });
-          }
-
-          return new Response(JSON.stringify({ version }), {
-            headers: { "Content-Type": "application/json" },
+          const { restoreProject } = await import("@/lib/server/project-repository");
+          const body = await request.json().catch(() => ({}));
+          const result = await restoreProject(params.id, access.user.id, {
+            versionId: params.versionId,
+            scope: "model",
+            requestId: body.requestId,
+            expectedCommit: body.expectedCommit,
           });
+          return Response.json(result);
         } catch (error) {
-          console.error("Error restoring ERD version:", error);
-          return new Response(JSON.stringify({ error: "Failed to restore ERD version" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+          const { repositoryFailure } = await import("@/lib/server/project-repository");
+          return repositoryFailure(error);
         }
       },
 

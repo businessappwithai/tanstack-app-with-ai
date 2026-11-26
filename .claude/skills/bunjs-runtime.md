@@ -82,7 +82,7 @@ bun --version
     "eslint": "^8.55.0"
   },
   "engines": {
-    "bun": ">=1.1.0",
+    "bun": ">=1.4.4",
     "node": ">=20.0.0"
   },
   "trustedDependencies": [
@@ -866,7 +866,7 @@ config({ path: '.env.production' });
 
 ```dockerfile
 # Dockerfile
-FROM oven/bun:1 AS base
+FROM oven/bun:1.4.4 AS base
 WORKDIR /app
 
 FROM base AS install

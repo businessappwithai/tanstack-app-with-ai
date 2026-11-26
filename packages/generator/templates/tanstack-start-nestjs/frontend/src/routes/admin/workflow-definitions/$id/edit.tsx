@@ -192,7 +192,8 @@ function StepConnector({ onAddRule }: { onAddRule?: () => void }) {
 /** Rule gate card — amber, links to the rule editor */
 function RuleGateCard({ rule }: { rule: LinkedRule }) {
   const rowCount = countRuleRows(rule.jdmContent);
-  const isValidation = rule.ruleName.includes('_validation');
+  // "Fee Invoice validation" now; "bus_fee_invoice_validation" in older databases.
+  const isValidation = /[_ ]validation$/i.test(rule.ruleName);
 
   return (
     <Link to="/admin/rules/$id/edit" params={{ id: rule.id }}>

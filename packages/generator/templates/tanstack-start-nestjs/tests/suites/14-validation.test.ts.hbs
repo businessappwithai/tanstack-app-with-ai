@@ -160,6 +160,9 @@ describe("validation", () => {
           (field) => field.isForeignKey || field.name.endsWith("_id")
         );
         if (!fk) return;
+        // A reference to an entity the model never declares has no table to
+        // check against; the schema carries no constraint for it by design.
+        if (fk.isForeignKey && !harness.resolveParentEntity(fk.name)) return;
 
         const payload = await harness.buildValidRecord(entity, { [fk.name]: ABSENT_ID });
         const response = await harness.client.post(`/bus/${entity.route}`, payload, {

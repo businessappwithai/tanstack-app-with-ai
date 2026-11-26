@@ -1,4 +1,5 @@
 import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import { HeadingTitle } from "@/components/providers/HeadingTitle";
 import { Providers } from "@/components/providers/Providers";
 import "@/styles/globals.css";
 
@@ -10,7 +11,7 @@ function NotFoundPage() {
       <p className="text-muted-foreground">The page you're looking for doesn't exist.</p>
       <Link
         to="/projects"
-        className="mt-2 px-4 py-2 rounded-lg text-white text-sm font-semibold"
+        className="mt-2 px-4 py-2 rounded-lg text-slate-900 text-sm font-semibold"
         style={{ backgroundColor: "#FF8400" }}
       >
         Back to Projects
@@ -36,6 +37,7 @@ function RootLayout() {
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
         <Providers>
+          <HeadingTitle />
           <Outlet />
         </Providers>
         <Scripts />

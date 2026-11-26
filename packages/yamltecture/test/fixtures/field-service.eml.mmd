@@ -1,0 +1,31 @@
+%%meta name: Field Service
+%%meta kind: erd
+%%enum JobStatus: scheduled, dispatched, on_site, complete, cancelled
+
+erDiagram
+    Customer {
+        string id PK
+        string name
+        email email UK
+        phone phone OPTIONAL
+    }
+    Engineer {
+        string id PK
+        string first_name
+        string last_name
+    }
+    Job {
+        string id PK
+        string customer_id FK
+        string engineer_id FK
+        string status
+        datetime scheduled_for
+        money quoted_total
+    }
+    Customer ||--o{ Job : "raises"
+    Engineer ||--o{ Job : "works"
+
+%%entity Job help: A visit an engineer makes to a customer site.
+%%field Job.status enum: JobStatus
+%%field Job.quoted_total help: What the customer was quoted, before parts used on site.
+%%rbac role:dispatcher on Job.update

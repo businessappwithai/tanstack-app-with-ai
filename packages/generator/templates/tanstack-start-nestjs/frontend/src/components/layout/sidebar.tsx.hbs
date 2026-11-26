@@ -33,7 +33,7 @@
  * Generated: {{now}}
  */
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
@@ -223,16 +223,15 @@ const DASHBOARD_ENTRY: NavEntry = {
 
 interface SidebarProps {
   className?: string;
-  mobile?: boolean;
-  onNavigate?: () => void;
+  /** Drawn inside the mobile drawer: always shown, full width, never collapsed. */
+  inDrawer?: boolean;
 }
 
-export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps) {
-  const searchId = useId();
-  const resultsRef = useRef<HTMLDivElement>(null);
+export function Sidebar({ className, inDrawer = false }: SidebarProps) {
   const location = useLocation();
   const pathname = location.pathname;
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [collapsedRail, setIsCollapsed] = useState(false);
+  const isCollapsed = !inDrawer && collapsedRail;
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -320,14 +319,9 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
     setActiveIndex(0);
   }, [needle]);
 
-  useEffect(() => {
-    resultsRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
-  }, [activeIndex, results]);
-
   const go = (href: string) => {
     setQuery('');
     navigate({ to: href });
-    onNavigate?.();
   };
 
   /**
@@ -361,39 +355,47 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
   return (
     <div
       className={cn(
-        'relative flex-col border-r bg-background shrink-0 min-h-0',
-        mobile ? 'flex h-full' : 'hidden md:flex',
-        isCollapsed ? 'w-16' : 'w-64',
+        /* Hidden below `md`. The sidebar is a fixed 256px (64px collapsed) and
+           a phone is 375px wide, so showing it there would leave 119px for the
+           record being read. Below `md` the header's menu button opens this same
+           sidebar in a drawer over the screen (`inDrawer`). */
+        inDrawer
+          ? 'flex w-full flex-1 flex-col bg-background'
+          : 'relative hidden flex-col border-r bg-background md:flex',
+        !inDrawer && (isCollapsed ? 'w-16' : 'w-64'),
         'transition-all duration-300',
         className
       )}
     >
       {/* Header */}
-      <div className={cn("flex h-16 shrink-0 items-center justify-between border-b px-4", mobile && "pr-12")}>
+      {/* In the drawer, room on the right for its Close button. */}
+      <div className={cn('flex h-16 items-center justify-between border-b px-4', inDrawer && 'pr-12')}>
         {!isCollapsed && (
           <div className="flex min-w-0 items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
               <Database className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="truncate font-semibold">{{project.name}}</span>
+            {/* A long name (Hospital Management System) wrapped to three lines and overflowed the
+                fixed-height header: two lines at most, the whole name on hover. */}
+            <span className="line-clamp-2 text-sm font-semibold leading-tight" title="{{project.name}}">{{project.name}}</span>
           </div>
         )}
-        {!mobile && <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            setQuery('');
-            setIsCollapsed(!isCollapsed);
-          }}
-          className="h-8 w-8"
-          aria-label={isCollapsed ? 'Expand the navigation' : 'Collapse the navigation'}
-        >
-          {isCollapsed ? (
-            <ChevronRight className="h-4 w-4" />
-          ) : (
-            <ChevronLeft className="h-4 w-4" />
-          )}
-        </Button>}
+        {/* The drawer has its own Close in this corner; a rail toggle means nothing there. */}
+        {!inDrawer && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="h-8 w-8"
+            aria-label={isCollapsed ? 'Expand the navigation' : 'Collapse the navigation'}
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </Button>
+        )}
       </div>
 
       {/*
@@ -418,10 +420,10 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
                  that mysteriously changes the page when you press Enter. */
               role="combobox"
               aria-expanded={isSearching}
-              aria-controls={isSearching ? `${searchId}-results` : undefined}
+              aria-controls="sidebar-search-results"
               aria-activedescendant={
                 isSearching && results[activeIndex]
-                  ? `${searchId}-result-${activeIndex}`
+                  ? `sidebar-result-${activeIndex}`
                   : undefined
               }
               aria-label="Search the navigation"
@@ -453,7 +455,7 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
            * matched nothing, and the reader counts empty sections looking for
            * the one hit.
            */
-          <div ref={resultsRef} id={`${searchId}-results`} role="listbox" aria-label="Search results" className="space-y-1">
+          <div id="sidebar-search-results" role="listbox" aria-label="Search results" className="space-y-1">
             {results.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">
                 No screen matches <span className="font-medium text-foreground">{query}</span>.
@@ -464,7 +466,7 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
                   key={item.href}
                   item={item}
                   needle={needle}
-                  id={`${searchId}-result-${index}`}
+                  index={index}
                   isActive={index === activeIndex}
                   onHover={() => setActiveIndex(index)}
                   onChoose={() => go(item.href)}
@@ -478,7 +480,6 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
             <NavItemRow
               item={DASHBOARD_ENTRY}
               isActive={pathname === DASHBOARD_ENTRY.href}
-              onChoose={() => go(DASHBOARD_ENTRY.href)}
               isCollapsed={isCollapsed}
               fallback={LayoutDashboard}
             />
@@ -497,7 +498,6 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
                   key={item.href}
                   item={item}
                   isActive={pathname === item.href}
-                  onChoose={() => go(item.href)}
                   isCollapsed={isCollapsed}
                 />
               ))}
@@ -516,7 +516,6 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
                   key={item.href}
                   item={item}
                   isActive={pathname === item.href}
-                  onChoose={() => go(item.href)}
                   isCollapsed={isCollapsed}
                 />
               ))}
@@ -532,7 +531,7 @@ export function Sidebar({ className, mobile = false, onNavigate }: SidebarProps)
 interface SearchResultRowProps {
   item: SearchableEntry;
   needle: string;
-  id: string;
+  index: number;
   isActive: boolean;
   onHover: () => void;
   onChoose: () => void;
@@ -552,7 +551,7 @@ interface SearchResultRowProps {
 function SearchResultRow({
   item,
   needle,
-  id,
+  index,
   isActive,
   onHover,
   onChoose,
@@ -560,7 +559,7 @@ function SearchResultRow({
   return (
     <button
       type="button"
-      id={id}
+      id={`sidebar-result-${index}`}
       role="option"
       aria-selected={isActive}
       onMouseEnter={onHover}
@@ -589,10 +588,10 @@ interface NavItemRowProps {
   isCollapsed: boolean;
   /** Drawn when the dictionary names no icon. */
   fallback?: React.ElementType;
-  onChoose: () => void;
 }
 
-function NavItemRow({ item, isActive, isCollapsed, fallback, onChoose }: NavItemRowProps) {
+function NavItemRow({ item, isActive, isCollapsed, fallback }: NavItemRowProps) {
+  const navigate = useNavigate();
   const Fallback = fallback ?? Database;
 
   const button = (
@@ -602,7 +601,7 @@ function NavItemRow({ item, isActive, isCollapsed, fallback, onChoose }: NavItem
         'w-full justify-start gap-2',
         isCollapsed && 'justify-center px-2'
       )}
-      onClick={onChoose}
+      onClick={() => navigate({ to: item.href })}
       aria-current={isActive ? 'page' : undefined}
       aria-label={item.title}
       title={item.description}

@@ -26,6 +26,8 @@
 
 - `Guardian ||--o{ StudentGuardian` — linked by
 - `Guardian ||--o{ AdmissionApplication` — submitted by
+- `Guardian ||--o{ ConsentRecord` — grants consent
+- `Guardian ||--o{ CommunicationLog` — receives
 
 ## Lifecycle
 

@@ -9,7 +9,7 @@
  * Project: {{project.name}}
  */
 
-import type { EntityMeta, FieldMeta } from "./entities.ts";
+import { type EntityMeta, type FieldMeta, SIGNED_COLUMN } from "./entities.ts";
 import type { HttpClient } from "./http.ts";
 
 export interface RuleRecord {
@@ -123,7 +123,10 @@ export function buildStaticValidationJdm(entity: EntityMeta, fields: FieldMeta[]
         message: `${field.displayName} is required`,
       });
     }
-    if (field.type === "integer" || field.type === "decimal") {
+    // Signed by nature (coordinates, variances, balances...): the application's own
+    // generated rule leaves them out (the isSignedColumn helper), so this one must too —
+    // the suite's valid record carries a negative latitude half the time.
+    if ((field.type === "integer" || field.type === "decimal") && !SIGNED_COLUMN.test(field.name)) {
       rows.push({
         _id: `${entity.tableName}-${field.name}-non-negative`,
         when: `${field.name} != null and ${field.name} < 0`,

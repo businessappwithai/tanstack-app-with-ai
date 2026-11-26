@@ -1,104 +1,59 @@
-/**
- * One file from the mermaid library — read it, or remove it.
- *
- * A filename is not a permission. Both verbs used to act on whatever the path
- * named, with no session and no owner check, so a diagram could be downloaded —
- * or deleted — by anyone who could guess or list a name. The file's own
- * `.meta.json` records the project it was saved from, and that is what decides
- * who may reach it: the name says which file, the project says whose.
- */
-
-import fs from "node:fs/promises";
-import path from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
-import { type ProjectPermission, requireProjectAccess } from "@/lib/project-access";
+import { accessibleProjectIds, requireProjectAccess } from "@/lib/project-access";
 import { requireUser } from "@/lib/require-user";
 
-const MERMAID_DIR = path.join(process.cwd(), "generated-projects", ".mermaid-library");
-
-function json(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-/** The same narrowing the writer applies, so a name resolves to one file. */
-function safeName(filename: string): string {
-  return decodeURIComponent(filename).replace(/[^a-z0-9._-]/gi, "_");
-}
-
-/**
- * Resolve the file's project and confirm the caller may act on it.
- *
- * A file whose metadata names no project belongs to no project, and is refused
- * rather than shared: an entry written without the field would otherwise be
- * readable by everyone, which is the hole this check exists to close.
- */
-async function guard(
-  request: Request,
-  safeFilename: string,
-  permission: ProjectPermission
-): Promise<{ response: Response } | { response?: undefined }> {
-  const caller = await requireUser(request, `mermaid:${safeFilename}`, permission);
-  if (caller.response) return caller;
-
-  let projectId: string | undefined;
-  try {
-    const raw = await fs.readFile(path.join(MERMAID_DIR, `${safeFilename}.meta.json`), "utf-8");
-    projectId = (JSON.parse(raw) as { projectId?: string }).projectId;
-  } catch {
-    // No metadata beside it — treated below exactly as a file with no project.
+async function resolve(request: Request, filename: string, write: boolean) {
+  const user = await requireUser(request, "mermaid-library", write ? "write" : "read");
+  if (user.response) return { response: user.response };
+  const service = await import("@/lib/server/project-repository");
+  const projectId = new URL(request.url).searchParams.get("projectId");
+  const ids = projectId ? [projectId] : [...(await accessibleProjectIds(user.user.id))];
+  if (projectId) {
+    const access = await requireProjectAccess(request, projectId, write ? "read_write" : "read");
+    if (access.response) return { response: access.response };
   }
-
-  if (!projectId) return { response: json({ error: "File not found" }, 404) };
-
-  const access = await requireProjectAccess(request, projectId, permission);
+  const matches = (await Promise.all(ids.map((id) => service.projectDiagrams(id))))
+    .flat()
+    .filter((f) => f.filename === filename);
+  if (!matches.length)
+    return { response: Response.json({ error: "File not found" }, { status: 404 }) };
+  if (matches.length !== 1)
+    return {
+      response: Response.json({ error: "Choose a project for this filename" }, { status: 409 }),
+    };
+  const file = matches[0]!;
+  const access = await requireProjectAccess(request, file.projectId, write ? "read_write" : "read");
   if (access.response) return { response: access.response };
-  return {};
+  return { file, actor: access.user.id };
 }
-
 export const Route = createFileRoute("/api/mermaid/$filename")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const safeFilename = safeName(params.filename);
-
-        const denied = await guard(request, safeFilename, "read");
-        if (denied.response) return denied.response;
-
+        const service = await import("@/lib/server/project-repository");
         try {
-          const content = await fs.readFile(path.join(MERMAID_DIR, safeFilename), "utf-8");
-
-          const isJson = safeFilename.endsWith(".json");
-          return new Response(content, {
+          const result = await resolve(request, params.filename, false);
+          if (result.response) return result.response;
+          return new Response(result.file!.content, {
             headers: {
-              "Content-Type": isJson ? "application/json" : "text/plain",
-              "Content-Disposition": `attachment; filename="${safeFilename}"`,
+              "Content-Type": "text/plain",
               "Cache-Control": "no-cache",
+              "Content-Disposition": `attachment; filename="${result.file!.filename.replace(/[^a-zA-Z0-9._-]/g, "_")}"`,
             },
           });
-        } catch (err) {
-          const code = (err as NodeJS.ErrnoException).code;
-          if (code === "ENOENT") return json({ error: "File not found" }, 404);
-          return json({ error: err instanceof Error ? err.message : "Failed to read file" }, 500);
+        } catch (error) {
+          return service.repositoryFailure(error);
         }
       },
-
       DELETE: async ({ request, params }) => {
-        const safeFilename = safeName(params.filename);
-
-        const denied = await guard(request, safeFilename, "read_write");
-        if (denied.response) return denied.response;
-
+        const service = await import("@/lib/server/project-repository");
         try {
-          const filePath = path.join(MERMAID_DIR, safeFilename);
-          await fs.unlink(filePath).catch(() => undefined);
-          await fs.unlink(`${filePath}.meta.json`).catch(() => undefined);
-
-          return json({ success: true }, 200);
-        } catch (err) {
-          return json({ error: err instanceof Error ? err.message : "Failed to delete file" }, 500);
+          const result = await resolve(request, params.filename, true);
+          if (result.response) return result.response;
+          await service.deleteDiagram(result.file!.projectId, result.actor!, result.file!.filename);
+          return Response.json({ success: true });
+        } catch (error) {
+          return service.repositoryFailure(error);
         }
       },
     },

@@ -21,7 +21,7 @@ blank           = { WS } ;
    -------------------------------------------------------------------------- *)
 comment         = "%%" , { CHAR - reservedStart } , { CHAR } ;
 directive       = metaDir | hookDir | stepDir | loopDir | actionDir
-                | entityDir | fieldDir | enumDir | categoryDir | indexDir
+                | entityDir | fieldDir | enumDir | categoryDir | sectionDir | indexDir
                 | ruleDir | guardDir | rbacDir | triggerDir | workflowDir ;
 
 metaDir         = "%%meta" , WS , key , ":" , WS , value ;
@@ -49,6 +49,16 @@ categoryDir     = "%%category" , WS , categoryKey , ":" , WS , categoryValue ,
 categoryKey     = "name" | "description" | "icon" | "color" | "seq"
                 | "default" | "entities" ;
 categoryValue   = { CHAR - ( ";" | NEWLINE ) } ;
+(* One section of one entity's form. `entity`, `name` and `rows` are required.
+   Rows are separated by "|" and hold one or two columns separated by ","; a
+   row of one spans the form's full width. A section repeated (same entity and
+   name) continues on the next line. `help` alone may contain ";" — a segment
+   that does not open with a sectionKey belongs to the value before it. *)
+sectionDir      = "%%section" , WS , sectionKey , ":" , WS , categoryValue ,
+                  { ";" , WS , sectionKey , ":" , WS , categoryValue } ;
+sectionKey      = "entity" | "name" | "help" | "rows" | "collapsed" ;
+sectionRows     = sectionRow , { WS , "|" , WS , sectionRow } ;
+sectionRow      = ident , [ "," , WS , ident ] ;
 indexDir        = "%%index" , WS , ident , "(" , ident , { "," , WS , ident } ,
                   ")" , [ WS , "unique" ] ;
 ruleDir         = "%%rule" , WS , ident , WS , "on" , WS , ident , WS ,

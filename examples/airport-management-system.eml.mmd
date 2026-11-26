@@ -1,0 +1,1423 @@
+%%meta name: Airport Management System
+%%meta kind: erd
+%%meta version: 1.0.0
+
+%%category name: Airport estate; entities: Airport, Staff, Terminal, Resource, Asset
+%%category name: Flight operations; entities: Airline, AircraftType, Aircraft, Flight, Allocation
+%%category name: Ground and terminal services; entities: ServiceProvider, TurnaroundTask, BaggageBatch, CargoConsignment
+%%category name: Safety and engineering; entities: SafetyCase, WorkOrder
+%%category name: Security; entities: SecurityPass
+%%category name: Airport finance; entities: Tariff, Charge, Invoice, Receipt
+%%enum Discipline: operations, ground, terminal, safety, maintenance, finance, security, management
+%%enum WakeCategory: light, medium, heavy, super
+%%enum ResourceType: runway, stand, gate, checkin_counter, reclaim_belt
+%%enum Availability: available, restricted, closed
+%%enum Direction: arrival, departure
+%%enum FlightStatus: planned, scheduled, active, completed, cancelled
+%%enum AllocationStatus: requested, reserved, released, voided
+%%enum ServiceType: fuelling, catering, cleaning, pushback, boarding, baggage_handling, water_service, deicing
+%%enum TurnaroundTaskStatus: queued, underway, finished, waived
+%%enum BaggageBatchStatus: collecting, reconciled, loaded, delivered, exception
+%%enum CargoConsignmentStatus: booked, received, held, cleared, dispatched
+%%enum AssetCondition: serviceable, limited, unserviceable
+%%enum Priority: routine, urgent, critical
+%%enum WorkOrderStatus: reported, authorised, repairing, verified, closed
+%%enum Severity: minor, major, critical
+%%enum SafetyCaseStatus: logged, investigating, mitigated, resolved
+%%enum CorrectiveActionStatus: proposed, accepted, implemented, validated
+%%enum AccessZone: landside, airside, restricted
+%%enum SecurityPassStatus: applied, issued, revoked, expired
+%%enum ChargeType: landing, parking, passenger, handling, cargo
+%%enum ChargeUnit: movement, hour, passenger, tonne, service
+%%enum ChargeStatus: assessed, approved, billed, disputed
+%%enum InvoiceStatus: draft, issued, settled, void
+%%enum PaymentMethod: bank_transfer, cash, card
+%%enum ReceiptStatus: recorded, reconciled, reversed
+
+erDiagram
+    Airport {
+        string id PK
+        string name
+        string code UK
+        string iata_code OPTIONAL
+        string timezone
+        string country_code
+        phone duty_phone
+        boolean is_active
+    }
+    Staff {
+        string id PK
+        string full_name
+        string airport_id FK
+        email email UK
+        phone phone
+        string discipline
+        boolean is_active
+    }
+    Airline {
+        string id PK
+        string name
+        string code UK
+        string iata_code OPTIONAL
+        email billing_email
+        phone operations_phone
+        boolean is_active
+    }
+    AircraftType {
+        string id PK
+        string name
+        string code UK
+        string wake_category
+        decimal wingspan_m
+        integer passenger_capacity
+        decimal maximum_takeoff_weight_kg
+    }
+    Aircraft {
+        string id PK
+        string name UK
+        string aircraft_type_id FK
+        string airline_id FK
+        boolean is_active
+    }
+    Terminal {
+        string id PK
+        string name
+        string airport_id FK
+        string code
+        boolean is_active
+    }
+    Resource {
+        string id PK
+        string name
+        string airport_id FK
+        string terminal_id FK OPTIONAL
+        string resource_type
+        string availability
+        decimal maximum_wingspan_m OPTIONAL
+        integer capacity OPTIONAL
+        text restriction_notes OPTIONAL
+    }
+    Flight {
+        string id PK
+        string reference UK
+        string airport_id FK
+        string airline_id FK
+        string aircraft_id FK OPTIONAL
+        string flight_number
+        string direction
+        string route_airport_code
+        date service_date
+        string status
+        datetime scheduled_at
+        datetime estimated_at OPTIONAL
+        datetime actual_at OPTIONAL
+        integer passenger_count
+        string owner_id FK
+        text cancellation_reason OPTIONAL
+        datetime cancelled_at OPTIONAL
+        datetime active_at OPTIONAL
+        datetime completed_at OPTIONAL
+    }
+    Allocation {
+        string id PK
+        string reference UK
+        string flight_id FK
+        string resource_id FK
+        string status
+        datetime starts_at
+        datetime ends_at
+        string owner_id FK
+        text notes OPTIONAL
+        datetime reserved_at OPTIONAL
+        datetime voided_at OPTIONAL
+        datetime released_at OPTIONAL
+    }
+    ServiceProvider {
+        string id PK
+        string name
+        string code UK
+        phone duty_phone
+        email email
+        boolean is_active
+    }
+    TurnaroundTask {
+        string id PK
+        string reference UK
+        string flight_id FK
+        string service_provider_id FK
+        string owner_id FK
+        string service_type
+        string status
+        datetime due_at
+        datetime finished_at OPTIONAL
+        text completion_notes OPTIONAL
+        datetime underway_at OPTIONAL
+        datetime waived_at OPTIONAL
+    }
+    BaggageBatch {
+        string id PK
+        string reference UK
+        string flight_id FK
+        string status
+        integer expected_bags
+        integer counted_bags
+        decimal weight_kg
+        text exception_notes OPTIONAL
+        datetime reconciled_at OPTIONAL
+        datetime exception_at OPTIONAL
+        datetime loaded_at OPTIONAL
+        datetime delivered_at OPTIONAL
+        datetime collecting_at OPTIONAL
+    }
+    CargoConsignment {
+        string id PK
+        string reference UK
+        string flight_id FK
+        string status
+        integer pieces
+        decimal weight_kg
+        boolean is_dangerous_goods
+        text goods_description
+        text release_reference OPTIONAL
+        datetime received_at OPTIONAL
+        datetime held_at OPTIONAL
+        datetime cleared_at OPTIONAL
+        datetime dispatched_at OPTIONAL
+    }
+    Asset {
+        string id PK
+        string name
+        string code UK
+        string airport_id FK
+        string resource_id FK OPTIONAL
+        string condition
+        date next_service_on OPTIONAL
+        text location_notes
+    }
+    WorkOrder {
+        string id PK
+        string reference UK
+        string asset_id FK
+        string owner_id FK
+        string priority
+        string status
+        datetime due_at
+        text defect_description
+        text repair_notes OPTIONAL
+        boolean requires_resource_closure
+        datetime authorised_at OPTIONAL
+        datetime repairing_at OPTIONAL
+        datetime verified_at OPTIONAL
+        datetime closed_at OPTIONAL
+    }
+    SafetyCase {
+        string id PK
+        string reference UK
+        string airport_id FK
+        string flight_id FK OPTIONAL
+        string reported_by_id FK
+        string owner_id FK
+        string severity
+        string status
+        datetime occurred_at
+        text description
+        text immediate_action
+        text closure_evidence OPTIONAL
+        datetime investigating_at OPTIONAL
+        datetime mitigated_at OPTIONAL
+        datetime resolved_at OPTIONAL
+    }
+    CorrectiveAction {
+        string id PK
+        string reference UK
+        string safety_case_id FK
+        string owner_id FK
+        string status
+        datetime due_at
+        text instruction
+        text evidence OPTIONAL
+        datetime accepted_at OPTIONAL
+        datetime implemented_at OPTIONAL
+        datetime validated_at OPTIONAL
+    }
+    SecurityPass {
+        string id PK
+        string reference UK
+        string airport_id FK
+        string holder_name
+        string sponsor
+        string access_zone
+        string status
+        datetime valid_from
+        datetime valid_until
+        string approved_by_id FK OPTIONAL
+        text revocation_reason OPTIONAL
+        datetime issued_at OPTIONAL
+        datetime revoked_at OPTIONAL
+        datetime expired_at OPTIONAL
+    }
+    Tariff {
+        string id PK
+        string name
+        string airport_id FK
+        string charge_type
+        string unit
+        money unit_price
+        string currency
+        date effective_from
+        date effective_until OPTIONAL
+        boolean is_active
+    }
+    Charge {
+        string id PK
+        string reference UK
+        string flight_id FK
+        string tariff_id FK
+        string status
+        decimal quantity
+        money unit_price
+        money net_amount
+        money tax_amount
+        money gross_amount
+        string currency
+        string invoice_id FK OPTIONAL
+        boolean is_transferred
+        datetime approved_at OPTIONAL
+        datetime disputed_at OPTIONAL
+        datetime billed_at OPTIONAL
+        datetime assessed_at OPTIONAL
+    }
+    Invoice {
+        string id PK
+        string reference UK
+        string airport_id FK
+        string airline_id FK
+        string status
+        string currency
+        date issued_on
+        date due_on
+        money total_amount
+        money received_amount
+        text void_reason OPTIONAL
+        datetime issued_at OPTIONAL
+        datetime void_at OPTIONAL
+        datetime settled_at OPTIONAL
+    }
+    InvoiceLine {
+        string id PK
+        string invoice_id FK
+        string charge_id FK
+        text description
+        money amount
+    }
+    Receipt {
+        string id PK
+        string reference UK
+        string invoice_id FK
+        string status
+        date received_on
+        money amount
+        string method
+        text reconciliation_notes OPTIONAL
+        datetime reconciled_at OPTIONAL
+        datetime reversed_at OPTIONAL
+    }
+    Aircraft ||--o{ Flight : "supports"
+    AircraftType ||--o{ Aircraft : "supports"
+    Airline ||--o{ Aircraft : "supports"
+    Airline ||--o{ Flight : "supports"
+    Airline ||--o{ Invoice : "supports"
+    Airport ||--o{ Asset : "supports"
+    Airport ||--o{ Flight : "supports"
+    Airport ||--o{ Invoice : "supports"
+    Airport ||--o{ Resource : "supports"
+    Airport ||--o{ SafetyCase : "supports"
+    Airport ||--o{ SecurityPass : "supports"
+    Airport ||--o{ Staff : "supports"
+    Airport ||--o{ Tariff : "supports"
+    Airport ||--o{ Terminal : "supports"
+    Asset ||--o{ WorkOrder : "supports"
+    Charge ||--o{ InvoiceLine : "supports"
+    Flight ||--o{ Allocation : "supports"
+    Flight ||--o{ BaggageBatch : "supports"
+    Flight ||--o{ CargoConsignment : "supports"
+    Flight ||--o{ Charge : "supports"
+    Flight ||--o{ SafetyCase : "supports"
+    Flight ||--o{ TurnaroundTask : "supports"
+    Invoice ||--o{ Charge : "supports"
+    Invoice ||--o{ InvoiceLine : "owns"
+    Invoice ||--o{ Receipt : "supports"
+    Resource ||--o{ Allocation : "supports"
+    Resource ||--o{ Asset : "supports"
+    SafetyCase ||--o{ CorrectiveAction : "owns"
+    ServiceProvider ||--o{ TurnaroundTask : "supports"
+    Staff ||--o{ Allocation : "supports"
+    Staff ||--o{ CorrectiveAction : "supports"
+    Staff ||--o{ Flight : "supports"
+    Staff ||--o{ SafetyCase : "supports"
+    Staff ||--o{ SecurityPass : "supports"
+    Staff ||--o{ TurnaroundTask : "supports"
+    Staff ||--o{ WorkOrder : "supports"
+    Tariff ||--o{ Charge : "supports"
+    Terminal ||--o{ Resource : "supports"
+
+%%entity Airport help: An airport operated by this organisation. Its timezone governs local displays while movement timestamps are recorded in UTC.
+%%field Airport.name help: Airport name used in duty logs and operational reports.
+%%field Airport.code help: Four-letter ICAO designator used to distinguish this airport from route destinations.
+%%field Airport.iata_code help: Three-letter commercial designator, left empty for airports without one.
+%%field Airport.timezone help: IANA timezone such as Asia/Kolkata used when interpreting local schedules.
+%%field Airport.country_code help: ISO two-letter country code used on airport correspondence.
+%%field Airport.duty_phone help: Continuously staffed operations contact for disruptions and emergencies.
+%%field Airport.is_active help: Clear when the airport leaves the operating portfolio, retaining past movements.
+%%section entity: Airport; name: Airport identity; help: Identify the aerodrome before configuring facilities.; rows: name, code | iata_code, country_code
+%%section entity: Airport; name: Duty coordination; help: Confirm the local time basis and the staffed operational contact.; rows: timezone, duty_phone | is_active
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Airport.read
+%%rbac role:airport_manager on Airport.create
+%%rbac role:airport_manager on Airport.update
+%%rbac role:airport_manager on Airport.delete
+
+%%entity Staff help: An operational employee who owns tasks or approves work. Login permissions are assigned through the generated role system.
+%%field Staff.full_name help: Name colleagues recognise in task assignments and approval records.
+%%field Staff.airport_id help: Home duty station, used to organise the airport roster.
+%%field Staff.email help: Work address used to contact the employee about assigned airport work.
+%%field Staff.phone help: Duty contact reachable during the assigned shift.
+%%field Staff.discipline help: Operational function performed by this employee, separate from login role grants.
+%%field Staff.discipline enum: Discipline
+%%field Staff.is_active help: Clear when staff leave active duty so historical sign-offs remain attributable.
+%%section entity: Staff; name: Duty identity; help: Identify the colleague and their home operating station.; rows: full_name, airport_id | discipline, is_active
+%%section entity: Staff; name: Contact; help: Use staffed work contacts for duty coordination.; rows: email, phone
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Staff.read
+%%rbac role:airport_manager on Staff.create
+%%rbac role:airport_manager on Staff.update
+%%rbac role:airport_manager on Staff.delete
+%%index Staff(airport_id)
+
+%%entity Airline help: An aircraft operator billed for airport services. Retain it after its last flight so historical movements and invoices remain attributable.
+%%field Airline.name help: Trading name displayed on movement lists and invoices.
+%%field Airline.code help: ICAO operator designator used with flight numbers.
+%%field Airline.iata_code help: Commercial two-character operator code when one is allocated.
+%%field Airline.billing_email help: Address to receive issued airport charge invoices.
+%%field Airline.operations_phone help: Airline station contact for turnaround and schedule changes.
+%%field Airline.is_active help: Clear when the operator stops using the airport without removing its history.
+%%section entity: Airline; name: Operator; help: Identify the operator from its published designators.; rows: name, code | iata_code, is_active
+%%section entity: Airline; name: Station contacts; help: Route financial and operational enquiries to the right desks.; rows: billing_email, operations_phone
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Airline.read
+%%rbac role:airport_manager|operations_controller on Airline.create
+%%rbac role:airport_manager|operations_controller on Airline.update
+%%rbac role:airport_manager on Airline.delete
+
+%%entity AircraftType help: A certified airframe variant used to check stand suitability and describe the operating fleet.
+%%field AircraftType.name help: Manufacturer and variant as recognised by airport planners.
+%%field AircraftType.code help: ICAO aircraft type designator used on movement messages.
+%%field AircraftType.wake_category help: Light, medium, heavy or super planning classification, not an ATC separation decision.
+%%field AircraftType.wake_category enum: WakeCategory
+%%field AircraftType.wingspan_m help: Wingtip span in metres used in physical clearance planning.
+%%field AircraftType.passenger_capacity help: Maximum configured passenger seats for plausibility checks.
+%%field AircraftType.maximum_takeoff_weight_kg help: Certified maximum mass in kilograms, used as the charge basis where tariffs specify it.
+%%section entity: AircraftType; name: Airframe; help: Identify the certified variant and planning classification.; rows: name, code | wake_category, passenger_capacity
+%%section entity: AircraftType; name: Physical limits; help: Use published dimensions and mass when checking infrastructure and charges.; rows: wingspan_m, maximum_takeoff_weight_kg
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on AircraftType.read
+%%rbac role:airport_manager|operations_controller on AircraftType.create
+%%rbac role:airport_manager|operations_controller on AircraftType.update
+%%rbac role:airport_manager on AircraftType.delete
+
+%%entity Aircraft help: A registered airframe visiting the airport. Flight movements reference the airframe so its type and operator can be checked.
+%%field Aircraft.name help: Registration painted on the airframe, including the national prefix.
+%%field Aircraft.aircraft_type_id help: Certified variant that supplies dimensions and maximum mass.
+%%field Aircraft.airline_id help: Operator currently responsible for this airframe.
+%%field Aircraft.is_active help: Clear when the registration is retired from the local fleet register.
+%%section entity: Aircraft; name: Registration; help: Confirm the actual airframe rather than just its flight number.; rows: name, aircraft_type_id | airline_id, is_active
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Aircraft.read
+%%rbac role:airport_manager|operations_controller on Aircraft.create
+%%rbac role:airport_manager|operations_controller on Aircraft.update
+%%rbac role:airport_manager on Aircraft.delete
+%%index Aircraft(aircraft_type_id)
+%%index Aircraft(airline_id)
+
+%%entity Terminal help: A passenger building whose gates, counters and reclaim belts are allocated to movements.
+%%field Terminal.name help: Wayfinding name displayed to passengers and duty teams.
+%%field Terminal.airport_id help: Airport containing this passenger building.
+%%field Terminal.code help: Local terminal designation, unique within its airport.
+%%field Terminal.is_active help: Clear when the building is withdrawn from routine passenger operations.
+%%section entity: Terminal; name: Passenger building; help: Match the terminal to airport wayfinding before adding its resources.; rows: name, code | airport_id, is_active
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Terminal.read
+%%rbac role:airport_manager|terminal_supervisor on Terminal.create
+%%rbac role:airport_manager|terminal_supervisor on Terminal.update
+%%rbac role:airport_manager on Terminal.delete
+%%index Terminal(airport_id)
+
+%%entity Resource help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Reservations carry time intervals rather than an occupied flag.
+%%field Resource.name help: Operational designation on signs and allocation screens, such as Stand A12.
+%%field Resource.airport_id help: Airport controlling this facility.
+%%field Resource.terminal_id help: Passenger building served, empty for runways or remote apron facilities.
+%%field Resource.resource_type help: Runway for movements, stand for parking, gate for boarding, counter for check-in, or belt for reclaim.
+%%field Resource.resource_type enum: ResourceType
+%%field Resource.availability help: Available permits planning, restricted requires review, closed blocks new use.
+%%field Resource.availability enum: Availability
+%%field Resource.maximum_wingspan_m help: Physical span limit in metres for stands or gates, empty when not applicable.
+%%field Resource.capacity help: People or service positions the facility can safely handle, according to its operating procedure.
+%%field Resource.restriction_notes help: Closure limits and operating precautions from the current airport duty instruction.
+%%section entity: Resource; name: Facility; help: Identify the physical resource and the operation it serves.; rows: name, resource_type | airport_id, terminal_id
+%%section entity: Resource; name: Operating restrictions; help: Check suitability and current restrictions before reserving the facility.; rows: availability, maximum_wingspan_m | capacity | restriction_notes
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Resource.read
+%%rbac role:airport_manager|operations_controller on Resource.create
+%%rbac role:airport_manager|operations_controller on Resource.update
+%%rbac role:airport_manager on Resource.delete
+%%index Resource(airport_id)
+%%index Resource(terminal_id)
+
+%%entity Flight help: One arrival or departure at one operated airport on a service date. An aircraft turnaround may connect an inbound movement to an outbound movement through resource planning.
+%%field Flight.reference help: Locally unique movement reference combining flight number, date and direction.
+%%field Flight.airport_id help: Operated airport at which this movement is handled.
+%%field Flight.airline_id help: Operating airline responsible for coordination and airport charges.
+%%field Flight.aircraft_id help: Actual registered airframe, optional until the operator confirms it.
+%%field Flight.flight_number help: Published operator flight number retained even if the aircraft changes.
+%%field Flight.direction help: Arrival enters this airport, departure leaves it.
+%%field Flight.direction enum: Direction
+%%field Flight.route_airport_code help: ICAO designator of the other endpoint, kept as an external code rather than an operated-airport lookup.
+%%field Flight.service_date help: Local operating date used to distinguish recurring flight numbers across midnight.
+%%field Flight.status help: planned is provisional, scheduled is accepted, active is underway, completed records actual movement, cancelled retains the reason.
+%%field Flight.status enum: FlightStatus
+%%field Flight.scheduled_at help: Scheduled landing or takeoff in UTC, interpreted using the airport timezone.
+%%field Flight.estimated_at help: Latest agreed estimated landing or takeoff in UTC.
+%%field Flight.actual_at help: Observed landing or takeoff in UTC, required before completing the movement.
+%%field Flight.passenger_count help: Actual or latest expected passengers on this movement, excluding crew.
+%%field Flight.owner_id help: Operations controller accountable for this movement's coordination.
+%%field Flight.cancellation_reason help: Airline or airport explanation required when the movement is cancelled.
+%%section entity: Flight; name: Movement; help: Identify the dated movement and its operating responsibility.; rows: reference | flight_number, direction | airline_id, aircraft_id
+%%section entity: Flight; name: Route and timetable; help: Record the local service date and UTC movement times.; rows: airport_id, route_airport_code | service_date, scheduled_at | estimated_at, actual_at
+%%section entity: Flight; name: Duty coordination; help: Confirm the passenger workload and accountable controller.; rows: passenger_count, owner_id
+%%section entity: Flight; name: Cancellation; help: Retain the reason a planned movement did not operate.; rows: cancellation_reason
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Flight.read
+%%rbac role:airport_manager|operations_controller on Flight.create
+%%rbac role:airport_manager|operations_controller on Flight.update
+%%rbac role:airport_manager on Flight.delete
+%%index Flight(airport_id)
+%%index Flight(airline_id)
+%%index Flight(aircraft_id)
+%%index Flight(owner_id)
+
+%%entity Allocation help: A timed reservation of one airport resource for one movement. Overlapping live reservations require conflict validation before confirmation.
+%%field Allocation.reference help: Allocation reference used in the duty log when a facility is reassigned.
+%%field Allocation.flight_id help: Movement receiving the facility for this time interval.
+%%field Allocation.resource_id help: Physical facility being reserved.
+%%field Allocation.status help: requested awaits conflict review, reserved is confirmed, released ended normally, voided was withdrawn.
+%%field Allocation.status enum: AllocationStatus
+%%field Allocation.starts_at help: Beginning of the reserved interval in UTC, including the planned setup buffer.
+%%field Allocation.ends_at help: End of the reserved interval in UTC, including handover and clearance time.
+%%field Allocation.owner_id help: Controller who owns the reservation and resolves conflicting requests.
+%%field Allocation.notes help: Handover instructions or the reason for a nonstandard reservation.
+%%section entity: Allocation; name: Reservation; help: Link the movement to the facility and confirm approval.; rows: reference | flight_id, resource_id
+%%section entity: Allocation; name: Use interval; help: Include setup and clearance buffers in the UTC reservation interval.; rows: starts_at, ends_at | owner_id | notes
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on Allocation.read
+%%rbac role:airport_manager|operations_controller on Allocation.create
+%%rbac role:airport_manager|operations_controller on Allocation.update
+%%rbac role:airport_manager on Allocation.delete
+%%index Allocation(flight_id)
+%%index Allocation(resource_id)
+%%index Allocation(owner_id)
+
+%%entity ServiceProvider help: A contracted ground service organisation assigned turnaround work or maintaining airport assets.
+%%field ServiceProvider.name help: Contractor trading name used in task assignment and duty calls.
+%%field ServiceProvider.code help: Airport vendor reference that distinguishes similarly named contractors.
+%%field ServiceProvider.duty_phone help: Staffed dispatch number for immediate turnaround coordination.
+%%field ServiceProvider.email help: Contract contact for service evidence and follow-up.
+%%field ServiceProvider.is_active help: Clear when the contract no longer permits new assignments.
+%%section entity: ServiceProvider; name: Contractor; help: Identify the contracted provider before assigning work.; rows: name, code | is_active
+%%section entity: ServiceProvider; name: Dispatch; help: Confirm the contacts that can mobilise a team.; rows: duty_phone, email
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|safety_officer|maintenance_engineer|finance_officer|security_officer on ServiceProvider.read
+%%rbac role:airport_manager|ground_supervisor on ServiceProvider.create
+%%rbac role:airport_manager|ground_supervisor on ServiceProvider.update
+%%rbac role:airport_manager on ServiceProvider.delete
+
+%%entity TurnaroundTask help: An independently assignable piece of ground work for a movement, tracked until completion or exception.
+%%field TurnaroundTask.reference help: Task reference quoted by ramp teams in handovers.
+%%field TurnaroundTask.flight_id help: Movement whose readiness depends on the work.
+%%field TurnaroundTask.service_provider_id help: Contracted organisation carrying out the ground work.
+%%field TurnaroundTask.owner_id help: Ground supervisor accountable for completion evidence.
+%%field TurnaroundTask.service_type help: Handling activity performed, selected from the agreed airport service list.
+%%field TurnaroundTask.service_type enum: ServiceType
+%%field TurnaroundTask.status help: queued awaits dispatch, underway is being performed, finished is evidenced, waived requires a recorded exception.
+%%field TurnaroundTask.status enum: TurnaroundTaskStatus
+%%field TurnaroundTask.due_at help: UTC deadline agreed against the movement's turnaround plan.
+%%field TurnaroundTask.finished_at help: UTC time the ground team actually finished, required for finished work.
+%%field TurnaroundTask.completion_notes help: Evidence of completion or the authorised reason for waiving the task.
+%%section entity: TurnaroundTask; name: Ground assignment; help: Assign the required handling activity and its accountable team.; rows: reference, service_type | flight_id, service_provider_id | owner_id
+%%section entity: TurnaroundTask; name: Completion evidence; help: Record when the work was due and what the team actually delivered.; rows: due_at, finished_at | completion_notes
+%%rbac role:airport_manager|operations_controller|ground_supervisor on TurnaroundTask.read
+%%rbac role:airport_manager|operations_controller|ground_supervisor on TurnaroundTask.create
+%%rbac role:airport_manager|operations_controller|ground_supervisor on TurnaroundTask.update
+%%rbac role:airport_manager on TurnaroundTask.delete
+%%index TurnaroundTask(flight_id)
+%%index TurnaroundTask(service_provider_id)
+%%index TurnaroundTask(owner_id)
+
+%%entity BaggageBatch help: An aggregate hold-baggage batch on a movement. Counts support reconciliation without keeping individual passenger identities.
+%%field BaggageBatch.reference help: Batch label used by the baggage handling team to reconcile a load or unload.
+%%field BaggageBatch.flight_id help: Movement carrying this batch.
+%%field BaggageBatch.status help: collecting accepts bags, reconciled has matching counts, loaded is on the aircraft, delivered is handed over, exception needs investigation.
+%%field BaggageBatch.status enum: BaggageBatchStatus
+%%field BaggageBatch.expected_bags help: Bags expected from the handling manifest.
+%%field BaggageBatch.counted_bags help: Bags physically scanned or counted for this batch.
+%%field BaggageBatch.weight_kg help: Aggregate bag weight in kilograms from the accepted load sheet.
+%%field BaggageBatch.exception_notes help: Reason counts differ or a bag was withheld from the batch.
+%%section entity: BaggageBatch; name: Baggage reconciliation; help: Compare the handling manifest with physical counts for the movement.; rows: reference | flight_id, weight_kg | expected_bags, counted_bags
+%%section entity: BaggageBatch; name: Exceptions; help: Explain discrepancies before loading or closing the batch.; rows: exception_notes
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|security_officer on BaggageBatch.read
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|security_officer on BaggageBatch.create
+%%rbac role:airport_manager|operations_controller|ground_supervisor|terminal_supervisor|security_officer on BaggageBatch.update
+%%rbac role:airport_manager on BaggageBatch.delete
+%%index BaggageBatch(flight_id)
+
+%%entity CargoConsignment help: An air waybill consignment handled by the airport cargo operation, with release recorded separately from physical receipt.
+%%field CargoConsignment.reference help: Air waybill reference used to locate the consignment and its supporting documents.
+%%field CargoConsignment.flight_id help: Movement carrying the consignment into or out of the airport.
+%%field CargoConsignment.status help: booked is expected, received is physically accepted, held cannot move, cleared is authorised, dispatched has left custody.
+%%field CargoConsignment.status enum: CargoConsignmentStatus
+%%field CargoConsignment.pieces help: Number of cargo packages accepted under this waybill.
+%%field CargoConsignment.weight_kg help: Accepted gross weight in kilograms for handling and charging.
+%%field CargoConsignment.is_dangerous_goods help: True requires specialist acceptance and handling precautions before clearance.
+%%field CargoConsignment.goods_description help: Plain description that handlers can use to verify the consignment.
+%%field CargoConsignment.release_reference help: Customs or authorised release evidence required before dispatch.
+%%section entity: CargoConsignment; name: Waybill; help: Identify the movement and physical cargo quantity.; rows: reference | flight_id, is_dangerous_goods | pieces, weight_kg
+%%section entity: CargoConsignment; name: Acceptance and release; help: Describe the goods and preserve evidence allowing them to leave custody.; rows: goods_description | release_reference
+%%rbac role:airport_manager|operations_controller|ground_supervisor|security_officer on CargoConsignment.read
+%%rbac role:airport_manager|operations_controller|ground_supervisor|security_officer on CargoConsignment.create
+%%rbac role:airport_manager|operations_controller|ground_supervisor|security_officer on CargoConsignment.update
+%%rbac role:airport_manager on CargoConsignment.delete
+%%index CargoConsignment(flight_id)
+
+%%entity Asset help: An airport-owned maintainable installation or equipment item. Its service condition is separate from facility reservation availability.
+%%field Asset.name help: Equipment label or installation name used by technicians on site.
+%%field Asset.code help: Asset register tag physically attached to the equipment where practical.
+%%field Asset.airport_id help: Airport responsible for this equipment's upkeep.
+%%field Asset.resource_id help: Operational facility served, empty for equipment shared across facilities.
+%%field Asset.condition help: Serviceable is fit for use, limited needs precautions, unserviceable must not be used.
+%%field Asset.condition enum: AssetCondition
+%%field Asset.next_service_on help: Next planned maintenance due date from the equipment maintenance schedule.
+%%field Asset.location_notes help: Instructions helping the technician locate the equipment safely.
+%%section entity: Asset; name: Equipment register; help: Identify the tagged equipment and the airport responsible for it.; rows: name, code | airport_id, resource_id
+%%section entity: Asset; name: Fitness and access; help: Check use restrictions and service timing before attending the equipment.; rows: condition, next_service_on | location_notes
+%%rbac role:airport_manager|maintenance_engineer|operations_controller|safety_officer on Asset.read
+%%rbac role:airport_manager|maintenance_engineer on Asset.create
+%%rbac role:airport_manager|maintenance_engineer on Asset.update
+%%rbac role:airport_manager on Asset.delete
+%%index Asset(airport_id)
+%%index Asset(resource_id)
+
+%%entity WorkOrder help: A maintenance intervention against one airport asset, from reported defect through supervisor verification.
+%%field WorkOrder.reference help: Maintenance reference quoted in defect and handback logs.
+%%field WorkOrder.asset_id help: Equipment whose defect or planned service is being addressed.
+%%field WorkOrder.owner_id help: Maintenance engineer responsible for safe execution and handback.
+%%field WorkOrder.priority help: Routine can be planned, urgent threatens availability, critical requires immediate containment.
+%%field WorkOrder.priority enum: Priority
+%%field WorkOrder.status help: reported awaits triage, authorised permits work, repairing is underway, verified confirms the repair, closed records handback.
+%%field WorkOrder.status enum: WorkOrderStatus
+%%field WorkOrder.due_at help: UTC completion target agreed by engineering and operations.
+%%field WorkOrder.defect_description help: Observed failure and operational effect, without guessing an unverified cause.
+%%field WorkOrder.repair_notes help: Work performed and test evidence required before supervisor verification.
+%%field WorkOrder.requires_resource_closure help: True means operations must separately close the affected resource before work starts.
+%%section entity: WorkOrder; name: Maintenance instruction; help: Identify the defect, accountable engineer and operational urgency.; rows: reference | asset_id, owner_id | priority, requires_resource_closure
+%%section entity: WorkOrder; name: Work and handback; help: Describe the fault and retain evidence that the equipment is fit to return.; rows: due_at | defect_description | repair_notes
+%%rbac role:airport_manager|maintenance_engineer|operations_controller|safety_officer on WorkOrder.read
+%%rbac role:airport_manager|maintenance_engineer|operations_controller|safety_officer on WorkOrder.create
+%%rbac role:airport_manager|maintenance_engineer|operations_controller|safety_officer on WorkOrder.update
+%%rbac role:airport_manager on WorkOrder.delete
+%%index WorkOrder(asset_id)
+%%index WorkOrder(owner_id)
+
+%%entity SafetyCase help: An airport safety occurrence or hazard investigation. Closure requires evidence and accountable review rather than deleting the original report.
+%%field SafetyCase.reference help: Safety case reference used in investigations and corrective action tracking.
+%%field SafetyCase.airport_id help: Airport at which the hazard or occurrence was observed.
+%%field SafetyCase.flight_id help: Affected movement when the event relates to one flight.
+%%field SafetyCase.reported_by_id help: Employee who raised the observation and can explain the original facts.
+%%field SafetyCase.owner_id help: Safety officer responsible for investigation and follow-up.
+%%field SafetyCase.severity help: Minor is locally containable, major needs management attention, critical threatens life or essential operations.
+%%field SafetyCase.severity enum: Severity
+%%field SafetyCase.status help: logged preserves the report, investigating establishes facts, mitigated has controls in place, resolved has verified closure.
+%%field SafetyCase.status enum: SafetyCaseStatus
+%%field SafetyCase.occurred_at help: UTC time the event happened, not when the form was later entered.
+%%field SafetyCase.description help: Factual observation including location and immediate operational effect.
+%%field SafetyCase.immediate_action help: Containment already taken to protect people and aircraft.
+%%field SafetyCase.closure_evidence help: Evidence that controls are effective, required before final resolution.
+%%section entity: SafetyCase; name: Occurrence; help: Identify the event, its location and the accountable investigation team.; rows: reference | airport_id, flight_id | reported_by_id, owner_id
+%%section entity: SafetyCase; name: Initial assessment; help: Record severity and facts while they are still available.; rows: severity, occurred_at | description | immediate_action
+%%section entity: SafetyCase; name: Verified resolution; help: Preserve the evidence used by the safety officer to resolve the case.; rows: closure_evidence
+%%rbac role:airport_manager|safety_officer|operations_controller on SafetyCase.read
+%%rbac role:airport_manager|safety_officer|operations_controller on SafetyCase.create
+%%rbac role:airport_manager|safety_officer|operations_controller on SafetyCase.update
+%%rbac role:airport_manager on SafetyCase.delete
+%%index SafetyCase(airport_id)
+%%index SafetyCase(flight_id)
+%%index SafetyCase(reported_by_id)
+%%index SafetyCase(owner_id)
+
+%%entity CorrectiveAction help: A remedial commitment belonging to one safety case, with an individual owner and verification evidence.
+%%entity CorrectiveAction parent: SafetyCase
+%%field CorrectiveAction.reference help: Action reference used when following up an investigation finding.
+%%field CorrectiveAction.safety_case_id help: Investigation whose risk this action reduces.
+%%field CorrectiveAction.owner_id help: Employee accountable for delivering the agreed corrective measure.
+%%field CorrectiveAction.status help: proposed awaits acceptance, accepted is committed, implemented awaits verification, validated has effective evidence.
+%%field CorrectiveAction.status enum: CorrectiveActionStatus
+%%field CorrectiveAction.due_at help: UTC deadline agreed with the action owner.
+%%field CorrectiveAction.instruction help: Specific change and measurable acceptance criteria agreed by the safety officer.
+%%field CorrectiveAction.evidence help: Proof of implementation and effectiveness, required for validation.
+%%section entity: CorrectiveAction; name: Remedial commitment; help: Agree who will correct which investigation finding and by when.; rows: reference | safety_case_id, owner_id | due_at
+%%section entity: CorrectiveAction; name: Acceptance evidence; help: Describe the measurable change and retain verification evidence.; rows: instruction | evidence
+%%rbac role:airport_manager|safety_officer|operations_controller on CorrectiveAction.read
+%%rbac role:airport_manager|safety_officer|operations_controller on CorrectiveAction.create
+%%rbac role:airport_manager|safety_officer|operations_controller on CorrectiveAction.update
+%%rbac role:airport_manager on CorrectiveAction.delete
+%%index CorrectiveAction(safety_case_id)
+%%index CorrectiveAction(owner_id)
+
+%%entity SecurityPass help: A time-limited airside access authorisation for a named holder. Passes are records of authority, separate from software login roles.
+%%field SecurityPass.reference help: Printed pass reference checked at controlled airport access points.
+%%field SecurityPass.airport_id help: Airport that issues and recognises this authorisation.
+%%field SecurityPass.holder_name help: Name on the holder's verified identity document.
+%%field SecurityPass.sponsor help: Employing organisation taking responsibility for the holder's airport activity.
+%%field SecurityPass.access_zone help: Landside permits public work areas, airside permits designated apron access, restricted permits separately approved controlled areas.
+%%field SecurityPass.access_zone enum: AccessZone
+%%field SecurityPass.status help: applied awaits checks, issued permits access during validity, revoked removes authority, expired is no longer valid.
+%%field SecurityPass.status enum: SecurityPassStatus
+%%field SecurityPass.valid_from help: UTC instant before which the pass must not admit its holder.
+%%field SecurityPass.valid_until help: UTC expiry after which the pass must not admit its holder.
+%%field SecurityPass.approved_by_id help: Security employee who verified eligibility before issue.
+%%field SecurityPass.revocation_reason help: Reason for immediate withdrawal, required when revoking access.
+%%section entity: SecurityPass; name: Pass holder; help: Identify the person and organisation sponsoring access.; rows: reference | holder_name, sponsor | airport_id, access_zone
+%%section entity: SecurityPass; name: Authorisation; help: Check both validity boundaries and the approving security employee.; rows: valid_from, valid_until | approved_by_id
+%%section entity: SecurityPass; name: Withdrawal; help: Retain the reason an issued pass was withdrawn.; rows: revocation_reason
+%%rbac role:airport_manager|security_officer on SecurityPass.read
+%%rbac role:airport_manager|security_officer on SecurityPass.create
+%%rbac role:airport_manager|security_officer on SecurityPass.update
+%%rbac role:airport_manager on SecurityPass.delete
+%%index SecurityPass(airport_id)
+%%index SecurityPass(approved_by_id)
+
+%%entity Tariff help: An approved unit price for an airport service, with a currency and effective interval. Charges snapshot the applied price so later tariff changes do not rewrite history.
+%%field Tariff.name help: Commercial description appearing on airport charge lines.
+%%field Tariff.airport_id help: Airport at which this rate applies.
+%%field Tariff.charge_type help: Landing, parking, passenger, handling or cargo charging basis agreed with finance.
+%%field Tariff.charge_type enum: ChargeType
+%%field Tariff.unit help: Movement, hour, passenger, tonne or service specifies what one quantity unit means.
+%%field Tariff.unit enum: ChargeUnit
+%%field Tariff.unit_price help: Net amount for one unit in the stated currency before tax.
+%%field Tariff.currency help: ISO three-letter invoice currency, consistent with the invoice using this rate.
+%%field Tariff.effective_from help: First local service date on which this rate may be applied.
+%%field Tariff.effective_until help: Last inclusive service date, empty for an open-ended published rate.
+%%field Tariff.is_active help: True permits new charge assessment within the effective interval.
+%%section entity: Tariff; name: Published service rate; help: Identify the service, charging unit and airport.; rows: name, airport_id | charge_type, unit
+%%section entity: Tariff; name: Commercial terms; help: Apply only the net price and currency valid on the service date.; rows: unit_price, currency | effective_from, effective_until | is_active
+%%rbac role:airport_manager|finance_officer on Tariff.read
+%%rbac role:airport_manager|finance_officer on Tariff.create
+%%rbac role:airport_manager|finance_officer on Tariff.update
+%%rbac role:airport_manager on Tariff.delete
+%%index Tariff(airport_id)
+
+%%entity Charge help: An assessed service charge against one movement. The amount snapshots quantity times net price plus tax and becomes an invoice line after finance review.
+%%field Charge.reference help: Charge reference used to prevent duplicate assessment of the same service.
+%%field Charge.flight_id help: Movement that consumed the airport service.
+%%field Charge.tariff_id help: Published rate used as the assessment basis.
+%%field Charge.status help: assessed awaits review, approved may be invoiced, billed has been transferred once, disputed is held for resolution.
+%%field Charge.status enum: ChargeStatus
+%%field Charge.quantity help: Number of tariff units actually supplied, such as parking hours or passengers.
+%%field Charge.unit_price help: Net price per unit copied from the tariff at assessment time.
+%%field Charge.net_amount help: Quantity multiplied by unit price in the charge currency.
+%%field Charge.tax_amount help: Applicable tax amount in the charge currency, entered from the approved tax assessment.
+%%field Charge.gross_amount help: Net amount plus tax, the amount transferred to the invoice.
+%%field Charge.currency help: ISO three-letter currency copied from the tariff and matched to the invoice.
+%%field Charge.invoice_id help: Invoice receiving this charge, empty until finance groups approved charges.
+%%field Charge.is_transferred help: Set by the invoice transfer saga so repeated saves do not create another invoice line.
+%%section entity: Charge; name: Charge assessment; help: Identify the consumed service and the finance review position.; rows: reference | flight_id, tariff_id
+%%section entity: Charge; name: Valuation; help: Use the tariff unit and currency consistently when calculating amounts.; rows: quantity, unit_price | net_amount, tax_amount | gross_amount, currency
+%%section entity: Charge; name: Billing transfer; help: Assign the invoice before transferring the approved charge exactly once.; rows: invoice_id, is_transferred
+%%rbac role:airport_manager|finance_officer on Charge.read
+%%rbac role:airport_manager|finance_officer on Charge.create
+%%rbac role:airport_manager|finance_officer on Charge.update
+%%rbac role:airport_manager on Charge.delete
+%%index Charge(flight_id)
+%%index Charge(tariff_id)
+%%index Charge(invoice_id)
+
+%%entity Invoice help: An airport operator invoice to one airline in one currency. Finance groups reviewed movement charges and records receipts against the issued document.
+%%field Invoice.reference help: Legal invoice number quoted by the airline when paying or disputing a bill.
+%%field Invoice.airport_id help: Airport issuing the invoice and recognising the service revenue.
+%%field Invoice.airline_id help: Airline legally responsible for paying the included charges.
+%%field Invoice.status help: draft allows charge grouping, issued is sent to the airline, settled has reconciled receipts, void retains a cancelled document.
+%%field Invoice.status enum: InvoiceStatus
+%%field Invoice.currency help: ISO three-letter currency shared by every included charge and receipt.
+%%field Invoice.issued_on help: Invoice issue date determining the commercial payment period.
+%%field Invoice.due_on help: Contractual payment deadline used by the outstanding-invoice report.
+%%field Invoice.total_amount help: Sum of the included gross charge lines in invoice currency, verified before issue.
+%%field Invoice.received_amount help: Reconciled receipt total in invoice currency, verified before settlement.
+%%field Invoice.void_reason help: Reason the document was cancelled, required for a void invoice.
+%%section entity: Invoice; name: Billing document; help: Identify the billed airline, issuing airport and document state.; rows: reference | airport_id, airline_id
+%%section entity: Invoice; name: Payment terms; help: Confirm issue, due date and totals in one invoice currency.; rows: issued_on, due_on | currency, total_amount | received_amount
+%%section entity: Invoice; name: Cancellation evidence; help: Explain why the issued commercial record must be voided.; rows: void_reason
+%%rbac role:airport_manager|finance_officer on Invoice.read
+%%rbac role:airport_manager|finance_officer on Invoice.create
+%%rbac role:airport_manager|finance_officer on Invoice.update
+%%rbac role:airport_manager on Invoice.delete
+%%index Invoice(airport_id)
+%%index Invoice(airline_id)
+
+%%entity InvoiceLine help: A charge snapshot owned by one invoice. It preserves the commercial description and gross amount agreed at billing time.
+%%entity InvoiceLine parent: Invoice
+%%field InvoiceLine.invoice_id help: Billing document containing this service charge snapshot.
+%%field InvoiceLine.charge_id help: Assessed airport charge transferred to this line only once.
+%%field InvoiceLine.description help: Service description printed for the airline, including the movement reference where needed.
+%%field InvoiceLine.amount help: Gross amount copied from the charge in the parent invoice currency.
+%%section entity: InvoiceLine; name: Billed service; help: Trace the invoice amount to its reviewed airport charge.; rows: invoice_id, charge_id | description | amount
+%%rbac role:airport_manager|finance_officer on InvoiceLine.read
+%%rbac role:airport_manager|finance_officer on InvoiceLine.create
+%%rbac role:airport_manager|finance_officer on InvoiceLine.update
+%%rbac role:airport_manager on InvoiceLine.delete
+%%index InvoiceLine(invoice_id)
+%%index InvoiceLine(charge_id)
+
+%%entity Receipt help: A payment received against an airline invoice and reconciled by finance. Reversed receipts remain in the history.
+%%field Receipt.reference help: Bank or cash receipt reference used to detect a duplicate payment entry.
+%%field Receipt.invoice_id help: Invoice against which this payment is allocated.
+%%field Receipt.status help: recorded awaits reconciliation, reconciled counts toward settlement, reversed no longer counts.
+%%field Receipt.status enum: ReceiptStatus
+%%field Receipt.received_on help: Value date on which the airport received the funds.
+%%field Receipt.amount help: Positive amount received in exactly the parent invoice currency.
+%%field Receipt.method help: Bank transfer, cash or card identifies the evidence needed for reconciliation.
+%%field Receipt.method enum: PaymentMethod
+%%field Receipt.reconciliation_notes help: Bank statement match or reason for reversing the receipt.
+%%section entity: Receipt; name: Payment receipt; help: Identify the payment and the invoice it reduces.; rows: reference | invoice_id, method | received_on, amount
+%%section entity: Receipt; name: Bank reconciliation; help: Retain the evidence used to count or reverse the payment.; rows: reconciliation_notes
+%%rbac role:airport_manager|finance_officer on Receipt.read
+%%rbac role:airport_manager|finance_officer on Receipt.create
+%%rbac role:airport_manager|finance_officer on Receipt.update
+%%rbac role:airport_manager on Receipt.delete
+%%index Receipt(invoice_id)
+%%index Terminal(airport_id, code) unique
+%%index Allocation(resource_id, starts_at, ends_at)
+%%index Flight(airport_id, service_date, status)
+%%index TurnaroundTask(status, due_at)
+%%index WorkOrder(status, due_at)
+%%index CorrectiveAction(status, due_at)
+%%index Invoice(status, due_on)
+%%index InvoiceLine(charge_id) unique
+
+%%report movement-board title: Movement board entity: Flight help: Review dated movement timings for the operations duty briefing. sql: SELECT reference, direction, scheduled_at, estimated_at, actual_at, status FROM bus_flight WHERE deleted_at IS NULL ORDER BY scheduled_at
+%%report resource-reservations title: Confirmed facility reservations entity: Allocation help: Review the live reservations requiring resource coordination. sql: SELECT reference, resource_id, flight_id, starts_at, ends_at FROM bus_allocation WHERE status = 'reserved' AND deleted_at IS NULL ORDER BY starts_at
+%%report ground-work title: Unfinished handling tasks entity: TurnaroundTask help: Dispatch the ground work still requiring completion. sql: SELECT reference, flight_id, owner_id, due_at FROM bus_turnaround_task WHERE status IN ('queued', 'underway') AND deleted_at IS NULL ORDER BY due_at
+%%report baggage-discrepancies title: Unresolved baggage counts entity: BaggageBatch help: Investigate batches whose physical count cannot yet be accepted. sql: SELECT reference, flight_id, expected_bags, counted_bags FROM bus_baggage_batch WHERE (expected_bags <> counted_bags OR status = 'exception') AND deleted_at IS NULL
+%%report cargo-holds title: Held cargo consignments entity: CargoConsignment help: Locate consignments that cannot yet leave controlled custody. sql: SELECT reference, flight_id, pieces, weight_kg FROM bus_cargo_consignment WHERE status = 'held' AND deleted_at IS NULL
+%%report engineering-backlog title: Maintenance work awaiting handback entity: WorkOrder help: Prioritise equipment repairs still awaiting verified handback. sql: SELECT reference, asset_id, priority, due_at FROM bus_work_order WHERE status <> 'closed' AND deleted_at IS NULL ORDER BY due_at
+%%report safety-followup title: Unverified safety commitments entity: CorrectiveAction help: Follow up the owners of unfinished safety commitments. sql: SELECT reference, safety_case_id, owner_id, due_at FROM bus_corrective_action WHERE status <> 'validated' AND deleted_at IS NULL ORDER BY due_at
+%%report pass-register title: Issued airside access passes entity: SecurityPass help: Review issued authorisations by expiry before checking current validity. sql: SELECT reference, holder_name, access_zone, valid_until FROM bus_security_pass WHERE status = 'issued' AND deleted_at IS NULL ORDER BY valid_until
+%%report outstanding-invoices title: Issued invoices awaiting payment entity: Invoice help: Prioritise airline collection work by payment deadline. sql: SELECT reference, airline_id, due_on, currency, total_amount, received_amount, total_amount - received_amount AS outstanding FROM bus_invoice WHERE status = 'issued' AND deleted_at IS NULL ORDER BY due_on
+%%report charge-review title: Airport charges awaiting review entity: Charge help: Resolve assessments and disputes before issuing the next airline bill. sql: SELECT reference, flight_id, currency, gross_amount FROM bus_charge WHERE status IN ('assessed', 'disputed') AND deleted_at IS NULL
+%%report airport-created-per-month title: Airports created per month entity: Airport chart: line x: month y: records help: An airport operated by this organisation. New airports per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_airport WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report airport-is-active-share title: Airports: is active entity: Airport chart: pie x: is_active y: records help: An airport operated by this organisation. The share of airports where is active holds against those where it does not. sql: SELECT CASE WHEN is_active THEN 'yes' ELSE 'no' END AS is_active, COUNT(*) AS records FROM bus_airport WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report airport-top-country-code title: Airports: the most common country code entity: Airport chart: bar x: country_code y: records help: An airport operated by this organisation. The ten most frequent values of country code among airports; free text that repeats is a list the model could close. sql: SELECT COALESCE(country_code, '(blank)') AS country_code, COUNT(*) AS records FROM bus_airport WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report staff-by-discipline title: Staffs by discipline entity: Staff chart: bar x: discipline y: records help: An operational employee who owns tasks or approves work. How staffs divide across discipline, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(discipline::text, '(unset)') AS discipline, COUNT(*) AS records FROM bus_staff WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report staff-created-per-month title: Staffs created per month entity: Staff chart: line x: month y: records help: An operational employee who owns tasks or approves work. New staffs per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_staff WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report staff-per-airport title: Staffs per airport entity: Staff chart: bar x: airport y: records help: An operational employee who owns tasks or approves work. Which airport the most staffs belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS airport, COUNT(*) AS records FROM bus_staff x LEFT JOIN bus_airport p ON p.id = x.airport_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report airline-created-per-month title: Airlines created per month entity: Airline chart: line x: month y: records help: An aircraft operator billed for airport services. New airlines per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_airline WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report airline-age-bands title: How recently airlines were changed entity: Airline chart: bar x: last_changed y: records help: An aircraft operator billed for airport services. Records by time since their last change; the oldest band is the stale tail to review or retire. sql: SELECT CASE WHEN updated_at >= now() - interval '30 days' THEN 'last 30 days' WHEN updated_at >= now() - interval '90 days' THEN '30 to 90 days' WHEN updated_at >= now() - interval '180 days' THEN '90 to 180 days' ELSE 'older than 180 days' END AS last_changed, COUNT(*) AS records FROM bus_airline WHERE deleted_at IS NULL GROUP BY 1 ORDER BY MIN(updated_at) DESC
+%%report airline-is-active-share title: Airlines: is active entity: Airline chart: pie x: is_active y: records help: An aircraft operator billed for airport services. The share of airlines where is active holds against those where it does not. sql: SELECT CASE WHEN is_active THEN 'yes' ELSE 'no' END AS is_active, COUNT(*) AS records FROM bus_airline WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report aircraft-type-by-wake-category title: Aircraft Types by wake category entity: AircraftType chart: pie x: wake_category y: records help: A certified airframe variant used to check stand suitability and describe the operating fleet. How aircraft types divide across wake category, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(wake_category::text, '(unset)') AS wake_category, COUNT(*) AS records FROM bus_aircraft_type WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report aircraft-type-wingspan-m-by-wake-category title: Total wingspan m by wake category entity: AircraftType chart: bar x: wake_category y: total_wingspan_m help: A certified airframe variant used to check stand suitability and describe the operating fleet. Aircraft Types added up on wingspan m, split by wake category, to show where the quantity sits. sql: SELECT COALESCE(wake_category::text, '(unset)') AS wake_category, ROUND(SUM(wingspan_m)::numeric, 2) AS total_wingspan_m FROM bus_aircraft_type WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report aircraft-type-wingspan-m-per-month title: Average wingspan m per month entity: AircraftType chart: line x: month y: average_wingspan_m help: A certified airframe variant used to check stand suitability and describe the operating fleet. The average wingspan m of aircraft types created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(wingspan_m)::numeric, 2) AS average_wingspan_m FROM bus_aircraft_type WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report aircraft-type-largest-by-wingspan-m title: The ten largest aircraft types by wingspan m entity: AircraftType chart: bar x: record y: wingspan_m help: A certified airframe variant used to check stand suitability and describe the operating fleet. The records with the highest wingspan m; worth reading for outliers and for the few that carry most of the total. sql: SELECT name::text AS record, wingspan_m FROM bus_aircraft_type WHERE deleted_at IS NULL AND wingspan_m IS NOT NULL ORDER BY wingspan_m DESC LIMIT 10
+%%report aircraft-type-passenger-capacity-by-wake-category title: Total passenger capacity by wake category entity: AircraftType chart: bar x: wake_category y: total_passenger_capacity help: A certified airframe variant used to check stand suitability and describe the operating fleet. Aircraft Types added up on passenger capacity, split by wake category, to show where the quantity sits. sql: SELECT COALESCE(wake_category::text, '(unset)') AS wake_category, ROUND(SUM(passenger_capacity)::numeric, 2) AS total_passenger_capacity FROM bus_aircraft_type WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report aircraft-type-passenger-capacity-per-month title: Average passenger capacity per month entity: AircraftType chart: line x: month y: average_passenger_capacity help: A certified airframe variant used to check stand suitability and describe the operating fleet. The average passenger capacity of aircraft types created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(passenger_capacity)::numeric, 2) AS average_passenger_capacity FROM bus_aircraft_type WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report aircraft-type-largest-by-passenger-capacity title: The ten largest aircraft types by passenger capacity entity: AircraftType chart: bar x: record y: passenger_capacity help: A certified airframe variant used to check stand suitability and describe the operating fleet. The records with the highest passenger capacity; worth reading for outliers and for the few that carry most of the total. sql: SELECT name::text AS record, passenger_capacity FROM bus_aircraft_type WHERE deleted_at IS NULL AND passenger_capacity IS NOT NULL ORDER BY passenger_capacity DESC LIMIT 10
+%%report aircraft-type-maximum-takeoff-weight-kg-by-wake-category title: Total maximum takeoff weight kg by wake category entity: AircraftType chart: bar x: wake_category y: total_maximum_takeoff_weight_kg help: A certified airframe variant used to check stand suitability and describe the operating fleet. Aircraft Types added up on maximum takeoff weight kg, split by wake category, to show where the quantity sits. sql: SELECT COALESCE(wake_category::text, '(unset)') AS wake_category, ROUND(SUM(maximum_takeoff_weight_kg)::numeric, 2) AS total_maximum_takeoff_weight_kg FROM bus_aircraft_type WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report aircraft-type-maximum-takeoff-weight-kg-per-month title: Average maximum takeoff weight kg per month entity: AircraftType chart: line x: month y: average_maximum_takeoff_weight_kg help: A certified airframe variant used to check stand suitability and describe the operating fleet. The average maximum takeoff weight kg of aircraft types created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(maximum_takeoff_weight_kg)::numeric, 2) AS average_maximum_takeoff_weight_kg FROM bus_aircraft_type WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report aircraft-type-largest-by-maximum-takeoff-weight-kg title: The ten largest aircraft types by maximum takeoff weight kg entity: AircraftType chart: bar x: record y: maximum_takeoff_weight_kg help: A certified airframe variant used to check stand suitability and describe the operating fleet. The records with the highest maximum takeoff weight kg; worth reading for outliers and for the few that carry most of the total. sql: SELECT name::text AS record, maximum_takeoff_weight_kg FROM bus_aircraft_type WHERE deleted_at IS NULL AND maximum_takeoff_weight_kg IS NOT NULL ORDER BY maximum_takeoff_weight_kg DESC LIMIT 10
+%%report aircraft-created-per-month title: Aircrafts created per month entity: Aircraft chart: line x: month y: records help: A registered airframe visiting the airport. New aircrafts per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_aircraft WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report aircraft-per-aircraft-type title: Aircrafts per aircraft type entity: Aircraft chart: bar x: aircraft_type y: records help: A registered airframe visiting the airport. Which aircraft type the most aircrafts belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS aircraft_type, COUNT(*) AS records FROM bus_aircraft x LEFT JOIN bus_aircraft_type p ON p.id = x.aircraft_type_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report aircraft-per-airline title: Aircrafts per airline entity: Aircraft chart: bar x: airline y: records help: A registered airframe visiting the airport. Which airline the most aircrafts belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS airline, COUNT(*) AS records FROM bus_aircraft x LEFT JOIN bus_airline p ON p.id = x.airline_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report terminal-created-per-month title: Terminals created per month entity: Terminal chart: line x: month y: records help: A passenger building whose gates, counters and reclaim belts are allocated to movements. New terminals per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_terminal WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report terminal-is-active-share title: Terminals: is active entity: Terminal chart: pie x: is_active y: records help: A passenger building whose gates, counters and reclaim belts are allocated to movements. The share of terminals where is active holds against those where it does not. sql: SELECT CASE WHEN is_active THEN 'yes' ELSE 'no' END AS is_active, COUNT(*) AS records FROM bus_terminal WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report terminal-per-airport title: Terminals per airport entity: Terminal chart: bar x: airport y: records help: A passenger building whose gates, counters and reclaim belts are allocated to movements. Which airport the most terminals belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS airport, COUNT(*) AS records FROM bus_terminal x LEFT JOIN bus_airport p ON p.id = x.airport_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report resource-by-resource-type title: Resources by resource type entity: Resource chart: pie x: resource_type y: records help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. How resources divide across resource type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(resource_type::text, '(unset)') AS resource_type, COUNT(*) AS records FROM bus_resource WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report resource-by-availability title: Resources by availability entity: Resource chart: pie x: availability y: records help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. How resources divide across availability, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(availability::text, '(unset)') AS availability, COUNT(*) AS records FROM bus_resource WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report resource-maximum-wingspan-m-by-resource-type title: Total maximum wingspan m by resource type entity: Resource chart: bar x: resource_type y: total_maximum_wingspan_m help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Resources added up on maximum wingspan m, split by resource type, to show where the quantity sits. sql: SELECT COALESCE(resource_type::text, '(unset)') AS resource_type, ROUND(SUM(maximum_wingspan_m)::numeric, 2) AS total_maximum_wingspan_m FROM bus_resource WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report resource-maximum-wingspan-m-per-month title: Average maximum wingspan m per month entity: Resource chart: line x: month y: average_maximum_wingspan_m help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. The average maximum wingspan m of resources created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(maximum_wingspan_m)::numeric, 2) AS average_maximum_wingspan_m FROM bus_resource WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report resource-largest-by-maximum-wingspan-m title: The ten largest resources by maximum wingspan m entity: Resource chart: bar x: record y: maximum_wingspan_m help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. The records with the highest maximum wingspan m; worth reading for outliers and for the few that carry most of the total. sql: SELECT name::text AS record, maximum_wingspan_m FROM bus_resource WHERE deleted_at IS NULL AND maximum_wingspan_m IS NOT NULL ORDER BY maximum_wingspan_m DESC LIMIT 10
+%%report resource-capacity-by-resource-type title: Total capacity by resource type entity: Resource chart: bar x: resource_type y: total_capacity help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Resources added up on capacity, split by resource type, to show where the quantity sits. sql: SELECT COALESCE(resource_type::text, '(unset)') AS resource_type, ROUND(SUM(capacity)::numeric, 2) AS total_capacity FROM bus_resource WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report resource-capacity-per-month title: Average capacity per month entity: Resource chart: line x: month y: average_capacity help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. The average capacity of resources created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(capacity)::numeric, 2) AS average_capacity FROM bus_resource WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report resource-largest-by-capacity title: The ten largest resources by capacity entity: Resource chart: bar x: record y: capacity help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. The records with the highest capacity; worth reading for outliers and for the few that carry most of the total. sql: SELECT name::text AS record, capacity FROM bus_resource WHERE deleted_at IS NULL AND capacity IS NOT NULL ORDER BY capacity DESC LIMIT 10
+%%report resource-per-airport title: Resources per airport entity: Resource chart: bar x: airport y: records help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Which airport the most resources belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS airport, COUNT(*) AS records FROM bus_resource x LEFT JOIN bus_airport p ON p.id = x.airport_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report resource-maximum-wingspan-m-per-airport title: Total maximum wingspan m per airport entity: Resource chart: bar x: airport y: total_maximum_wingspan_m help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Resources added up on maximum wingspan m for each airport, ten largest first. sql: SELECT COALESCE(p.name::text, '(none)') AS airport, ROUND(SUM(x.maximum_wingspan_m)::numeric, 2) AS total_maximum_wingspan_m FROM bus_resource x LEFT JOIN bus_airport p ON p.id = x.airport_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+%%report resource-per-terminal title: Resources per terminal entity: Resource chart: bar x: terminal y: records help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Which terminal the most resources belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS terminal, COUNT(*) AS records FROM bus_resource x LEFT JOIN bus_terminal p ON p.id = x.terminal_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report resource-maximum-wingspan-m-per-terminal title: Total maximum wingspan m per terminal entity: Resource chart: bar x: terminal y: total_maximum_wingspan_m help: A schedulable airport facility such as a runway, stand, gate, check-in counter or reclaim belt. Resources added up on maximum wingspan m for each terminal, ten largest first. sql: SELECT COALESCE(p.name::text, '(none)') AS terminal, ROUND(SUM(x.maximum_wingspan_m)::numeric, 2) AS total_maximum_wingspan_m FROM bus_resource x LEFT JOIN bus_terminal p ON p.id = x.terminal_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+%%report flight-by-status title: Flights by status entity: Flight chart: pie x: status y: records help: One arrival or departure at one operated airport on a service date. How flights divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_flight WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report flight-by-direction title: Flights by direction entity: Flight chart: pie x: direction y: records help: One arrival or departure at one operated airport on a service date. How flights divide across direction, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(direction::text, '(unset)') AS direction, COUNT(*) AS records FROM bus_flight WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report flight-lifecycle title: Flight lifecycle entity: Flight chart: bar x: state y: records help: One arrival or departure at one operated airport on a service date. Where flights sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'planned' AS state, 0 AS position UNION ALL SELECT 'scheduled', 1 UNION ALL SELECT 'cancelled', 2 UNION ALL SELECT 'active', 3 UNION ALL SELECT 'completed', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_flight WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report flight-passenger-count-by-status title: Total passenger count by status entity: Flight chart: bar x: status y: total_passenger_count help: One arrival or departure at one operated airport on a service date. Flights added up on passenger count, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(passenger_count)::numeric, 2) AS total_passenger_count FROM bus_flight WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report flight-passenger-count-per-month title: Average passenger count per month entity: Flight chart: line x: month y: average_passenger_count help: One arrival or departure at one operated airport on a service date. The average passenger count of flights created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(passenger_count)::numeric, 2) AS average_passenger_count FROM bus_flight WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report flight-largest-by-passenger-count title: The ten largest flights by passenger count entity: Flight chart: bar x: record y: passenger_count help: One arrival or departure at one operated airport on a service date. The records with the highest passenger count; worth reading for outliers and for the few that carry most of the total. sql: SELECT reference::text AS record, passenger_count FROM bus_flight WHERE deleted_at IS NULL AND passenger_count IS NOT NULL ORDER BY passenger_count DESC LIMIT 10
+%%report flight-per-airport title: Flights per airport entity: Flight chart: bar x: airport y: records help: One arrival or departure at one operated airport on a service date. Which airport the most flights belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS airport, COUNT(*) AS records FROM bus_flight x LEFT JOIN bus_airport p ON p.id = x.airport_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report allocation-by-status title: Allocations by status entity: Allocation chart: pie x: status y: records help: A timed reservation of one airport resource for one movement. How allocations divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_allocation WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report allocation-lifecycle title: Allocation lifecycle entity: Allocation chart: bar x: state y: records help: A timed reservation of one airport resource for one movement. Where allocations sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'requested' AS state, 0 AS position UNION ALL SELECT 'reserved', 1 UNION ALL SELECT 'voided', 2 UNION ALL SELECT 'released', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_allocation WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report allocation-per-flight title: Allocations per flight entity: Allocation chart: bar x: flight y: records help: A timed reservation of one airport resource for one movement. Which flight the most allocations belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.reference::text, '(none)') AS flight, COUNT(*) AS records FROM bus_allocation x LEFT JOIN bus_flight p ON p.id = x.flight_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report service-provider-created-per-month title: Service Providers created per month entity: ServiceProvider chart: line x: month y: records help: A contracted ground service organisation assigned turnaround work or maintaining airport assets. New service providers per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_service_provider WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report service-provider-age-bands title: How recently service providers were changed entity: ServiceProvider chart: bar x: last_changed y: records help: A contracted ground service organisation assigned turnaround work or maintaining airport assets. Records by time since their last change; the oldest band is the stale tail to review or retire. sql: SELECT CASE WHEN updated_at >= now() - interval '30 days' THEN 'last 30 days' WHEN updated_at >= now() - interval '90 days' THEN '30 to 90 days' WHEN updated_at >= now() - interval '180 days' THEN '90 to 180 days' ELSE 'older than 180 days' END AS last_changed, COUNT(*) AS records FROM bus_service_provider WHERE deleted_at IS NULL GROUP BY 1 ORDER BY MIN(updated_at) DESC
+%%report service-provider-is-active-share title: Service Providers: is active entity: ServiceProvider chart: pie x: is_active y: records help: A contracted ground service organisation assigned turnaround work or maintaining airport assets. The share of service providers where is active holds against those where it does not. sql: SELECT CASE WHEN is_active THEN 'yes' ELSE 'no' END AS is_active, COUNT(*) AS records FROM bus_service_provider WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report turnaround-task-by-status title: Turnaround Tasks by status entity: TurnaroundTask chart: pie x: status y: records help: An independently assignable piece of ground work for a movement, tracked until completion or exception. How turnaround tasks divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_turnaround_task WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report turnaround-task-by-service-type title: Turnaround Tasks by service type entity: TurnaroundTask chart: bar x: service_type y: records help: An independently assignable piece of ground work for a movement, tracked until completion or exception. How turnaround tasks divide across service type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(service_type::text, '(unset)') AS service_type, COUNT(*) AS records FROM bus_turnaround_task WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report turnaround-task-lifecycle title: Turnaround Task lifecycle entity: TurnaroundTask chart: bar x: state y: records help: An independently assignable piece of ground work for a movement, tracked until completion or exception. Where turnaround tasks sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'queued' AS state, 0 AS position UNION ALL SELECT 'underway', 1 UNION ALL SELECT 'waived', 2 UNION ALL SELECT 'finished', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_turnaround_task WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report baggage-batch-by-status title: Baggage Batches by status entity: BaggageBatch chart: pie x: status y: records help: An aggregate hold-baggage batch on a movement. How baggage batches divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_baggage_batch WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report baggage-batch-lifecycle title: Baggage Batch lifecycle entity: BaggageBatch chart: bar x: state y: records help: An aggregate hold-baggage batch on a movement. Where baggage batches sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'collecting' AS state, 0 AS position UNION ALL SELECT 'reconciled', 1 UNION ALL SELECT 'exception', 2 UNION ALL SELECT 'loaded', 3 UNION ALL SELECT 'delivered', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_baggage_batch WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report baggage-batch-expected-bags-by-status title: Total expected bags by status entity: BaggageBatch chart: bar x: status y: total_expected_bags help: An aggregate hold-baggage batch on a movement. Baggage Batches added up on expected bags, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(expected_bags)::numeric, 2) AS total_expected_bags FROM bus_baggage_batch WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report baggage-batch-expected-bags-per-month title: Average expected bags per month entity: BaggageBatch chart: line x: month y: average_expected_bags help: An aggregate hold-baggage batch on a movement. The average expected bags of baggage batches created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(expected_bags)::numeric, 2) AS average_expected_bags FROM bus_baggage_batch WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report baggage-batch-largest-by-expected-bags title: The ten largest baggage batches by expected bags entity: BaggageBatch chart: bar x: record y: expected_bags help: An aggregate hold-baggage batch on a movement. The records with the highest expected bags; worth reading for outliers and for the few that carry most of the total. sql: SELECT reference::text AS record, expected_bags FROM bus_baggage_batch WHERE deleted_at IS NULL AND expected_bags IS NOT NULL ORDER BY expected_bags DESC LIMIT 10
+%%report baggage-batch-counted-bags-by-status title: Total counted bags by status entity: BaggageBatch chart: bar x: status y: total_counted_bags help: An aggregate hold-baggage batch on a movement. Baggage Batches added up on counted bags, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(counted_bags)::numeric, 2) AS total_counted_bags FROM bus_baggage_batch WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report cargo-consignment-by-status title: Cargo Consignments by status entity: CargoConsignment chart: pie x: status y: records help: An air waybill consignment handled by the airport cargo operation, with release recorded separately from physical receipt. How cargo consignments divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_cargo_consignment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report cargo-consignment-lifecycle title: Cargo Consignment lifecycle entity: CargoConsignment chart: bar x: state y: records help: An air waybill consignment handled by the airport cargo operation, with release recorded separately from physical receipt. Where cargo consignments sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'booked' AS state, 0 AS position UNION ALL SELECT 'received', 1 UNION ALL SELECT 'held', 2 UNION ALL SELECT 'cleared', 3 UNION ALL SELECT 'dispatched', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_cargo_consignment WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report cargo-consignment-pieces-by-status title: Total pieces by status entity: CargoConsignment chart: bar x: status y: total_pieces help: An air waybill consignment handled by the airport cargo operation, with release recorded separately from physical receipt. Cargo Consignments added up on pieces, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(pieces)::numeric, 2) AS total_pieces FROM bus_cargo_consignment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+%%report asset-by-condition title: Assets by condition entity: Asset chart: pie x: condition y: records help: An airport-owned maintainable installation or equipment item. How assets divide across condition, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(condition::text, '(unset)') AS condition, COUNT(*) AS records FROM bus_asset WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report asset-per-airport title: Assets per airport entity: Asset chart: bar x: airport y: records help: An airport-owned maintainable installation or equipment item. Which airport the most assets belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS airport, COUNT(*) AS records FROM bus_asset x LEFT JOIN bus_airport p ON p.id = x.airport_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report asset-per-resource title: Assets per resource entity: Asset chart: bar x: resource y: records help: An airport-owned maintainable installation or equipment item. Which resource the most assets belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.name::text, '(none)') AS resource, COUNT(*) AS records FROM bus_asset x LEFT JOIN bus_resource p ON p.id = x.resource_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report work-order-by-status title: Work Orders by status entity: WorkOrder chart: pie x: status y: records help: A maintenance intervention against one airport asset, from reported defect through supervisor verification. How work orders divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_work_order WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report work-order-by-priority title: Work Orders by priority entity: WorkOrder chart: pie x: priority y: records help: A maintenance intervention against one airport asset, from reported defect through supervisor verification. How work orders divide across priority, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(priority::text, '(unset)') AS priority, COUNT(*) AS records FROM bus_work_order WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report work-order-lifecycle title: Work Order lifecycle entity: WorkOrder chart: bar x: state y: records help: A maintenance intervention against one airport asset, from reported defect through supervisor verification. Where work orders sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'reported' AS state, 0 AS position UNION ALL SELECT 'authorised', 1 UNION ALL SELECT 'repairing', 2 UNION ALL SELECT 'verified', 3 UNION ALL SELECT 'closed', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_work_order WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report safety-case-by-status title: Safety Cases by status entity: SafetyCase chart: pie x: status y: records help: An airport safety occurrence or hazard investigation. How safety cases divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_safety_case WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report safety-case-by-severity title: Safety Cases by severity entity: SafetyCase chart: pie x: severity y: records help: An airport safety occurrence or hazard investigation. How safety cases divide across severity, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(severity::text, '(unset)') AS severity, COUNT(*) AS records FROM bus_safety_case WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report safety-case-lifecycle title: Safety Case lifecycle entity: SafetyCase chart: bar x: state y: records help: An airport safety occurrence or hazard investigation. Where safety cases sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'logged' AS state, 0 AS position UNION ALL SELECT 'investigating', 1 UNION ALL SELECT 'mitigated', 2 UNION ALL SELECT 'resolved', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_safety_case WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report corrective-action-by-status title: Corrective Actions by status entity: CorrectiveAction chart: pie x: status y: records help: A remedial commitment belonging to one safety case, with an individual owner and verification evidence. How corrective actions divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_corrective_action WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report corrective-action-lifecycle title: Corrective Action lifecycle entity: CorrectiveAction chart: bar x: state y: records help: A remedial commitment belonging to one safety case, with an individual owner and verification evidence. Where corrective actions sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'proposed' AS state, 0 AS position UNION ALL SELECT 'accepted', 1 UNION ALL SELECT 'implemented', 2 UNION ALL SELECT 'validated', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_corrective_action WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report corrective-action-per-safety-case title: Corrective Actions per safety case entity: CorrectiveAction chart: bar x: safety_case y: records help: A remedial commitment belonging to one safety case, with an individual owner and verification evidence. Which safety case the most corrective actions belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.reference::text, '(none)') AS safety_case, COUNT(*) AS records FROM bus_corrective_action x LEFT JOIN bus_safety_case p ON p.id = x.safety_case_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report security-pass-by-status title: Security Passes by status entity: SecurityPass chart: pie x: status y: records help: A time-limited airside access authorisation for a named holder. How security passes divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_security_pass WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report security-pass-by-access-zone title: Security Passes by access zone entity: SecurityPass chart: pie x: access_zone y: records help: A time-limited airside access authorisation for a named holder. How security passes divide across access zone, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(access_zone::text, '(unset)') AS access_zone, COUNT(*) AS records FROM bus_security_pass WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report security-pass-lifecycle title: Security Pass lifecycle entity: SecurityPass chart: bar x: state y: records help: A time-limited airside access authorisation for a named holder. Where security passes sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'applied' AS state, 0 AS position UNION ALL SELECT 'issued', 1 UNION ALL SELECT 'revoked', 2 UNION ALL SELECT 'expired', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_security_pass WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report tariff-by-charge-type title: Tariffs by charge type entity: Tariff chart: pie x: charge_type y: records help: An approved unit price for an airport service, with a currency and effective interval. How tariffs divide across charge type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(charge_type::text, '(unset)') AS charge_type, COUNT(*) AS records FROM bus_tariff WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report tariff-by-unit title: Tariffs by unit entity: Tariff chart: pie x: unit y: records help: An approved unit price for an airport service, with a currency and effective interval. How tariffs divide across unit, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(unit::text, '(unset)') AS unit, COUNT(*) AS records FROM bus_tariff WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report tariff-top-currency title: Tariffs: the most common currency entity: Tariff chart: bar x: currency y: records help: An approved unit price for an airport service, with a currency and effective interval. The ten most frequent values of currency among tariffs; free text that repeats is a list the model could close. sql: SELECT COALESCE(currency, '(blank)') AS currency, COUNT(*) AS records FROM bus_tariff WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report charge-by-status title: Charges by status entity: Charge chart: pie x: status y: records help: An assessed service charge against one movement. How charges divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_charge WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report charge-lifecycle title: Charge lifecycle entity: Charge chart: bar x: state y: records help: An assessed service charge against one movement. Where charges sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'assessed' AS state, 0 AS position UNION ALL SELECT 'approved', 1 UNION ALL SELECT 'disputed', 2 UNION ALL SELECT 'billed', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_charge WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report charge-top-currency title: Charges: the most common currency entity: Charge chart: bar x: currency y: records help: An assessed service charge against one movement. The ten most frequent values of currency among charges; free text that repeats is a list the model could close. sql: SELECT COALESCE(currency, '(blank)') AS currency, COUNT(*) AS records FROM bus_charge WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report invoice-by-status title: Invoices by status entity: Invoice chart: pie x: status y: records help: An airport operator invoice to one airline in one currency. How invoices divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_invoice WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report invoice-lifecycle title: Invoice lifecycle entity: Invoice chart: bar x: state y: records help: An airport operator invoice to one airline in one currency. Where invoices sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'draft' AS state, 0 AS position UNION ALL SELECT 'issued', 1 UNION ALL SELECT 'void', 2 UNION ALL SELECT 'settled', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_invoice WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%report invoice-top-currency title: Invoices: the most common currency entity: Invoice chart: bar x: currency y: records help: An airport operator invoice to one airline in one currency. The ten most frequent values of currency among invoices; free text that repeats is a list the model could close. sql: SELECT COALESCE(currency, '(blank)') AS currency, COUNT(*) AS records FROM bus_invoice WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report invoice-line-amount-per-month title: Average amount per month entity: InvoiceLine chart: line x: month y: average_amount help: A charge snapshot owned by one invoice. The average amount of invoice lines created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(amount)::numeric, 2) AS average_amount FROM bus_invoice_line WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+%%report invoice-line-per-invoice title: Invoice Lines per invoice entity: InvoiceLine chart: bar x: invoice y: records help: A charge snapshot owned by one invoice. Which invoice the most invoice lines belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.reference::text, '(none)') AS invoice, COUNT(*) AS records FROM bus_invoice_line x LEFT JOIN bus_invoice p ON p.id = x.invoice_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+%%report invoice-line-amount-per-invoice title: Total amount per invoice entity: InvoiceLine chart: bar x: invoice y: total_amount help: A charge snapshot owned by one invoice. Invoice Lines added up on amount for each invoice, ten largest first. sql: SELECT COALESCE(p.reference::text, '(none)') AS invoice, ROUND(SUM(x.amount)::numeric, 2) AS total_amount FROM bus_invoice_line x LEFT JOIN bus_invoice p ON p.id = x.invoice_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+%%report receipt-by-status title: Receipts by status entity: Receipt chart: pie x: status y: records help: A payment received against an airline invoice and reconciled by finance. How receipts divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_receipt WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report receipt-by-method title: Receipts by method entity: Receipt chart: pie x: method y: records help: A payment received against an airline invoice and reconciled by finance. How receipts divide across method, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(method::text, '(unset)') AS method, COUNT(*) AS records FROM bus_receipt WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+%%report receipt-lifecycle title: Receipt lifecycle entity: Receipt chart: bar x: state y: records help: A payment received against an airline invoice and reconciled by finance. Where receipts sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'recorded' AS state, 0 AS position UNION ALL SELECT 'reconciled', 1 UNION ALL SELECT 'reversed', 2) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_receipt WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+%%dashboard airport-manager-lifecycles title: airport manager: Where records stand role: airport_manager reports: flight-lifecycle, allocation-lifecycle, turnaround-task-lifecycle, baggage-batch-lifecycle, cargo-consignment-lifecycle, work-order-lifecycle, safety-case-lifecycle, corrective-action-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard airport-manager-lifecycles-2 title: airport manager: Where records stand (2) role: airport_manager reports: security-pass-lifecycle, charge-lifecycle, invoice-lifecycle, receipt-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard airport-manager-breakdowns title: airport manager: Breakdowns role: airport_manager reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard airport-manager-breakdowns-2 title: airport manager: Breakdowns (2) role: airport_manager reports: turnaround-task-by-status, turnaround-task-by-service-type, baggage-batch-by-status, cargo-consignment-by-status, asset-by-condition, work-order-by-status, work-order-by-priority, safety-case-by-status help: How the records this role works with divide across their categories.
+%%dashboard airport-manager-breakdowns-3 title: airport manager: Breakdowns (3) role: airport_manager reports: safety-case-by-severity, corrective-action-by-status, security-pass-by-status, security-pass-by-access-zone, tariff-by-charge-type, tariff-by-unit, tariff-top-currency, charge-by-status help: How the records this role works with divide across their categories.
+%%dashboard airport-manager-breakdowns-4 title: airport manager: Breakdowns (4) role: airport_manager reports: charge-top-currency, invoice-by-status, invoice-top-currency, receipt-by-status, receipt-by-method help: How the records this role works with divide across their categories.
+%%dashboard airport-manager-measures title: airport manager: Amounts and totals role: airport_manager reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard airport-manager-measures-2 title: airport manager: Amounts and totals (2) role: airport_manager reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard airport-manager-measures-3 title: airport manager: Amounts and totals (3) role: airport_manager reports: flight-passenger-count-per-month, flight-largest-by-passenger-count, baggage-batch-expected-bags-by-status, baggage-batch-expected-bags-per-month, baggage-batch-largest-by-expected-bags, baggage-batch-counted-bags-by-status, cargo-consignment-pieces-by-status, invoice-line-amount-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard airport-manager-concentrations title: airport manager: Who the records belong to role: airport_manager reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard operations-controller-lifecycles title: operations controller: Where records stand role: operations_controller reports: flight-lifecycle, allocation-lifecycle, turnaround-task-lifecycle, baggage-batch-lifecycle, cargo-consignment-lifecycle, work-order-lifecycle, safety-case-lifecycle, corrective-action-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard operations-controller-breakdowns title: operations controller: Breakdowns role: operations_controller reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard operations-controller-breakdowns-2 title: operations controller: Breakdowns (2) role: operations_controller reports: turnaround-task-by-status, turnaround-task-by-service-type, baggage-batch-by-status, cargo-consignment-by-status, asset-by-condition, work-order-by-status, work-order-by-priority, safety-case-by-status help: How the records this role works with divide across their categories.
+%%dashboard operations-controller-measures title: operations controller: Amounts and totals role: operations_controller reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard operations-controller-measures-2 title: operations controller: Amounts and totals (2) role: operations_controller reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard operations-controller-measures-3 title: operations controller: Amounts and totals (3) role: operations_controller reports: flight-passenger-count-per-month, flight-largest-by-passenger-count, baggage-batch-expected-bags-by-status, baggage-batch-expected-bags-per-month, baggage-batch-largest-by-expected-bags, baggage-batch-counted-bags-by-status, cargo-consignment-pieces-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard operations-controller-concentrations title: operations controller: Who the records belong to role: operations_controller reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard operations-controller-concentrations-2 title: operations controller: Who the records belong to (2) role: operations_controller reports: flight-per-airport, allocation-per-flight, asset-per-airport, asset-per-resource, corrective-action-per-safety-case help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard operations-controller-volumes title: operations controller: Volumes over time role: operations_controller reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard operations-controller-flags title: operations controller: Yes and no questions role: operations_controller reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard ground-supervisor-lifecycles title: ground supervisor: Where records stand role: ground_supervisor reports: flight-lifecycle, allocation-lifecycle, turnaround-task-lifecycle, baggage-batch-lifecycle, cargo-consignment-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard ground-supervisor-breakdowns title: ground supervisor: Breakdowns role: ground_supervisor reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard ground-supervisor-breakdowns-2 title: ground supervisor: Breakdowns (2) role: ground_supervisor reports: turnaround-task-by-status, turnaround-task-by-service-type, baggage-batch-by-status, cargo-consignment-by-status help: How the records this role works with divide across their categories.
+%%dashboard ground-supervisor-measures title: ground supervisor: Amounts and totals role: ground_supervisor reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard ground-supervisor-measures-2 title: ground supervisor: Amounts and totals (2) role: ground_supervisor reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard ground-supervisor-measures-3 title: ground supervisor: Amounts and totals (3) role: ground_supervisor reports: flight-passenger-count-per-month, flight-largest-by-passenger-count, baggage-batch-expected-bags-by-status, baggage-batch-expected-bags-per-month, baggage-batch-largest-by-expected-bags, baggage-batch-counted-bags-by-status, cargo-consignment-pieces-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard ground-supervisor-concentrations title: ground supervisor: Who the records belong to role: ground_supervisor reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard ground-supervisor-volumes title: ground supervisor: Volumes over time role: ground_supervisor reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard ground-supervisor-flags title: ground supervisor: Yes and no questions role: ground_supervisor reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard ground-supervisor-airport title: ground supervisor: Airport at a glance role: ground_supervisor reports: airport-created-per-month, airport-is-active-share, airport-top-country-code help: Everything the reports know about one kind of record, in one place.
+%%dashboard terminal-supervisor-lifecycles title: terminal supervisor: Where records stand role: terminal_supervisor reports: flight-lifecycle, allocation-lifecycle, baggage-batch-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard terminal-supervisor-breakdowns title: terminal supervisor: Breakdowns role: terminal_supervisor reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard terminal-supervisor-measures title: terminal supervisor: Amounts and totals role: terminal_supervisor reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard terminal-supervisor-measures-2 title: terminal supervisor: Amounts and totals (2) role: terminal_supervisor reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard terminal-supervisor-measures-3 title: terminal supervisor: Amounts and totals (3) role: terminal_supervisor reports: flight-passenger-count-per-month, flight-largest-by-passenger-count, baggage-batch-expected-bags-by-status, baggage-batch-expected-bags-per-month, baggage-batch-largest-by-expected-bags, baggage-batch-counted-bags-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard terminal-supervisor-concentrations title: terminal supervisor: Who the records belong to role: terminal_supervisor reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard terminal-supervisor-volumes title: terminal supervisor: Volumes over time role: terminal_supervisor reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard terminal-supervisor-flags title: terminal supervisor: Yes and no questions role: terminal_supervisor reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard terminal-supervisor-airport title: terminal supervisor: Airport at a glance role: terminal_supervisor reports: airport-created-per-month, airport-is-active-share, airport-top-country-code help: Everything the reports know about one kind of record, in one place.
+%%dashboard terminal-supervisor-staff title: terminal supervisor: Staff at a glance role: terminal_supervisor reports: staff-by-discipline, staff-created-per-month, staff-per-airport help: Everything the reports know about one kind of record, in one place.
+%%dashboard safety-officer-lifecycles title: safety officer: Where records stand role: safety_officer reports: flight-lifecycle, allocation-lifecycle, work-order-lifecycle, safety-case-lifecycle, corrective-action-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard safety-officer-breakdowns title: safety officer: Breakdowns role: safety_officer reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard safety-officer-breakdowns-2 title: safety officer: Breakdowns (2) role: safety_officer reports: asset-by-condition, work-order-by-status, work-order-by-priority, safety-case-by-status, safety-case-by-severity, corrective-action-by-status help: How the records this role works with divide across their categories.
+%%dashboard safety-officer-measures title: safety officer: Amounts and totals role: safety_officer reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard safety-officer-measures-2 title: safety officer: Amounts and totals (2) role: safety_officer reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard safety-officer-concentrations title: safety officer: Who the records belong to role: safety_officer reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard safety-officer-concentrations-2 title: safety officer: Who the records belong to (2) role: safety_officer reports: flight-per-airport, allocation-per-flight, asset-per-airport, asset-per-resource, corrective-action-per-safety-case help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard safety-officer-volumes title: safety officer: Volumes over time role: safety_officer reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard safety-officer-flags title: safety officer: Yes and no questions role: safety_officer reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard safety-officer-airport title: safety officer: Airport at a glance role: safety_officer reports: airport-created-per-month, airport-is-active-share, airport-top-country-code help: Everything the reports know about one kind of record, in one place.
+%%dashboard maintenance-engineer-lifecycles title: maintenance engineer: Where records stand role: maintenance_engineer reports: flight-lifecycle, allocation-lifecycle, work-order-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard maintenance-engineer-breakdowns title: maintenance engineer: Breakdowns role: maintenance_engineer reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard maintenance-engineer-breakdowns-2 title: maintenance engineer: Breakdowns (2) role: maintenance_engineer reports: asset-by-condition, work-order-by-status, work-order-by-priority help: How the records this role works with divide across their categories.
+%%dashboard maintenance-engineer-measures title: maintenance engineer: Amounts and totals role: maintenance_engineer reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard maintenance-engineer-measures-2 title: maintenance engineer: Amounts and totals (2) role: maintenance_engineer reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard maintenance-engineer-concentrations title: maintenance engineer: Who the records belong to role: maintenance_engineer reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard maintenance-engineer-concentrations-2 title: maintenance engineer: Who the records belong to (2) role: maintenance_engineer reports: flight-per-airport, allocation-per-flight, asset-per-airport, asset-per-resource help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard maintenance-engineer-volumes title: maintenance engineer: Volumes over time role: maintenance_engineer reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard maintenance-engineer-flags title: maintenance engineer: Yes and no questions role: maintenance_engineer reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard maintenance-engineer-airport title: maintenance engineer: Airport at a glance role: maintenance_engineer reports: airport-created-per-month, airport-is-active-share, airport-top-country-code help: Everything the reports know about one kind of record, in one place.
+%%dashboard finance-officer-lifecycles title: finance officer: Where records stand role: finance_officer reports: flight-lifecycle, allocation-lifecycle, charge-lifecycle, invoice-lifecycle, receipt-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard finance-officer-breakdowns title: finance officer: Breakdowns role: finance_officer reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard finance-officer-breakdowns-2 title: finance officer: Breakdowns (2) role: finance_officer reports: tariff-by-charge-type, tariff-by-unit, tariff-top-currency, charge-by-status, charge-top-currency, invoice-by-status, invoice-top-currency, receipt-by-status help: How the records this role works with divide across their categories.
+%%dashboard finance-officer-measures title: finance officer: Amounts and totals role: finance_officer reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard finance-officer-measures-2 title: finance officer: Amounts and totals (2) role: finance_officer reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard finance-officer-measures-3 title: finance officer: Amounts and totals (3) role: finance_officer reports: flight-passenger-count-per-month, flight-largest-by-passenger-count, invoice-line-amount-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard finance-officer-concentrations title: finance officer: Who the records belong to role: finance_officer reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard finance-officer-concentrations-2 title: finance officer: Who the records belong to (2) role: finance_officer reports: flight-per-airport, allocation-per-flight, invoice-line-per-invoice, invoice-line-amount-per-invoice help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard finance-officer-volumes title: finance officer: Volumes over time role: finance_officer reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard finance-officer-flags title: finance officer: Yes and no questions role: finance_officer reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard security-officer-lifecycles title: security officer: Where records stand role: security_officer reports: flight-lifecycle, allocation-lifecycle, baggage-batch-lifecycle, cargo-consignment-lifecycle, security-pass-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+%%dashboard security-officer-breakdowns title: security officer: Breakdowns role: security_officer reports: airport-top-country-code, staff-by-discipline, aircraft-type-by-wake-category, resource-by-resource-type, resource-by-availability, flight-by-status, flight-by-direction, allocation-by-status help: How the records this role works with divide across their categories.
+%%dashboard security-officer-breakdowns-2 title: security officer: Breakdowns (2) role: security_officer reports: baggage-batch-by-status, cargo-consignment-by-status, security-pass-by-status, security-pass-by-access-zone help: How the records this role works with divide across their categories.
+%%dashboard security-officer-measures title: security officer: Amounts and totals role: security_officer reports: aircraft-type-wingspan-m-by-wake-category, aircraft-type-wingspan-m-per-month, aircraft-type-largest-by-wingspan-m, aircraft-type-passenger-capacity-by-wake-category, aircraft-type-passenger-capacity-per-month, aircraft-type-largest-by-passenger-capacity, aircraft-type-maximum-takeoff-weight-kg-by-wake-category, aircraft-type-maximum-takeoff-weight-kg-per-month help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard security-officer-measures-2 title: security officer: Amounts and totals (2) role: security_officer reports: aircraft-type-largest-by-maximum-takeoff-weight-kg, resource-maximum-wingspan-m-by-resource-type, resource-maximum-wingspan-m-per-month, resource-largest-by-maximum-wingspan-m, resource-capacity-by-resource-type, resource-capacity-per-month, resource-largest-by-capacity, flight-passenger-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard security-officer-measures-3 title: security officer: Amounts and totals (3) role: security_officer reports: flight-passenger-count-per-month, flight-largest-by-passenger-count, baggage-batch-expected-bags-by-status, baggage-batch-expected-bags-per-month, baggage-batch-largest-by-expected-bags, baggage-batch-counted-bags-by-status, cargo-consignment-pieces-by-status help: The quantities the business adds up, and the largest few records behind them.
+%%dashboard security-officer-concentrations title: security officer: Who the records belong to role: security_officer reports: staff-per-airport, aircraft-per-aircraft-type, aircraft-per-airline, terminal-per-airport, resource-per-airport, resource-maximum-wingspan-m-per-airport, resource-per-terminal, resource-maximum-wingspan-m-per-terminal help: Which customers, owners or parents account for the most records and the most value.
+%%dashboard security-officer-volumes title: security officer: Volumes over time role: security_officer reports: airport-created-per-month, staff-created-per-month, airline-created-per-month, aircraft-created-per-month, terminal-created-per-month, service-provider-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+%%dashboard security-officer-flags title: security officer: Yes and no questions role: security_officer reports: airport-is-active-share, airline-is-active-share, terminal-is-active-share, service-provider-is-active-share help: The share of records that meet each yes-or-no condition.
+%%dashboard security-officer-airport title: security officer: Airport at a glance role: security_officer reports: airport-created-per-month, airport-is-active-share, airport-top-country-code help: Everything the reports know about one kind of record, in one place.
+
+%%meta name: Flight Lifecycle
+%%meta kind: workflow
+%%workflow FlightLifecycle entity: Flight kind: state
+stateDiagram-v2
+    [*] --> planned
+    planned --> scheduled : schedule
+    planned --> cancelled : cancel
+    scheduled --> active : activate
+    scheduled --> cancelled : cancel
+    active --> completed : complete
+    active --> cancelled : cancel
+    completed --> [*]
+    cancelled --> [*]
+
+%%meta name: Allocation Lifecycle
+%%meta kind: workflow
+%%workflow AllocationLifecycle entity: Allocation kind: state
+stateDiagram-v2
+    [*] --> requested
+    requested --> reserved : reserve
+    requested --> voided : void
+    reserved --> released : release
+    reserved --> voided : void
+    released --> [*]
+    voided --> [*]
+
+%%meta name: TurnaroundTask Lifecycle
+%%meta kind: workflow
+%%workflow TurnaroundTaskLifecycle entity: TurnaroundTask kind: state
+stateDiagram-v2
+    [*] --> queued
+    queued --> underway : dispatch
+    queued --> waived : waive
+    underway --> finished : finish
+    underway --> waived : waive
+    finished --> [*]
+    waived --> [*]
+
+%%meta name: BaggageBatch Lifecycle
+%%meta kind: workflow
+%%workflow BaggageBatchLifecycle entity: BaggageBatch kind: state
+stateDiagram-v2
+    [*] --> collecting
+    collecting --> reconciled : reconcile
+    collecting --> exception : flag
+    reconciled --> loaded : load
+    reconciled --> delivered : deliver
+    reconciled --> exception : flag
+    loaded --> delivered : deliver
+    loaded --> exception : flag
+    exception --> collecting : recount
+    delivered --> [*]
+
+%%meta name: CargoConsignment Lifecycle
+%%meta kind: workflow
+%%workflow CargoConsignmentLifecycle entity: CargoConsignment kind: state
+stateDiagram-v2
+    [*] --> booked
+    booked --> received : receive
+    received --> held : hold
+    received --> cleared : clear
+    held --> cleared : clear
+    cleared --> dispatched : dispatch
+    dispatched --> [*]
+
+%%meta name: WorkOrder Lifecycle
+%%meta kind: workflow
+%%workflow WorkOrderLifecycle entity: WorkOrder kind: state
+stateDiagram-v2
+    [*] --> reported
+    reported --> authorised : authorise
+    authorised --> repairing : start
+    repairing --> verified : verify
+    verified --> closed : close
+    verified --> repairing : rework
+    closed --> [*]
+
+%%meta name: SafetyCase Lifecycle
+%%meta kind: workflow
+%%workflow SafetyCaseLifecycle entity: SafetyCase kind: state
+stateDiagram-v2
+    [*] --> logged
+    logged --> investigating : investigate
+    investigating --> mitigated : mitigate
+    mitigated --> resolved : resolve
+    mitigated --> investigating : reassess
+    resolved --> investigating : reopen
+    resolved --> [*]
+
+%%meta name: CorrectiveAction Lifecycle
+%%meta kind: workflow
+%%workflow CorrectiveActionLifecycle entity: CorrectiveAction kind: state
+stateDiagram-v2
+    [*] --> proposed
+    proposed --> accepted : accept
+    accepted --> implemented : implement
+    implemented --> validated : validate
+    implemented --> accepted : rework
+    validated --> [*]
+
+%%meta name: SecurityPass Lifecycle
+%%meta kind: workflow
+%%workflow SecurityPassLifecycle entity: SecurityPass kind: state
+stateDiagram-v2
+    [*] --> applied
+    applied --> issued : issue
+    applied --> revoked : revoke
+    issued --> revoked : revoke
+    issued --> expired : expire
+    revoked --> [*]
+    expired --> [*]
+
+%%meta name: Charge Lifecycle
+%%meta kind: workflow
+%%workflow ChargeLifecycle entity: Charge kind: state
+stateDiagram-v2
+    [*] --> assessed
+    assessed --> approved : approve
+    assessed --> disputed : dispute
+    approved --> billed : bill
+    approved --> disputed : dispute
+    disputed --> assessed : reassess
+    billed --> [*]
+
+%%meta name: Invoice Lifecycle
+%%meta kind: workflow
+%%workflow InvoiceLifecycle entity: Invoice kind: state
+stateDiagram-v2
+    [*] --> draft
+    draft --> issued : issue
+    draft --> void : void
+    issued --> settled : settle
+    issued --> void : void
+    settled --> [*]
+    void --> [*]
+
+%%meta name: Receipt Lifecycle
+%%meta kind: workflow
+%%workflow ReceiptLifecycle entity: Receipt kind: state
+stateDiagram-v2
+    [*] --> recorded
+    recorded --> reconciled : reconcile
+    recorded --> reversed : reverse
+    reconciled --> reversed : reverse
+    reversed --> [*]
+
+%%meta name: Flight Validation
+%%meta kind: rules
+%%rule validateFlight on Flight event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action passengersNonnegative validation-error when: passenger_count < 0 message: Passenger counts cannot be negative.
+    %%action actualBeforeCompletion validation-error when: status == "completed" and actual_at == null message: Record the observed UTC movement time before completion.
+    %%action actualBeforeCompletionOnMove validation-error when: completed_at != null and actual_at == null message: Record the observed UTC movement time before completion.
+    %%action flightCancelReason validation-error when: status == "cancelled" and cancellation_reason == null message: Record why the movement was cancelled.
+    %%action flightCancelReasonOnMove validation-error when: cancelled_at != null and cancellation_reason == null message: Record why the movement was cancelled.
+
+%%meta name: Allocation Validation
+%%meta kind: rules
+%%rule validateAllocation on Allocation event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action positiveReservation validation-error when: ends_at <= starts_at message: Reservation end must follow its start.
+
+%%meta name: TurnaroundTask Validation
+%%meta kind: rules
+%%rule validateTurnaroundTask on TurnaroundTask event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action taskFinishedTime validation-error when: status == "finished" and finished_at == null message: Record when the handling work actually finished.
+    %%action waiverEvidence validation-error when: status == "waived" and completion_notes == null message: Explain who authorised waiving this handling activity.
+    %%action waiverEvidenceOnMove validation-error when: waived_at != null and completion_notes == null message: Explain who authorised waiving this handling activity.
+
+%%meta name: BaggageBatch Validation
+%%meta kind: rules
+%%rule validateBaggageBatch on BaggageBatch event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action reconciledCounts validation-error when: status == "reconciled" and expected_bags != counted_bags message: Resolve the count discrepancy before reconciliation.
+    %%action reconciledCountsOnMove validation-error when: reconciled_at != null and expected_bags != counted_bags message: Resolve the count discrepancy before reconciliation.
+    %%action bagCountNonnegative validation-error when: counted_bags < 0 or expected_bags < 0 message: Baggage counts cannot be negative.
+
+%%meta name: CargoConsignment Validation
+%%meta kind: rules
+%%rule validateCargoConsignment on CargoConsignment event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action cargoQuantity validation-error when: pieces <= 0 or weight_kg <= 0 message: Cargo needs positive piece count and gross weight.
+    %%action cargoRelease validation-error when: status == "dispatched" and release_reference == null message: Record release authority before dispatching cargo.
+    %%action cargoReleaseOnMove validation-error when: dispatched_at != null and release_reference == null message: Record release authority before dispatching cargo.
+
+%%meta name: WorkOrder Validation
+%%meta kind: rules
+%%rule validateWorkOrder on WorkOrder event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action repairEvidence validation-error when: status == "verified" and repair_notes == null message: Record repair and test evidence before verification.
+    %%action repairEvidenceOnMove validation-error when: verified_at != null and repair_notes == null message: Record repair and test evidence before verification.
+
+%%meta name: SafetyCase Validation
+%%meta kind: rules
+%%rule validateSafetyCase on SafetyCase event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action safetyClosure validation-error when: status == "resolved" and closure_evidence == null message: Record verified control effectiveness before resolving the case.
+    %%action safetyClosureOnMove validation-error when: resolved_at != null and closure_evidence == null message: Record verified control effectiveness before resolving the case.
+
+%%meta name: CorrectiveAction Validation
+%%meta kind: rules
+%%rule validateCorrectiveAction on CorrectiveAction event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action actionEvidence validation-error when: status == "validated" and evidence == null message: Retain effectiveness evidence before validating the action.
+    %%action actionEvidenceOnMove validation-error when: validated_at != null and evidence == null message: Retain effectiveness evidence before validating the action.
+
+%%meta name: SecurityPass Validation
+%%meta kind: rules
+%%rule validateSecurityPass on SecurityPass event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action passInterval validation-error when: valid_until <= valid_from message: Pass expiry must follow its valid-from instant.
+    %%action passApproval validation-error when: status == "issued" and approved_by_id == null message: Record the approving security employee before issuing the pass.
+    %%action passApprovalOnMove validation-error when: issued_at != null and approved_by_id == null message: Record the approving security employee before issuing the pass.
+    %%action passRevocation validation-error when: status == "revoked" and revocation_reason == null message: Explain why access authority was withdrawn.
+    %%action passRevocationOnMove validation-error when: revoked_at != null and revocation_reason == null message: Explain why access authority was withdrawn.
+
+%%meta name: Tariff Validation
+%%meta kind: rules
+%%rule validateTariff on Tariff event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action nonnegativeTariff validation-error when: unit_price < 0 message: Published unit prices cannot be negative.
+
+%%meta name: Charge Validation
+%%meta kind: rules
+%%rule validateCharge on Charge event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action chargePositive validation-error when: quantity <= 0 or unit_price < 0 or tax_amount < 0 message: Quantity must be positive and price and tax cannot be negative.
+    %%action chargeInvoice validation-error when: status == "billed" and invoice_id == null message: Choose the airline invoice before transferring a billed charge.
+    %%action chargeInvoiceOnMove validation-error when: billed_at != null and invoice_id == null message: Choose the airline invoice before transferring a billed charge.
+    %%action calculateNet transform when: true field: net_amount value: quantity * unit_price
+    %%action calculateGross transform when: true field: gross_amount value: net_amount + tax_amount
+    %%action transferBilledCharge trigger-workflow when: status == "billed" and is_transferred == false workflow: ChargeInvoiceTransfer message: Snapshot the approved charge into the chosen invoice
+
+%%meta name: Invoice Validation
+%%meta kind: rules
+%%rule validateInvoice on Invoice event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action invoiceDates validation-error when: due_on < issued_on message: The payment deadline cannot precede the invoice date.
+    %%action invoiceSettlement validation-error when: status == "settled" and received_amount < total_amount message: Reconciled receipts must cover the invoice before settlement.
+    %%action invoiceSettlementOnMove validation-error when: settled_at != null and received_amount < total_amount message: Reconciled receipts must cover the invoice before settlement.
+    %%action voidEvidence validation-error when: status == "void" and void_reason == null message: Record why the commercial document is void.
+    %%action voidEvidenceOnMove validation-error when: void_at != null and void_reason == null message: Record why the commercial document is void.
+
+%%meta name: Receipt Validation
+%%meta kind: rules
+%%rule validateReceipt on Receipt event: beforeUpdate priority: 10
+flowchart TD
+    A([Write requested]) --> B{Record valid?}
+    B -->|Yes| C([Accept])
+    B -->|No| D([Reject with explanation])
+    %%action receiptPositive validation-error when: amount <= 0 message: A receipt must be positive, reverse an existing payment rather than entering a negative one.
+
+%%meta name: Charge Invoice Transfer
+%%meta kind: workflow
+%%workflow ChargeInvoiceTransfer entity: Charge kind: saga trigger: rule
+flowchart TD
+    A([Billed charge]) --> B[Create invoice snapshot]
+    B --> C[Mark transfer complete]
+    C --> Z([Invoice line available])
+    %%step B CreateEntity entity: InvoiceLine fields: {"invoice_id":"invoice_id","charge_id":"id","description":"reference","amount":"gross_amount"}
+    %%step C UpdateEntity field: is_transferred value: true
+
+%%meta name: Flight Governance
+%%meta kind: workflow
+%%workflow FlightGovernance entity: Flight kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate validateAircraftOperatorAndCapacity on Flight
+
+%%meta name: Allocation Governance
+%%meta kind: workflow
+%%workflow AllocationGovernance entity: Allocation kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate validateSameAirportSuitabilityAndNoOverlap on Allocation
+
+%%meta name: WorkOrder Governance
+%%meta kind: workflow
+%%workflow WorkOrderGovernance entity: WorkOrder kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate requireAffectedResourceClosureBeforeRepair on WorkOrder
+
+%%meta name: SafetyCase Governance
+%%meta kind: workflow
+%%workflow SafetyCaseGovernance entity: SafetyCase kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate requireValidatedCorrectiveActionsBeforeResolution on SafetyCase
+
+%%meta name: Charge Governance
+%%meta kind: workflow
+%%workflow ChargeGovernance entity: Charge kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate validateTariffPeriodCurrencyAndInvoiceAirline on Charge
+
+%%meta name: Invoice Governance
+%%meta kind: workflow
+%%workflow InvoiceGovernance entity: Invoice kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate validateLineTotalsAndReconciledReceiptTotals on Invoice
+    %%hook beforeDelete blockIssuedInvoiceDeletion on Invoice
+
+%%meta name: Receipt Governance
+%%meta kind: workflow
+%%workflow ReceiptGovernance entity: Receipt kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate validateInvoiceCurrencyAndReconciliationEvidence on Receipt
+
+%%meta name: SecurityPass Governance
+%%meta kind: workflow
+%%workflow SecurityPassGovernance entity: SecurityPass kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook beforeRead checkCurrentPassValidity on SecurityPass
+
+%%meta name: Resource Governance
+%%meta kind: workflow
+%%workflow ResourceGovernance entity: Resource kind: hook
+flowchart TD
+    A([Operation requested]) --> B[Run domain checks]
+    B --> Z([Continue or reject])
+    %%hook customValidate blockClosureWithoutReservationReview on Resource
+
+%% ---- When each status was reached: stamped by the application ----
+%% A record moves by an action button, along an edge its state diagram draws,
+%% and the application writes the <state>_at time when it does.
+%%field Flight.cancelled_at help: When this flight moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%field Flight.active_at help: When this flight moved to active. Stamped by the application when the move is made; nobody types it.
+%%field Flight.completed_at help: When this flight moved to completed. Stamped by the application when the move is made; nobody types it.
+%%section entity: Flight; name: Progress; help: When this flight reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: cancelled_at, active_at | completed_at
+
+%%field Allocation.reserved_at help: When this allocation moved to reserved. Stamped by the application when the move is made; nobody types it.
+%%field Allocation.voided_at help: When this allocation moved to voided. Stamped by the application when the move is made; nobody types it.
+%%field Allocation.released_at help: When this allocation moved to released. Stamped by the application when the move is made; nobody types it.
+%%section entity: Allocation; name: Progress; help: When this allocation reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: reserved_at, voided_at | released_at
+
+%%field TurnaroundTask.underway_at help: When this turnaround task moved to underway. Stamped by the application when the move is made; nobody types it.
+%%field TurnaroundTask.waived_at help: When this turnaround task moved to waived. Stamped by the application when the move is made; nobody types it.
+%%section entity: TurnaroundTask; name: Progress; help: When this turnaround task reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: underway_at, waived_at
+
+%%field BaggageBatch.reconciled_at help: When this baggage batch moved to reconciled. Stamped by the application when the move is made; nobody types it.
+%%field BaggageBatch.exception_at help: When this baggage batch moved to exception. Stamped by the application when the move is made; nobody types it.
+%%field BaggageBatch.loaded_at help: When this baggage batch moved to loaded. Stamped by the application when the move is made; nobody types it.
+%%field BaggageBatch.delivered_at help: When this baggage batch moved to delivered. Stamped by the application when the move is made; nobody types it.
+%%field BaggageBatch.collecting_at help: When this baggage batch moved to collecting. Stamped by the application when the move is made; nobody types it.
+%%section entity: BaggageBatch; name: Progress; help: When this baggage batch reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: reconciled_at, exception_at | loaded_at, delivered_at | collecting_at
+
+%%field CargoConsignment.received_at help: When this cargo consignment moved to received. Stamped by the application when the move is made; nobody types it.
+%%field CargoConsignment.held_at help: When this cargo consignment moved to held. Stamped by the application when the move is made; nobody types it.
+%%field CargoConsignment.cleared_at help: When this cargo consignment moved to cleared. Stamped by the application when the move is made; nobody types it.
+%%field CargoConsignment.dispatched_at help: When this cargo consignment moved to dispatched. Stamped by the application when the move is made; nobody types it.
+%%section entity: CargoConsignment; name: Progress; help: When this cargo consignment reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: received_at, held_at | cleared_at, dispatched_at
+
+%%field WorkOrder.authorised_at help: When this work order moved to authorised. Stamped by the application when the move is made; nobody types it.
+%%field WorkOrder.repairing_at help: When this work order moved to repairing. Stamped by the application when the move is made; nobody types it.
+%%field WorkOrder.verified_at help: When this work order moved to verified. Stamped by the application when the move is made; nobody types it.
+%%field WorkOrder.closed_at help: When this work order moved to closed. Stamped by the application when the move is made; nobody types it.
+%%section entity: WorkOrder; name: Progress; help: When this work order reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: authorised_at, repairing_at | verified_at, closed_at
+
+%%field SafetyCase.investigating_at help: When this safety case moved to investigating. Stamped by the application when the move is made; nobody types it.
+%%field SafetyCase.mitigated_at help: When this safety case moved to mitigated. Stamped by the application when the move is made; nobody types it.
+%%field SafetyCase.resolved_at help: When this safety case moved to resolved. Stamped by the application when the move is made; nobody types it.
+%%section entity: SafetyCase; name: Progress; help: When this safety case reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: investigating_at, mitigated_at | resolved_at
+
+%%field CorrectiveAction.accepted_at help: When this corrective action moved to accepted. Stamped by the application when the move is made; nobody types it.
+%%field CorrectiveAction.implemented_at help: When this corrective action moved to implemented. Stamped by the application when the move is made; nobody types it.
+%%field CorrectiveAction.validated_at help: When this corrective action moved to validated. Stamped by the application when the move is made; nobody types it.
+%%section entity: CorrectiveAction; name: Progress; help: When this corrective action reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: accepted_at, implemented_at | validated_at
+
+%%field SecurityPass.issued_at help: When this security pass moved to issued. Stamped by the application when the move is made; nobody types it.
+%%field SecurityPass.revoked_at help: When this security pass moved to revoked. Stamped by the application when the move is made; nobody types it.
+%%field SecurityPass.expired_at help: When this security pass moved to expired. Stamped by the application when the move is made; nobody types it.
+%%section entity: SecurityPass; name: Progress; help: When this security pass reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: issued_at, revoked_at | expired_at
+
+%%field Charge.approved_at help: When this charge moved to approved. Stamped by the application when the move is made; nobody types it.
+%%field Charge.disputed_at help: When this charge moved to disputed. Stamped by the application when the move is made; nobody types it.
+%%field Charge.billed_at help: When this charge moved to billed. Stamped by the application when the move is made; nobody types it.
+%%field Charge.assessed_at help: When this charge moved to assessed. Stamped by the application when the move is made; nobody types it.
+%%section entity: Charge; name: Progress; help: When this charge reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: approved_at, disputed_at | billed_at, assessed_at
+
+%%field Invoice.issued_at help: When this invoice moved to issued. Stamped by the application when the move is made; nobody types it.
+%%field Invoice.void_at help: When this invoice moved to void. Stamped by the application when the move is made; nobody types it.
+%%field Invoice.settled_at help: When this invoice moved to settled. Stamped by the application when the move is made; nobody types it.
+%%section entity: Invoice; name: Progress; help: When this invoice reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: issued_at, void_at | settled_at
+
+%%field Receipt.reconciled_at help: When this receipt moved to reconciled. Stamped by the application when the move is made; nobody types it.
+%%field Receipt.reversed_at help: When this receipt moved to reversed. Stamped by the application when the move is made; nobody types it.
+%%section entity: Receipt; name: Progress; help: When this receipt reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: reconciled_at, reversed_at

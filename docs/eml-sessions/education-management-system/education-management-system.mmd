@@ -1,29 +1,43 @@
 %% ============================================================================
 %% EML Model — Education Management System
 %%
-%% A fee-charging secondary school, modelled end to end: nineteen entities, the
-%% five lifecycles the school actually runs on, the admission decision it takes
-%% by judgement today, the capacity and overpayment refusals that must act, and
-%% the two sagas that turn an accepted application into an enrolled, invoiced
-%% student and a payment into a settled invoice.
+%% A fee-charging secondary school, modelled end to end: twenty-five entities,
+%% the sixteen lifecycles the school actually runs on, the admission decision it
+%% takes by judgement today, the capacity, overpayment and refund-approval
+%% refusals that must act, and the sagas that turn an accepted application
+%% into an enrolled, invoiced student, a payment into a settled invoice, a paid
+%% refund back into an open one, a cancelled section into withdrawn enrolments
+%% and a suspension into a suspended student. Consent, support plans, safeguarding concerns (and the outcome a
+%% reporter hears back) and the log of what was sent to families sit beside them, because a school answers for
+%% those as much as for its fees.
 %%
-%% Built through the interactive authoring protocol in llmdetailed.txt §10, so
+%% No person changes a status. Each lifecycle's moves are made by background
+%% workflows: recording the fact a move rests on (a `<state>_at` time) lets the
+%% entity's StateProgress rule start the saga that writes the new state.
+%%
+%% Built through the interactive authoring protocol (now llms.txt §1), so
 %% it holds that section's standard: help text on every entity and every column,
 %% one %%rbac read rule per entity, every state backed by a declared %%enum, and
 %% reports for every role on the matrix. Every diagram is valid, renderable
 %% Mermaid.
+%%
+%% Reporting: the questions written for each role by hand sit beside charted reports derived from the
+%% model's own structure (its lifecycles, enumerated columns, dates, flags, measures, parents and optional
+%% fields), and a %%dashboard per job groups them. Every role can run at least 50 charted reports and has
+%% at least 10 dashboards of three or more.
 %% ============================================================================
 
 %%meta name: Education Management System
 %%meta kind: erd
-%%meta version: 1.0.0
+%%meta version: 1.1.0
 %%category name: Admissions; icon: file-text; entities: AdmissionApplication
 %%category name: People; icon: users; entities: Student, Guardian, Staff
 %%category name: Academics; icon: book-open; entities: Department, Course, AcademicTerm, Room, ClassSection, ClassSession
 %%category name: Enrolment; icon: clipboard-list; entities: Enrollment
 %%category name: Assessment; icon: graduation-cap; entities: Assessment
-%%category name: Finance; icon: credit-card; entities: FeeInvoice, Payment
+%%category name: Finance; icon: credit-card; entities: FeeInvoice, Payment, Refund
 %%category name: Conduct; icon: shield-alert; entities: DisciplineIncident
+%%category name: Student Support; icon: heart-handshake; entities: ConsentRecord, SupportPlan, SafeguardingConcern, ConcernFeedback, CommunicationLog
 %%enum TermStatus: planned, current, closed
 %%enum StaffType: teaching, administrative, pastoral, leadership
 %%enum EmploymentStatus: active, on_leave, left
@@ -49,6 +63,18 @@
 %%enum IncidentSeverity: minor, moderate, serious, critical
 %%enum IncidentStatus: reported, under_review, action_taken, closed, dismissed
 %%enum Sanction: none, warning, detention, parental_meeting, suspension, exclusion
+%%enum ConsentType: medical_treatment, educational_trip, media_use, data_sharing, emergency_contact, digital_services
+%%enum ConsentStatus: draft, active, withdrawn, expired
+%%enum SupportPlanType: learning_support, accessibility, medical, behaviour, language
+%%enum SupportPlanStatus: draft, active, under_review, closed
+%%enum ConcernCategory: disclosure, neglect, abuse, exploitation, online_safety, welfare
+%%enum ConcernStatus: reported, triaged, investigating, referred, closed
+%%enum ConcernFeedbackOutcome: received, triaged, action_taken, referred, closed
+%%enum CommunicationChannel: email, sms, phone, post, portal, in_person
+%%enum CommunicationPurpose: attendance, academic, finance, safeguarding, admissions, general
+%%enum CommunicationStatus: queued, sent, delivered, failed
+%%enum RefundReason: duplicate_payment, overpayment, cancelled_service, approved_withdrawal, billing_error, other
+%%enum RefundStatus: requested, under_review, approved, paid, rejected, cancelled
 erDiagram
     Department {
         string   id PK
@@ -76,6 +102,8 @@ erDiagram
         date     ends_on
         date     census_on
         string   status
+        datetime current_at OPTIONAL
+        datetime closed_at OPTIONAL
     }
 
     Staff {
@@ -90,6 +118,9 @@ erDiagram
         string   status
         date     started_on
         phone    phone OPTIONAL
+        datetime on_leave_at OPTIONAL
+        datetime active_at OPTIONAL
+        datetime left_at OPTIONAL
     }
 
     Course {
@@ -127,6 +158,10 @@ erDiagram
         text     withdrawal_reason OPTIONAL
         email    school_email OPTIONAL
         boolean  has_support_plan
+        datetime on_leave_at OPTIONAL
+        datetime enrolled_at OPTIONAL
+        datetime graduated_at OPTIONAL
+        datetime withdrawn_at OPTIONAL
     }
 
     StudentGuardian {
@@ -157,6 +192,12 @@ erDiagram
         boolean  has_sibling_enrolled
         string   admission_band OPTIONAL
         text     decision_notes OPTIONAL
+        datetime under_review_at OPTIONAL
+        datetime offer_made_at OPTIONAL
+        datetime rejected_at OPTIONAL
+        datetime accepted_at OPTIONAL
+        datetime declined_at OPTIONAL
+        datetime withdrawn_at OPTIONAL
     }
 
     ClassSection {
@@ -172,6 +213,10 @@ erDiagram
         integer  period
         string   status
         text     cancellation_reason OPTIONAL
+        datetime open_at OPTIONAL
+        datetime in_progress_at OPTIONAL
+        datetime completed_at OPTIONAL
+        datetime cancelled_at OPTIONAL
     }
 
     ClassSession {
@@ -185,6 +230,8 @@ erDiagram
         boolean  register_taken
         string   topic OPTIONAL
         text     cancellation_reason OPTIONAL
+        datetime held_at OPTIONAL
+        datetime cancelled_at OPTIONAL
     }
 
     Enrollment {
@@ -197,6 +244,9 @@ erDiagram
         text     withdrawal_reason OPTIONAL
         string   final_grade OPTIONAL
         decimal  attendance_rate
+        datetime enrolled_at OPTIONAL
+        datetime completed_at OPTIONAL
+        datetime failed_at OPTIONAL
     }
 
     AttendanceRecord {
@@ -221,6 +271,10 @@ erDiagram
         date     due_on
         string   status
         text     instructions OPTIONAL
+        datetime published_at OPTIONAL
+        datetime marking_at OPTIONAL
+        datetime marked_at OPTIONAL
+        datetime cancelled_at OPTIONAL
     }
 
     AssessmentResult {
@@ -233,6 +287,9 @@ erDiagram
         string   status
         datetime marked_at OPTIONAL
         text     feedback OPTIONAL
+        datetime submitted_at OPTIONAL
+        datetime missing_at OPTIONAL
+        datetime excused_at OPTIONAL
     }
 
     FeeInvoice {
@@ -247,6 +304,8 @@ erDiagram
         decimal  amount_paid
         decimal  balance_due
         text     cancellation_reason OPTIONAL
+        datetime cancelled_at OPTIONAL
+        datetime overdue_at OPTIONAL
     }
 
     FeeInvoiceLine {
@@ -283,6 +342,112 @@ erDiagram
         string   sanction OPTIONAL
         text     sanction_notes OPTIONAL
         date     closed_on OPTIONAL
+        datetime under_review_at OPTIONAL
+        datetime dismissed_at OPTIONAL
+        datetime action_taken_at OPTIONAL
+        datetime closed_at OPTIONAL
+    }
+
+    ConsentRecord {
+        string   id PK
+        string   student_id FK
+        string   guardian_id FK
+        string   consent_type
+        string   status
+        date     effective_on
+        date     expires_on OPTIONAL
+        datetime withdrawn_at OPTIONAL
+        text     withdrawal_reason OPTIONAL
+        string   evidence_url OPTIONAL
+        datetime active_at OPTIONAL
+        datetime expired_at OPTIONAL
+    }
+
+    SupportPlan {
+        string   id PK
+        string   student_id FK
+        string   owner_id FK
+        string   plan_type
+        string   status
+        date     starts_on
+        date     review_due_on
+        date     closed_on OPTIONAL
+        text     needs_summary
+        text     adjustments
+        text     review_notes OPTIONAL
+        datetime active_at OPTIONAL
+        datetime under_review_at OPTIONAL
+        datetime closed_at OPTIONAL
+    }
+
+    SafeguardingConcern {
+        string   id PK
+        string   reference UK
+        string   student_id FK
+        string   reported_by_id FK
+        string   owner_id FK OPTIONAL
+        datetime occurred_at OPTIONAL
+        datetime reported_at
+        string   category
+        string   status
+        string   risk_level
+        text     factual_account
+        text     immediate_action OPTIONAL
+        string   external_reference OPTIONAL
+        date     closed_on OPTIONAL
+        text     closure_reason OPTIONAL
+        datetime triaged_at OPTIONAL
+        datetime investigating_at OPTIONAL
+        datetime referred_at OPTIONAL
+        datetime closed_at OPTIONAL
+    }
+
+    ConcernFeedback {
+        string   id PK
+        string   safeguarding_concern_id FK
+        string   reported_by_id FK
+        string   reference
+        string   outcome
+        datetime given_at
+        text     message
+    }
+
+    CommunicationLog {
+        string   id PK
+        string   student_id FK OPTIONAL
+        string   guardian_id FK OPTIONAL
+        string   sent_by_id FK
+        string   channel
+        string   purpose
+        string   status
+        string   subject
+        text     summary
+        datetime sent_at OPTIONAL
+        datetime delivered_at OPTIONAL
+        text     failure_reason OPTIONAL
+        datetime failed_at OPTIONAL
+    }
+
+    Refund {
+        string   id PK
+        string   payment_id FK
+        string   requested_by_id FK
+        string   approved_by_id FK OPTIONAL
+        decimal  amount
+        string   reason
+        string   status
+        datetime requested_at
+        datetime decided_at OPTIONAL
+        datetime paid_at OPTIONAL
+        text     decision_notes OPTIONAL
+        string   fee_invoice_id FK OPTIONAL
+        string   invoice_status_after OPTIONAL
+        datetime applied_to_invoice_at OPTIONAL
+        string   reference OPTIONAL
+        datetime under_review_at OPTIONAL
+        datetime cancelled_at OPTIONAL
+        datetime approved_at OPTIONAL
+        datetime rejected_at OPTIONAL
     }
 
     Department   ||--o{ Course               : "offers"
@@ -316,6 +481,20 @@ erDiagram
     Staff        ||--o{ Payment              : "received by"
     Student      ||--o{ DisciplineIncident   : "subject of"
     Staff        ||--o{ DisciplineIncident   : "reported by"
+    Student      ||--o{ ConsentRecord        : "has consent"
+    Guardian     ||--o{ ConsentRecord        : "grants consent"
+    Student      ||--o{ SupportPlan          : "supported by"
+    Staff        ||--o{ SupportPlan          : "owns"
+    Student      ||--o{ SafeguardingConcern  : "protected by"
+    Staff        ||--o{ SafeguardingConcern  : "reports and owns"
+    SafeguardingConcern ||--o{ ConcernFeedback : "reported back by"
+    Staff        ||--o{ ConcernFeedback      : "hears back through"
+    Student      ||--o{ CommunicationLog     : "concerns"
+    Guardian     ||--o{ CommunicationLog     : "receives"
+    Staff        ||--o{ CommunicationLog     : "sends"
+    Payment      ||--o{ Refund               : "reversed by"
+    Staff        ||--o{ Refund               : "requests and approves"
+    FeeInvoice   ||--o{ Refund               : "credited back by"
 
     %%entity Department help: A teaching department that owns a group of courses and employs the staff who teach them. Reference data, created once when the school's structure is set up.
     %%entity Room help: A teaching space with a legal capacity. A section's own capacity may be lower but is never allowed above the room's.
@@ -336,6 +515,12 @@ erDiagram
     %%entity FeeInvoiceLine help: One charge on an invoice — tuition, transport, examination entry or materials. Priced when the line is written and never repriced afterwards.
     %%entity Payment help: Money received against an invoice. Recorded once and never edited; a correction is a second, offsetting record.
     %%entity DisciplineIncident help: A recorded conduct event, its investigation and its outcome. Readable by pastoral staff and the principal only.
+    %%entity ConsentRecord help: One guardian's time-bounded decision about a student's participation, information use or emergency treatment. Withdrawal preserves the earlier authority and when it ended.
+    %%entity SupportPlan help: The controlled summary of a student's learning, accessibility, medical or behaviour support, its accountable owner and scheduled review. Teachers receive the adjustments they need without broad access to sensitive evidence.
+    %%entity SafeguardingConcern help: A confidential welfare or child-protection concern recorded in factual language, triaged to an accountable owner and retained through referral or closure. It is separate from discipline because the student may be at risk rather than at fault. Whoever reported it does not read it back; they hear the outcome through ConcernFeedback.
+    %%entity CommunicationLog help: An auditable record of an operational message to a guardian about a student, including delivery failure. It records the subject and outcome rather than storing unnecessary message content.
+    %%entity ConcernFeedback help: What a member of staff who reported a safeguarding concern is told about it afterwards: that it was received, triaged, acted on, referred or closed. It carries the case reference and an outcome in neutral words and never the student, the account or the risk, so a teacher who raised a concern can read it back without being able to read the concern.
+    %%entity Refund help: A controlled reversal of money previously received, requested and approved by different people, which the system enforces. It never edits or deletes the original payment; when it is paid, the invoice it was paid against is moved back to reflect the money returned.
 
     %%entity StudentGuardian parent: Student
     %%entity AttendanceRecord parent: ClassSession
@@ -392,7 +577,7 @@ erDiagram
     %%field Student.withdrawn_on help: The date the student left. Set with the status; the term's invoice is not cancelled by it, which is what makes the leavers report a finance report as well as a registry one.
     %%field Student.withdrawal_reason help: Why the student left, in the family's terms — relocation, transfer, financial, exclusion. Required on withdrawal, because the retention report is built from it and an unexplained leaver is the one the governors ask about.
     %%field Student.school_email help: The account the student signs in with. Optional: it is issued at year 7 and some transfers arrive without one.
-    %%field Student.has_support_plan help: Set when the student has a formal learning-support plan. It is a flag, not the plan: the plan itself is held outside this system, and this field exists so a teacher opening the register knows to ask for it.
+    %%field Student.has_support_plan help: True while the student has a support plan that is active or under review; a draft or closed plan does not count. It is kept in step with the plans by the support-plan hooks and never keyed by hand, so a teacher opening the register can trust it as the prompt to read the student's plan, which sits in this system as a SupportPlan record.
     %%field StudentGuardian.student_id help: The child. This is the link back to the parent record, so guardians appear as a tab on the student rather than as a screen of their own.
     %%field StudentGuardian.guardian_id help: The adult. One guardian may be linked to several students, which is why this is a link record rather than a column on the student.
     %%field StudentGuardian.relationship help: mother, father, step_parent, grandparent, carer — the relationship as the family states it; local_authority — a corporate parent, which changes who may consent; other — anything else, and the detail belongs in the student's pastoral record.
@@ -501,6 +686,120 @@ erDiagram
     %%field DisciplineIncident.sanction help: none — recorded, no sanction; warning — spoken or written; detention — supervised time; parental_meeting — the family is asked in; suspension — the student is barred from sessions and their status changes; exclusion — permanent, and the governors are involved. Required before an incident can move to action_taken.
     %%field DisciplineIncident.sanction_notes help: The detail of the sanction — how long, when, who supervised. The field the appeal is answered from, and the reason a bare enum was not enough.
     %%field DisciplineIncident.closed_on help: When the matter was finished. The open-incidents report is everything with no date here, and the ageing on that list is the pastoral team's real workload.
+    %%field ConsentRecord.student_id help: The student whose participation or information use this decision governs. Consent is stored per student because siblings may have different decisions.
+    %%field ConsentRecord.guardian_id help: The guardian who gave or withdrew the decision and whose authority must be verified before staff rely on it.
+    %%field ConsentRecord.consent_type help: The controlled purpose the guardian agreed to, so approval for a trip is never treated as approval for media use or data sharing.
+    %%field ConsentRecord.status help: draft — captured but not yet relied on; active — currently valid; withdrawn — revoked by the guardian; expired — passed its stated end date and must be renewed.
+    %%field ConsentRecord.effective_on help: The first date staff may rely on this consent. A future-dated decision remains draft until this day.
+    %%field ConsentRecord.expires_on help: The final day the consent remains valid where the purpose is time-bounded. Blank means it continues until withdrawal.
+    %%field ConsentRecord.withdrawn_at help: When the guardian revoked consent. Kept with the original record so earlier authorised activity remains explainable.
+    %%field ConsentRecord.withdrawal_reason help: The guardian's reason where they chose to give one. It is optional and must not be used to pressure a family to keep consent active.
+    %%field ConsentRecord.evidence_url help: A protected link to the signed form or verified digital evidence. Access must follow the same restrictions as the consent record.
+    %%field SupportPlan.student_id help: The student receiving support. One student may have separate plans for learning, accessibility, medical needs or behaviour.
+    %%field SupportPlan.owner_id help: The member of staff accountable for coordinating the plan, arranging reviews and confirming that agreed adjustments reach teachers.
+    %%field SupportPlan.plan_type help: The primary support domain, used to route the plan to the right specialist without exposing it to unrelated roles.
+    %%field SupportPlan.status help: draft — being agreed; active — adjustments apply now; under_review — outcomes and needs are being reassessed; closed — no longer in force but retained for continuity and audit.
+    %%field SupportPlan.starts_on help: The date the agreed adjustments begin. Staff should not apply a draft plan before this date.
+    %%field SupportPlan.review_due_on help: The next date the owner must review outcomes, needs and adjustments with the student and guardian as appropriate.
+    %%field SupportPlan.closed_on help: When support under this plan ended. Required when the plan is closed so historic decisions have a clear boundary.
+    %%field SupportPlan.needs_summary help: A concise functional description of what affects learning, access, health or behaviour. Record only what staff need to support the student.
+    %%field SupportPlan.adjustments help: The practical changes staff must make in lessons, assessment, access or care; written so a teacher can act without reading sensitive background evidence.
+    %%field SupportPlan.review_notes help: The latest review outcome, including what worked, what changed and who was consulted. Earlier versions remain in the generated audit history.
+    %%field SafeguardingConcern.reference help: The unique case reference used in restricted meetings and external referrals without putting the student's name in an email subject.
+    %%field SafeguardingConcern.student_id help: The student whose safety or welfare may be affected. A concern is never filed only against an alleged perpetrator.
+    %%field SafeguardingConcern.reported_by_id help: The staff member who received or observed the information and can distinguish direct words from later interpretation.
+    %%field SafeguardingConcern.owner_id help: The designated safeguarding staff member accountable for triage, action, referral and closure. Blank only until triage assigns the case.
+    %%field SafeguardingConcern.occurred_at help: When the event is believed to have happened, if known. It may differ materially from when the school learned of it.
+    %%field SafeguardingConcern.reported_at help: When the concern reached the school. Response-time reporting starts here, so staff record it immediately rather than backdating it later.
+    %%field SafeguardingConcern.category help: The broad safeguarding theme used for routing and trend review; it is not a finding that an allegation has been proven.
+    %%field SafeguardingConcern.status help: reported — captured; triaged — risk and owner assigned; investigating — internal facts being gathered; referred — passed to an authorised external body; closed — action and rationale recorded.
+    %%field SafeguardingConcern.risk_level help: The current operational risk assessment, recorded in plain language because local safeguarding frameworks differ and professional judgement must remain visible.
+    %%field SafeguardingConcern.factual_account help: What was seen, heard or disclosed, separating direct quotations and observations from assumptions. This is the core evidential record.
+    %%field SafeguardingConcern.immediate_action help: Steps already taken to protect the student or preserve evidence before formal triage, including who authorised them.
+    %%field SafeguardingConcern.external_reference help: The case number supplied by an authorised external agency. Blank until a referral is accepted.
+    %%field SafeguardingConcern.closed_on help: The date the concern was formally closed after actions, referrals and review were recorded.
+    %%field SafeguardingConcern.closure_reason help: Why no further action remains with the school and where continuing responsibility sits. Required on closure.
+    %%field ConcernFeedback.safeguarding_concern_id help: The concern this feedback answers. The feedback names it for the designated staff; it is not a way for the reader to open it.
+    %%field ConcernFeedback.reported_by_id help: The member of staff who reported the concern and is being told about it, copied from the concern by the feedback hook.
+    %%field ConcernFeedback.reference help: The concern's case reference, copied onto the feedback so a reporter can match it to the note they made. The reference carries no name, so it can be read by staff who may not read the concern.
+    %%field ConcernFeedback.outcome help: received — the designated lead has the concern; triaged — risk and an owner are assigned; action_taken — the school is acting on it; referred — passed to an external body; closed — nothing further remains with the school.
+    %%field ConcernFeedback.given_at help: When the reporter was told. It is stamped as the concern changes state, so the reporter can see the school responded promptly.
+    %%field ConcernFeedback.message help: A short neutral note for the reporter, such as that the concern was referred and they need do nothing more. It must not contain the student's name, what was alleged or the assessed risk.
+    %%field CommunicationLog.student_id help: The student the message concerns. Optional only for a general guardian communication not tied to one child.
+    %%field CommunicationLog.guardian_id help: The guardian contacted. Optional only for an internal or student-only communication, but at least one recipient context is required.
+    %%field CommunicationLog.sent_by_id help: The staff member accountable for the message or automated campaign that created it.
+    %%field CommunicationLog.channel help: How the message was attempted, which determines what delivery evidence and fallback action are possible.
+    %%field CommunicationLog.purpose help: Why the school contacted the family, used to keep sensitive safeguarding traffic out of broad academic and finance queues.
+    %%field CommunicationLog.status help: queued — waiting to send; sent — accepted by the channel; delivered — delivery confirmed; failed — no delivery and a reason requiring follow-up.
+    %%field CommunicationLog.subject help: A short non-sensitive description staff can recognise in a timeline. Do not place safeguarding details in this field.
+    %%field CommunicationLog.summary help: The minimum operational summary needed to understand the contact and promised follow-up, not a duplicate of the full message body.
+    %%field CommunicationLog.sent_at help: When the message left the school or the call occurred. Blank while it remains queued.
+    %%field CommunicationLog.delivered_at help: When the channel confirmed delivery. Blank for channels that do not provide confirmation.
+    %%field CommunicationLog.failure_reason help: Why delivery failed and what staff should correct before retrying, such as an invalid number or rejected email.
+    %%field Refund.payment_id help: The original payment being reversed. The payment remains immutable, so finance can reconcile both records together.
+    %%field Refund.requested_by_id help: The staff member who investigated the family request or reconciliation difference and opened the refund.
+    %%field Refund.approved_by_id help: The staff member who authorised repayment. Kept separate from the requester to support separation of duties.
+    %%field Refund.amount help: The amount to return. It must be positive and must not exceed the unreversed amount of the original payment.
+    %%field Refund.reason help: The controlled business reason for returning funds, used in reconciliation and management review.
+    %%field Refund.status help: requested — awaiting review; under_review — evidence being checked; approved — authorised for payment; paid — funds returned; rejected — not authorised; cancelled — withdrawn before payment.
+    %%field Refund.requested_at help: When the refund request entered the finance queue. Service-time reporting and escalation start here.
+    %%field Refund.decided_at help: When approval or rejection was recorded. Blank until a decision is made.
+    %%field Refund.paid_at help: When the money actually left the school. Required before the refund can be marked paid.
+    %%field Refund.decision_notes help: The evidence and reasoning behind approval, rejection or cancellation, written for reconciliation and later audit.
+    %%field Refund.reference help: The bank or payment-provider reference proving the repayment. Required where the channel supplies one.
+    %%field Refund.fee_invoice_id help: The invoice the original payment was made against, copied onto the refund by the refund hook so the invoice rules can read it. It is derived from the payment and never chosen.
+    %%field Refund.invoice_status_after help: What the invoice becomes once this refund is paid, worked out by the refund hook: part_paid when money remains paid against it, issued when the refund returns all of it. Blank when the invoice stays as it is, as with an overdue, draft or cancelled invoice. The rule reads it because it can only see the record being written.
+    %%field Refund.applied_to_invoice_at help: When the paid refund was taken off the invoice's amount paid. It is stamped once by the refund hook; while it is blank the refund has not reached the invoice, and once it is set no later edit applies it a second time.
+
+    %% Form layout: headed sections of two-column rows (`|` between rows,
+    %% `,` within one; a row of one spans the full width).
+    %%section entity: Department; name: Department; help: The teaching department, the code timetables use for it, its head, and whether it still runs courses.; rows: name, code | staff_id, is_active
+    %%section entity: Room; name: Room; help: The teaching room, where it is, and how many students it seats — the cap on any class booked into it.; rows: name, code | building, capacity | is_active
+    %%section entity: AcademicTerm; name: Term; help: The term, the year it belongs to, and whether enrolment and invoicing are open for it.; rows: name, code | academic_year
+    %%section entity: AcademicTerm; name: Dates; help: When teaching starts and ends, and the census day enrolment numbers are reported on.; rows: starts_on, ends_on | census_on
+    %%section entity: Staff; name: Person; help: Who the staff member is and how the school reaches them.; rows: first_name, last_name | staff_number, email | phone
+    %%section entity: Staff; name: Role; help: Where they work, what they do, and whether they can be timetabled.; rows: department_id, job_title | staff_type | started_on
+    %%section entity: Course; name: Course; help: What is taught, by which department, at what level, and how many credits it carries.; rows: name, code | department_id, level | credit_hours, is_active
+    %%section entity: Guardian; name: Guardian; help: Who the guardian is and the way they prefer the school to get in touch.; rows: first_name, last_name | email, phone | preferred_contact_method
+    %%section entity: Guardian; name: Address; help: Where letters about the student are posted.; rows: address_line | city, postcode
+    %%section entity: Student; name: Student; help: Who the student is, the number every record is matched on, and their year group.; rows: first_name, last_name | student_number, date_of_birth | year_group, school_email
+    %%section entity: Student; name: Enrolment; help: Whether the student is on roll, since when, and whether a support plan applies to their teaching.; rows: enrolled_on | has_support_plan
+    %%section entity: Student; name: Withdrawal; help: When and why the student left; set only once they are off roll.; rows: withdrawn_on | withdrawal_reason; collapsed: true
+    %%section entity: StudentGuardian; name: Relationship; help: How this guardian is related to the student, and what they may do on the student's behalf.; rows: student_id, guardian_id | relationship, contact_order | is_primary_contact, may_collect
+    %%section entity: AdmissionApplication; name: Application; help: The application, who made it, the term it is for, and where it stands.; rows: reference | guardian_id, academic_term_id | submitted_on
+    %%section entity: AdmissionApplication; name: Applicant; help: The child applying, before they become a student — the details the decision is taken on.; rows: applicant_first_name, applicant_last_name | applicant_date_of_birth, year_group_applied_for
+    %%section entity: AdmissionApplication; name: Assessment; help: What the admissions policy weighs — prior attainment, a sibling at the school, and the band that results.; rows: prior_attainment_score, has_sibling_enrolled | admission_band
+    %%section entity: AdmissionApplication; name: Decision; help: Who decided, when, why, and the student record created if the place was taken up.; rows: decided_by_id, decided_on | student_id | decision_notes
+    %%section entity: ClassSection; name: Class; help: One taught group of a course in a term — its code, teacher and room.; rows: code | course_id, academic_term_id | staff_id, room_id
+    %%section entity: ClassSection; name: Timetable and size; help: When the class meets and how many students it holds against how many are enrolled.; rows: day_of_week, period | capacity, enrolled_count
+    %%section entity: ClassSection; name: Cancellation; help: Why the class will not run; every enrolment on it is withdrawn when this is set.; rows: cancellation_reason; collapsed: true
+    %%section entity: ClassSession; name: Lesson; help: One meeting of a class — when, where, with whom, and what it covers.; rows: class_section_id | starts_at, ends_at | room_id, staff_id | topic
+    %%section entity: ClassSession; name: Register; help: Whether attendance has been taken, and why the lesson was cancelled if it was.; rows: register_taken | cancellation_reason
+    %%section entity: Enrollment; name: Enrolment; help: A student's place in a class, and where that place stands.; rows: student_id, class_section_id | enrolled_on
+    %%section entity: Enrollment; name: Outcome; help: The grade and attendance the place ended with, and why it was given up if it was.; rows: final_grade, attendance_rate | withdrawn_on | withdrawal_reason
+    %%section entity: AttendanceRecord; name: Mark; help: The register mark for one student in one lesson, and who took it.; rows: class_session_id, student_id | status, minutes_late | marked_by_id, marked_at
+    %%section entity: AttendanceRecord; name: Absence; help: Whether an absence is authorised and the reason given — what safeguarding and attendance reports read.; rows: is_authorised | absence_reason
+    %%section entity: Assessment; name: Assessment; help: The piece of assessed work, for which class, and when it is due.; rows: title, class_section_id | assessment_type | due_on
+    %%section entity: Assessment; name: Scoring; help: What it is marked out of, how much it counts towards the final grade, and what students are told to do.; rows: max_score, weight_percent | instructions
+    %%section entity: AssessmentResult; name: Result; help: One student's mark on the assessment, who marked it, and whether it is released.; rows: assessment_id, student_id | score, max_score | marked_by_id | marked_at | feedback
+    %%section entity: FeeInvoice; name: Invoice; help: The fee bill, the student and term it is for, and where it stands.; rows: invoice_number | student_id, academic_term_id | issued_on, due_on
+    %%section entity: FeeInvoice; name: Amounts; help: What was billed, what has been paid, and what is still owed.; rows: total_amount, amount_paid | balance_due
+    %%section entity: FeeInvoice; name: Cancellation; help: Why the invoice was voided, kept for the audit trail.; rows: cancellation_reason; collapsed: true
+    %%section entity: FeeInvoiceLine; name: Charge; help: One fee on the invoice, what it is for, and what it adds to the total.; rows: fee_invoice_id, charge_type | description | quantity, unit_amount | line_total
+    %%section entity: Payment; name: Payment; help: Money received against a fee invoice — how much, how, by whom, and what was owed before it.; rows: fee_invoice_id, received_by_id | amount, balance_before | method, received_at | reference
+    %%section entity: DisciplineIncident; name: Incident; help: What happened, to which student, when, who reported it, and how serious it is.; rows: reference | student_id, reported_by_id | occurred_at, closed_on | category, severity | summary
+    %%section entity: DisciplineIncident; name: Sanction; help: What the school decided to do about it and why.; rows: sanction | sanction_notes
+    %%section entity: ConsentRecord; name: Consent; help: Who granted which authority for the student, when it takes effect, and whether staff may rely on it now.; rows: student_id, guardian_id | consent_type | effective_on, expires_on
+    %%section entity: ConsentRecord; name: Withdrawal and evidence; help: When consent ended, why the guardian withdrew it, and where the verified evidence is held.; rows: withdrawn_at | withdrawal_reason | evidence_url; collapsed: true
+    %%section entity: SupportPlan; name: Plan; help: The student, accountable owner, support domain and dates that control when the plan is active and reviewed.; rows: student_id, owner_id | plan_type | starts_on, review_due_on | closed_on
+    %%section entity: SupportPlan; name: Support in practice; help: What staff need to understand and the concrete adjustments they must make, with the latest review outcome.; rows: needs_summary | adjustments | review_notes
+    %%section entity: SafeguardingConcern; name: Concern; help: The restricted case identity, student, reporter, timing and factual account used for immediate safeguarding triage.; rows: reference | student_id, reported_by_id | occurred_at, reported_at | category, risk_level | factual_account
+    %%section entity: SafeguardingConcern; name: Action and ownership; help: Who owns the concern, what was done immediately, any external case reference and the evidence required to close it.; rows: owner_id | immediate_action | external_reference | closed_on | closure_reason
+    %%section entity: CommunicationLog; name: Communication; help: Who was contacted about which student, why, through which channel and by which staff member.; rows: student_id, guardian_id | sent_by_id, purpose | channel | subject
+    %%section entity: CommunicationLog; name: Outcome; help: The minimum useful account of the contact, its send and delivery times, and any failure that needs follow-up.; rows: summary | sent_at, delivered_at | failure_reason
+    %%section entity: ConcernFeedback; name: Feedback; help: Which concern the reporter is hearing about, who they are and the neutral outcome they are told.; rows: safeguarding_concern_id, reported_by_id | reference, outcome | given_at | message
+    %%section entity: Refund; name: Request; help: The original payment, requester, amount and business reason entering the controlled refund queue.; rows: payment_id, requested_by_id | amount, reason | requested_at
+    %%section entity: Refund; name: Decision and settlement; help: Who decided the request, when it was decided and paid, and the evidence finance needs to reconcile it.; rows: approved_by_id, decided_at | paid_at, reference | decision_notes | fee_invoice_id, invoice_status_after | applied_to_invoice_at
 
     %%field AcademicTerm.status enum: TermStatus
     %%field Staff.staff_type enum: StaffType
@@ -527,6 +826,19 @@ erDiagram
     %%field DisciplineIncident.severity enum: IncidentSeverity
     %%field DisciplineIncident.status enum: IncidentStatus
     %%field DisciplineIncident.sanction enum: Sanction
+    %%field ConsentRecord.consent_type enum: ConsentType
+    %%field ConsentRecord.status enum: ConsentStatus
+    %%field SupportPlan.plan_type enum: SupportPlanType
+    %%field SupportPlan.status enum: SupportPlanStatus
+    %%field SafeguardingConcern.category enum: ConcernCategory
+    %%field SafeguardingConcern.status enum: ConcernStatus
+    %%field CommunicationLog.channel enum: CommunicationChannel
+    %%field CommunicationLog.purpose enum: CommunicationPurpose
+    %%field CommunicationLog.status enum: CommunicationStatus
+    %%field ConcernFeedback.outcome enum: ConcernFeedbackOutcome
+    %%field Refund.invoice_status_after enum: InvoiceStatus
+    %%field Refund.reason enum: RefundReason
+    %%field Refund.status enum: RefundStatus
 
     %%index Student(status, year_group)
     %%index Enrollment(class_section_id, status)
@@ -542,6 +854,12 @@ erDiagram
     %%index AdmissionApplication(status, submitted_on)
     %%index DisciplineIncident(status, occurred_at)
     %%index StudentGuardian(student_id, contact_order)
+    %%index ConsentRecord(student_id, consent_type, status)
+    %%index SupportPlan(student_id, status, review_due_on)
+    %%index SafeguardingConcern(status, reported_at)
+    %%index CommunicationLog(guardian_id, status, sent_at)
+    %%index ConcernFeedback(reported_by_id, given_at)
+    %%index Refund(payment_id, status, requested_at)
 
     %%rbac role:principal|registrar|head_of_department|teacher on Department.read
     %%rbac role:principal on Department.update
@@ -562,46 +880,33 @@ erDiagram
     %%rbac role:registrar|admissions_officer on Student.create
     %%rbac role:registrar|principal on Student.update
     %%rbac role:principal on Student.delete
-    %%rbac role:counsellor|principal on Student.suspend
-    %%rbac role:counsellor|principal on Student.reinstate
-    %%rbac role:registrar|principal on Student.withdraw
-    %%rbac role:principal on Student.graduate
     %%rbac role:principal|registrar|admissions_officer|counsellor|finance_officer on StudentGuardian.read
     %%rbac role:registrar|admissions_officer on StudentGuardian.create
     %%rbac role:registrar|counsellor on StudentGuardian.update
     %%rbac role:principal|admissions_officer|registrar on AdmissionApplication.read
     %%rbac role:admissions_officer on AdmissionApplication.create
     %%rbac role:admissions_officer|principal on AdmissionApplication.update
-    %%rbac role:admissions_officer|principal on AdmissionApplication.make_offer
-    %%rbac role:principal on AdmissionApplication.reject
     %%rbac role:principal|registrar|admissions_officer|head_of_department|teacher|finance_officer|counsellor|guardian on ClassSection.read
     %%rbac role:registrar on ClassSection.create
     %%rbac role:registrar|head_of_department on ClassSection.update
-    %%rbac role:principal|registrar on ClassSection.cancel
     %%rbac role:principal|registrar|head_of_department|teacher|counsellor on ClassSession.read
     %%rbac role:registrar on ClassSession.create
     %%rbac role:registrar|teacher on ClassSession.update
-    %%rbac role:registrar|head_of_department on ClassSession.cancel
     %%rbac role:principal|registrar|head_of_department|teacher|finance_officer|guardian on Enrollment.read
     %%rbac role:registrar on Enrollment.create
     %%rbac role:registrar|head_of_department on Enrollment.update
-    %%rbac role:registrar|principal on Enrollment.withdraw
     %%rbac role:principal|registrar|head_of_department|teacher|counsellor|guardian on AttendanceRecord.read
     %%rbac role:teacher|registrar on AttendanceRecord.create
     %%rbac role:teacher|registrar on AttendanceRecord.update
     %%rbac role:principal|registrar|head_of_department|teacher|guardian on Assessment.read
     %%rbac role:teacher|head_of_department on Assessment.create
     %%rbac role:teacher|head_of_department on Assessment.update
-    %%rbac role:head_of_department|principal on Assessment.cancel
     %%rbac role:principal|registrar|head_of_department|teacher|guardian on AssessmentResult.read
     %%rbac role:teacher|head_of_department on AssessmentResult.create
     %%rbac role:teacher|head_of_department on AssessmentResult.update
-    %%rbac role:teacher|head_of_department on AssessmentResult.mark
     %%rbac role:principal|finance_officer|registrar|guardian on FeeInvoice.read
     %%rbac role:finance_officer on FeeInvoice.create
     %%rbac role:finance_officer on FeeInvoice.update
-    %%rbac role:finance_officer on FeeInvoice.issue
-    %%rbac role:principal|finance_officer on FeeInvoice.cancel_issued
     %%rbac role:principal|finance_officer|registrar|guardian on FeeInvoiceLine.read
     %%rbac role:finance_officer on FeeInvoiceLine.create
     %%rbac role:principal|finance_officer|guardian on Payment.read
@@ -609,10 +914,26 @@ erDiagram
     %%rbac role:principal|counsellor on DisciplineIncident.read
     %%rbac role:counsellor|principal on DisciplineIncident.create
     %%rbac role:counsellor|principal on DisciplineIncident.update
-    %%rbac role:counsellor|principal on DisciplineIncident.apply_sanction
-    %%rbac role:principal on DisciplineIncident.dismiss
+    %%rbac role:principal|registrar|counsellor|guardian on ConsentRecord.read
+    %%rbac role:registrar|counsellor on ConsentRecord.create
+    %%rbac role:registrar|counsellor on ConsentRecord.update
+    %%rbac role:principal|registrar|head_of_department|teacher|counsellor on SupportPlan.read
+    %%rbac role:counsellor|registrar on SupportPlan.create
+    %%rbac role:counsellor|registrar on SupportPlan.update
+    %%rbac role:principal|counsellor on SafeguardingConcern.read
+    %%rbac role:teacher|counsellor|principal on SafeguardingConcern.create
+    %%rbac role:counsellor|principal on SafeguardingConcern.update
+    %%rbac role:principal|head_of_department|teacher|counsellor on ConcernFeedback.read
+    %%rbac role:counsellor|principal on ConcernFeedback.create
+    %%rbac role:counsellor|principal on ConcernFeedback.update
+    %%rbac role:principal|registrar|admissions_officer|head_of_department|teacher|finance_officer|counsellor|guardian on CommunicationLog.read
+    %%rbac role:principal|registrar|admissions_officer|head_of_department|teacher|finance_officer|counsellor on CommunicationLog.create
+    %%rbac role:principal|registrar|finance_officer|counsellor on CommunicationLog.update
+    %%rbac role:principal|finance_officer|guardian on Refund.read
+    %%rbac role:finance_officer on Refund.create
+    %%rbac role:finance_officer|principal on Refund.update
 
-%% ---- The reporting pass (llmdetailed §10.5.1) ------------------------------
+%% ---- The reporting pass (llms.txt §1.1.7) -----------------------------------
 %%
 %% What the derived pack already gives this model without being asked: a
 %% register per entity, a breakdown per %%enum-bound column, created-per-month,
@@ -681,6 +1002,298 @@ erDiagram
     %%report guardian-child-results title: My child's marked work entity: AssessmentResult help: Marks as they were given, with the paper's own maximum beside them, because a 34 means nothing until you know it was out of 40. Newest first, which is the order a family reads them in. sql: SELECT s.first_name || ' ' || s.last_name AS student, c.name AS course, a.title, ar.score, ar.max_score, ROUND(100.0 * ar.score / NULLIF(ar.max_score, 0)) AS percent, ar.marked_at FROM bus_assessment_result ar JOIN bus_assessment a ON a.id = ar.assessment_id JOIN bus_class_section sec ON sec.id = a.class_section_id JOIN bus_course c ON c.id = sec.course_id JOIN bus_student s ON s.id = ar.student_id WHERE ar.deleted_at IS NULL AND a.deleted_at IS NULL AND ar.status = 'marked' ORDER BY ar.marked_at DESC
     %%report guardian-outstanding-fees title: What I still owe, and by when entity: FeeInvoice help: One row per unpaid invoice with the balance and the due date, so a family can see what is outstanding without ringing the office — which is most of what the office is rung about. sql: SELECT s.first_name || ' ' || s.last_name AS student, f.invoice_number, t.name AS term, f.due_on, f.total_amount, f.amount_paid, f.balance_due, f.status FROM bus_fee_invoice f JOIN bus_student s ON s.id = f.student_id JOIN bus_academic_term t ON t.id = f.academic_term_id WHERE f.deleted_at IS NULL AND f.status IN ('issued', 'part_paid', 'overdue') AND f.balance_due > 0 ORDER BY f.due_on
 
+%% -- enterprise controls: consent, support, safeguarding, delivery and refunds
+    %%report registrar-consents-expiring title: Student consents expiring in the next thirty days entity: ConsentRecord help: The renewal queue that prevents a trip, service or information use from continuing after the guardian's authority has ended. sql: SELECT s.student_number, s.first_name || ' ' || s.last_name AS student, c.consent_type, c.expires_on, g.first_name || ' ' || g.last_name AS guardian FROM bus_consent_record c JOIN bus_student s ON s.id = c.student_id JOIN bus_guardian g ON g.id = c.guardian_id WHERE c.deleted_at IS NULL AND c.status = 'active' AND c.expires_on BETWEEN now()::date AND now()::date + 30 ORDER BY c.expires_on
+    %%report counsellor-support-reviews-due title: Active support plans due for review entity: SupportPlan help: The caseload ordered by review date, so adjustments are reconsidered before an outdated plan becomes the student's unofficial permanent provision. sql: SELECT s.student_number, s.first_name || ' ' || s.last_name AS student, p.plan_type, p.review_due_on, st.first_name || ' ' || st.last_name AS owner FROM bus_support_plan p JOIN bus_student s ON s.id = p.student_id JOIN bus_staff st ON st.id = p.owner_id WHERE p.deleted_at IS NULL AND p.status IN ('active', 'under_review') AND p.review_due_on <= now()::date + 30 ORDER BY p.review_due_on
+    %%report principal-untriaged-safeguarding title: Safeguarding concerns awaiting triage entity: SafeguardingConcern help: Restricted concerns that have been recorded but still lack an accountable response, oldest and highest risk first. sql: SELECT c.reference, s.student_number, s.first_name || ' ' || s.last_name AS student, c.risk_level, c.reported_at, EXTRACT(EPOCH FROM now() - c.reported_at)::int / 3600 AS hours_waiting FROM bus_safeguarding_concern c JOIN bus_student s ON s.id = c.student_id WHERE c.deleted_at IS NULL AND c.status = 'reported' ORDER BY c.reported_at
+    %%report registrar-failed-communications title: Family communications needing another route entity: CommunicationLog help: Messages that did not reach the intended guardian, so staff can correct the contact detail or switch channel before an attendance, finance or safeguarding notice is missed. sql: SELECT s.student_number, s.first_name || ' ' || s.last_name AS student, g.first_name || ' ' || g.last_name AS guardian, c.purpose, c.channel, c.subject, c.failure_reason, c.created_at FROM bus_communication_log c LEFT JOIN bus_student s ON s.id = c.student_id LEFT JOIN bus_guardian g ON g.id = c.guardian_id WHERE c.deleted_at IS NULL AND c.status = 'failed' ORDER BY c.created_at
+    %%report finance-refunds-awaiting-decision title: Refund requests awaiting approval entity: Refund help: The finance control queue showing age, amount and separation of requester from approver before money is returned. sql: SELECT r.requested_at, r.amount, r.reason, r.status, p.reference AS payment_reference, req.first_name || ' ' || req.last_name AS requested_by FROM bus_refund r JOIN bus_payment p ON p.id = r.payment_id JOIN bus_staff req ON req.id = r.requested_by_id WHERE r.deleted_at IS NULL AND r.status IN ('requested', 'under_review') ORDER BY r.requested_at
+    %%report department-created-per-month title: Departments created per month entity: Department chart: line x: month y: records help: A teaching department that owns a group of courses and employs the staff who teach them. New departments per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_department WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report department-is-active-share title: Departments: is active entity: Department chart: pie x: is_active y: records help: A teaching department that owns a group of courses and employs the staff who teach them. The share of departments where is active holds against those where it does not. sql: SELECT CASE WHEN is_active THEN 'yes' ELSE 'no' END AS is_active, COUNT(*) AS records FROM bus_department WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report department-per-staff title: Departments per staff entity: Department chart: bar x: staff y: records help: A teaching department that owns a group of courses and employs the staff who teach them. Which staff the most departments belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.staff_number::text, '(none)') AS staff, COUNT(*) AS records FROM bus_department x LEFT JOIN bus_staff p ON p.id = x.staff_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report room-created-per-month title: Rooms created per month entity: Room chart: line x: month y: records help: A teaching space with a legal capacity. New rooms per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_room WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report room-capacity-per-month title: Average capacity per month entity: Room chart: line x: month y: average_capacity help: A teaching space with a legal capacity. The average capacity of rooms created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(capacity)::numeric, 2) AS average_capacity FROM bus_room WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report room-largest-by-capacity title: The ten largest rooms by capacity entity: Room chart: bar x: record y: capacity help: A teaching space with a legal capacity. The records with the highest capacity; worth reading for outliers and for the few that carry most of the total. sql: SELECT code::text AS record, capacity FROM bus_room WHERE deleted_at IS NULL AND capacity IS NOT NULL ORDER BY capacity DESC LIMIT 10
+    %%report academic-term-by-status title: Academic Terms by status entity: AcademicTerm chart: pie x: status y: records help: A named teaching period inside an academic year. How academic terms divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_academic_term WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report academic-term-lifecycle title: Academic Term lifecycle entity: AcademicTerm chart: bar x: state y: records help: A named teaching period inside an academic year. Where academic terms sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'planned' AS state, 0 AS position UNION ALL SELECT 'current', 1 UNION ALL SELECT 'closed', 2) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_academic_term WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report academic-term-created-per-month title: Academic Terms created per month entity: AcademicTerm chart: line x: month y: records help: A named teaching period inside an academic year. New academic terms per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_academic_term WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report staff-by-status title: Staffs by status entity: Staff chart: pie x: status y: records help: An employee of the school, teaching or administrative. How staffs divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_staff WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report staff-by-staff-type title: Staffs by staff type entity: Staff chart: pie x: staff_type y: records help: An employee of the school, teaching or administrative. How staffs divide across staff type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(staff_type::text, '(unset)') AS staff_type, COUNT(*) AS records FROM bus_staff WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report staff-lifecycle title: Staff lifecycle entity: Staff chart: bar x: state y: records help: An employee of the school, teaching or administrative. Where staffs sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'active' AS state, 0 AS position UNION ALL SELECT 'on_leave', 1 UNION ALL SELECT 'left', 2) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_staff WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report course-by-level title: Courses by level entity: Course chart: pie x: level y: records help: A subject as it is offered and examined. How courses divide across level, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(level::text, '(unset)') AS level, COUNT(*) AS records FROM bus_course WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report course-credit-hours-by-level title: Total credit hours by level entity: Course chart: bar x: level y: total_credit_hours help: A subject as it is offered and examined. Courses added up on credit hours, split by level, to show where the quantity sits. sql: SELECT COALESCE(level::text, '(unset)') AS level, ROUND(SUM(credit_hours)::numeric, 2) AS total_credit_hours FROM bus_course WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report course-credit-hours-per-month title: Average credit hours per month entity: Course chart: line x: month y: average_credit_hours help: A subject as it is offered and examined. The average credit hours of courses created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(credit_hours)::numeric, 2) AS average_credit_hours FROM bus_course WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report course-largest-by-credit-hours title: The ten largest courses by credit hours entity: Course chart: bar x: record y: credit_hours help: A subject as it is offered and examined. The records with the highest credit hours; worth reading for outliers and for the few that carry most of the total. sql: SELECT code::text AS record, credit_hours FROM bus_course WHERE deleted_at IS NULL AND credit_hours IS NOT NULL ORDER BY credit_hours DESC LIMIT 10
+    %%report guardian-by-preferred-contact-method title: Guardians by preferred contact method entity: Guardian chart: pie x: preferred_contact_method y: records help: The adult legally responsible for one or more students. How guardians divide across preferred contact method, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(preferred_contact_method::text, '(unset)') AS preferred_contact_method, COUNT(*) AS records FROM bus_guardian WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report guardian-created-per-month title: Guardians created per month entity: Guardian chart: line x: month y: records help: The adult legally responsible for one or more students. New guardians per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_guardian WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report guardian-top-city title: Guardians: the most common city entity: Guardian chart: bar x: city y: records help: The adult legally responsible for one or more students. The ten most frequent values of city among guardians; free text that repeats is a list the model could close. sql: SELECT COALESCE(city, '(blank)') AS city, COUNT(*) AS records FROM bus_guardian WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report student-by-status title: Students by status entity: Student chart: pie x: status y: records help: The child. Created when an offer is accepted, never at enquiry, and never deleted — a leaver is a status, because safeguarding and alumni obligations both need the record to survive. How students divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_student WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report student-lifecycle title: Student lifecycle entity: Student chart: bar x: state y: records help: The child. Created when an offer is accepted, never at enquiry, and never deleted — a leaver is a status, because safeguarding and alumni obligations both need the record to survive. Where students sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'enrolled' AS state, 0 AS position UNION ALL SELECT 'on_leave', 1 UNION ALL SELECT 'suspended', 2 UNION ALL SELECT 'graduated', 3 UNION ALL SELECT 'withdrawn', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_student WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report student-year-group-by-status title: Total year group by status entity: Student chart: bar x: status y: total_year_group help: The child. Created when an offer is accepted, never at enquiry, and never deleted — a leaver is a status, because safeguarding and alumni obligations both need the record to survive. Students added up on year group, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(year_group)::numeric, 2) AS total_year_group FROM bus_student WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report student-year-group-per-month title: Average year group per month entity: Student chart: line x: month y: average_year_group help: The child. Created when an offer is accepted, never at enquiry, and never deleted — a leaver is a status, because safeguarding and alumni obligations both need the record to survive. The average year group of students created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(year_group)::numeric, 2) AS average_year_group FROM bus_student WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report student-largest-by-year-group title: The ten largest students by year group entity: Student chart: bar x: record y: year_group help: The child. Created when an offer is accepted, never at enquiry, and never deleted — a leaver is a status, because safeguarding and alumni obligations both need the record to survive. The records with the highest year group; worth reading for outliers and for the few that carry most of the total. sql: SELECT student_number::text AS record, year_group FROM bus_student WHERE deleted_at IS NULL AND year_group IS NOT NULL ORDER BY year_group DESC LIMIT 10
+    %%report student-guardian-by-relationship title: Student Guardians by relationship entity: StudentGuardian chart: bar x: relationship y: records help: One guardian's relationship to one student — the kind of relationship, the contact order and whether they may collect. How student guardians divide across relationship, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(relationship::text, '(unset)') AS relationship, COUNT(*) AS records FROM bus_student_guardian WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report student-guardian-per-student title: Student Guardians per student entity: StudentGuardian chart: bar x: student y: records help: One guardian's relationship to one student — the kind of relationship, the contact order and whether they may collect. Which student the most student guardians belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.student_number::text, '(none)') AS student, COUNT(*) AS records FROM bus_student_guardian x LEFT JOIN bus_student p ON p.id = x.student_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report student-guardian-per-guardian title: Student Guardians per guardian entity: StudentGuardian chart: bar x: guardian y: records help: One guardian's relationship to one student — the kind of relationship, the contact order and whether they may collect. Which guardian the most student guardians belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.email::text, '(none)') AS guardian, COUNT(*) AS records FROM bus_student_guardian x LEFT JOIN bus_guardian p ON p.id = x.guardian_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report admission-application-by-status title: Admission Applications by status entity: AdmissionApplication chart: bar x: status y: records help: A request for a place, with an outcome. How admission applications divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_admission_application WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report admission-application-by-admission-band title: Admission Applications by admission band entity: AdmissionApplication chart: pie x: admission_band y: records help: A request for a place, with an outcome. How admission applications divide across admission band, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(admission_band::text, '(unset)') AS admission_band, COUNT(*) AS records FROM bus_admission_application WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report admission-application-lifecycle title: Admission Application lifecycle entity: AdmissionApplication chart: bar x: state y: records help: A request for a place, with an outcome. Where admission applications sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'submitted' AS state, 0 AS position UNION ALL SELECT 'under_review', 1 UNION ALL SELECT 'offer_made', 2 UNION ALL SELECT 'rejected', 3 UNION ALL SELECT 'accepted', 4 UNION ALL SELECT 'declined', 5 UNION ALL SELECT 'withdrawn', 6) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_admission_application WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report admission-application-year-group-applied-for-by-status title: Total year group applied for by status entity: AdmissionApplication chart: bar x: status y: total_year_group_applied_for help: A request for a place, with an outcome. Admission Applications added up on year group applied for, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(year_group_applied_for)::numeric, 2) AS total_year_group_applied_for FROM bus_admission_application WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report admission-application-year-group-applied-for-per-month title: Average year group applied for per month entity: AdmissionApplication chart: line x: month y: average_year_group_applied_for help: A request for a place, with an outcome. The average year group applied for of admission applications created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(year_group_applied_for)::numeric, 2) AS average_year_group_applied_for FROM bus_admission_application WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report admission-application-largest-by-year-group-applied-for title: The ten largest admission applications by year group applied for entity: AdmissionApplication chart: bar x: record y: year_group_applied_for help: A request for a place, with an outcome. The records with the highest year group applied for; worth reading for outliers and for the few that carry most of the total. sql: SELECT reference::text AS record, year_group_applied_for FROM bus_admission_application WHERE deleted_at IS NULL AND year_group_applied_for IS NOT NULL ORDER BY year_group_applied_for DESC LIMIT 10
+    %%report admission-application-prior-attainment-score-by-status title: Total prior attainment score by status entity: AdmissionApplication chart: bar x: status y: total_prior_attainment_score help: A request for a place, with an outcome. Admission Applications added up on prior attainment score, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(prior_attainment_score)::numeric, 2) AS total_prior_attainment_score FROM bus_admission_application WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report admission-application-prior-attainment-score-per-month title: Average prior attainment score per month entity: AdmissionApplication chart: line x: month y: average_prior_attainment_score help: A request for a place, with an outcome. The average prior attainment score of admission applications created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(prior_attainment_score)::numeric, 2) AS average_prior_attainment_score FROM bus_admission_application WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report admission-application-largest-by-prior-attainment-score title: The ten largest admission applications by prior attainment score entity: AdmissionApplication chart: bar x: record y: prior_attainment_score help: A request for a place, with an outcome. The records with the highest prior attainment score; worth reading for outliers and for the few that carry most of the total. sql: SELECT reference::text AS record, prior_attainment_score FROM bus_admission_application WHERE deleted_at IS NULL AND prior_attainment_score IS NOT NULL ORDER BY prior_attainment_score DESC LIMIT 10
+    %%report admission-application-per-guardian title: Admission Applications per guardian entity: AdmissionApplication chart: bar x: guardian y: records help: A request for a place, with an outcome. Which guardian the most admission applications belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.email::text, '(none)') AS guardian, COUNT(*) AS records FROM bus_admission_application x LEFT JOIN bus_guardian p ON p.id = x.guardian_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report admission-application-year-group-applied-for-per-guardian title: Total year group applied for per guardian entity: AdmissionApplication chart: bar x: guardian y: total_year_group_applied_for help: A request for a place, with an outcome. Admission Applications added up on year group applied for for each guardian, ten largest first. sql: SELECT COALESCE(p.email::text, '(none)') AS guardian, ROUND(SUM(x.year_group_applied_for)::numeric, 2) AS total_year_group_applied_for FROM bus_admission_application x LEFT JOIN bus_guardian p ON p.id = x.guardian_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+    %%report admission-application-per-student title: Admission Applications per student entity: AdmissionApplication chart: bar x: student y: records help: A request for a place, with an outcome. Which student the most admission applications belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.student_number::text, '(none)') AS student, COUNT(*) AS records FROM bus_admission_application x LEFT JOIN bus_student p ON p.id = x.student_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report admission-application-year-group-applied-for-per-student title: Total year group applied for per student entity: AdmissionApplication chart: bar x: student y: total_year_group_applied_for help: A request for a place, with an outcome. Admission Applications added up on year group applied for for each student, ten largest first. sql: SELECT COALESCE(p.student_number::text, '(none)') AS student, ROUND(SUM(x.year_group_applied_for)::numeric, 2) AS total_year_group_applied_for FROM bus_admission_application x LEFT JOIN bus_student p ON p.id = x.student_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+    %%report admission-application-per-academic-term title: Admission Applications per academic term entity: AdmissionApplication chart: bar x: academic_term y: records help: A request for a place, with an outcome. Which academic term the most admission applications belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.code::text, '(none)') AS academic_term, COUNT(*) AS records FROM bus_admission_application x LEFT JOIN bus_academic_term p ON p.id = x.academic_term_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report admission-application-year-group-applied-for-per-academic-term title: Total year group applied for per academic term entity: AdmissionApplication chart: bar x: academic_term y: total_year_group_applied_for help: A request for a place, with an outcome. Admission Applications added up on year group applied for for each academic term, ten largest first. sql: SELECT COALESCE(p.code::text, '(none)') AS academic_term, ROUND(SUM(x.year_group_applied_for)::numeric, 2) AS total_year_group_applied_for FROM bus_admission_application x LEFT JOIN bus_academic_term p ON p.id = x.academic_term_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+    %%report class-section-by-status title: Class Sections by status entity: ClassSection chart: pie x: status y: records help: One taught group of a course in one term, with a teacher, a room and a capacity. How class sections divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_class_section WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report class-section-by-day-of-week title: Class Sections by day of week entity: ClassSection chart: pie x: day_of_week y: records help: One taught group of a course in one term, with a teacher, a room and a capacity. How class sections divide across day of week, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(day_of_week::text, '(unset)') AS day_of_week, COUNT(*) AS records FROM bus_class_section WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report class-section-lifecycle title: Class Section lifecycle entity: ClassSection chart: bar x: state y: records help: One taught group of a course in one term, with a teacher, a room and a capacity. Where class sections sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'planned' AS state, 0 AS position UNION ALL SELECT 'open', 1 UNION ALL SELECT 'in_progress', 2 UNION ALL SELECT 'completed', 3 UNION ALL SELECT 'cancelled', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_class_section WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report class-section-capacity-by-status title: Total capacity by status entity: ClassSection chart: bar x: status y: total_capacity help: One taught group of a course in one term, with a teacher, a room and a capacity. Class Sections added up on capacity, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(capacity)::numeric, 2) AS total_capacity FROM bus_class_section WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report class-section-capacity-per-month title: Average capacity per month (Class Section) entity: ClassSection chart: line x: month y: average_capacity help: One taught group of a course in one term, with a teacher, a room and a capacity. The average capacity of class sections created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(capacity)::numeric, 2) AS average_capacity FROM bus_class_section WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report class-section-largest-by-capacity title: The ten largest class sections by capacity entity: ClassSection chart: bar x: record y: capacity help: One taught group of a course in one term, with a teacher, a room and a capacity. The records with the highest capacity; worth reading for outliers and for the few that carry most of the total. sql: SELECT code::text AS record, capacity FROM bus_class_section WHERE deleted_at IS NULL AND capacity IS NOT NULL ORDER BY capacity DESC LIMIT 10
+    %%report class-section-enrolled-count-by-status title: Total enrolled count by status entity: ClassSection chart: bar x: status y: total_enrolled_count help: One taught group of a course in one term, with a teacher, a room and a capacity. Class Sections added up on enrolled count, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(enrolled_count)::numeric, 2) AS total_enrolled_count FROM bus_class_section WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report class-section-enrolled-count-per-month title: Average enrolled count per month entity: ClassSection chart: line x: month y: average_enrolled_count help: One taught group of a course in one term, with a teacher, a room and a capacity. The average enrolled count of class sections created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(enrolled_count)::numeric, 2) AS average_enrolled_count FROM bus_class_section WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report class-section-largest-by-enrolled-count title: The ten largest class sections by enrolled count entity: ClassSection chart: bar x: record y: enrolled_count help: One taught group of a course in one term, with a teacher, a room and a capacity. The records with the highest enrolled count; worth reading for outliers and for the few that carry most of the total. sql: SELECT code::text AS record, enrolled_count FROM bus_class_section WHERE deleted_at IS NULL AND enrolled_count IS NOT NULL ORDER BY enrolled_count DESC LIMIT 10
+    %%report class-section-period-by-status title: Total period by status entity: ClassSection chart: bar x: status y: total_period help: One taught group of a course in one term, with a teacher, a room and a capacity. Class Sections added up on period, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(period)::numeric, 2) AS total_period FROM bus_class_section WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report class-section-period-per-month title: Average period per month entity: ClassSection chart: line x: month y: average_period help: One taught group of a course in one term, with a teacher, a room and a capacity. The average period of class sections created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(period)::numeric, 2) AS average_period FROM bus_class_section WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report class-section-largest-by-period title: The ten largest class sections by period entity: ClassSection chart: bar x: record y: period help: One taught group of a course in one term, with a teacher, a room and a capacity. The records with the highest period; worth reading for outliers and for the few that carry most of the total. sql: SELECT code::text AS record, period FROM bus_class_section WHERE deleted_at IS NULL AND period IS NOT NULL ORDER BY period DESC LIMIT 10
+    %%report class-section-per-course title: Class Sections per course entity: ClassSection chart: bar x: course y: records help: One taught group of a course in one term, with a teacher, a room and a capacity. Which course the most class sections belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.code::text, '(none)') AS course, COUNT(*) AS records FROM bus_class_section x LEFT JOIN bus_course p ON p.id = x.course_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report class-section-capacity-per-course title: Total capacity per course entity: ClassSection chart: bar x: course y: total_capacity help: One taught group of a course in one term, with a teacher, a room and a capacity. Class Sections added up on capacity for each course, ten largest first. sql: SELECT COALESCE(p.code::text, '(none)') AS course, ROUND(SUM(x.capacity)::numeric, 2) AS total_capacity FROM bus_class_section x LEFT JOIN bus_course p ON p.id = x.course_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 10
+    %%report class-session-by-status title: Class Sessions by status entity: ClassSession chart: pie x: status y: records help: One dated, timed meeting of a section. How class sessions divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_class_session WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report class-session-lifecycle title: Class Session lifecycle entity: ClassSession chart: bar x: state y: records help: One dated, timed meeting of a section. Where class sessions sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'scheduled' AS state, 0 AS position UNION ALL SELECT 'held', 1 UNION ALL SELECT 'cancelled', 2) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_class_session WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report class-session-per-class-section title: Class Sessions per class section entity: ClassSession chart: bar x: class_section y: records help: One dated, timed meeting of a section. Which class section the most class sessions belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.code::text, '(none)') AS class_section, COUNT(*) AS records FROM bus_class_session x LEFT JOIN bus_class_section p ON p.id = x.class_section_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report enrollment-by-status title: Enrollments by status entity: Enrollment chart: pie x: status y: records help: One student's place in one section for one term. How enrollments divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_enrollment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report enrollment-by-final-grade title: Enrollments by final grade entity: Enrollment chart: pie x: final_grade y: records help: One student's place in one section for one term. How enrollments divide across final grade, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(final_grade::text, '(unset)') AS final_grade, COUNT(*) AS records FROM bus_enrollment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report enrollment-lifecycle title: Enrollment lifecycle entity: Enrollment chart: bar x: state y: records help: One student's place in one section for one term. Where enrollments sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'pending' AS state, 0 AS position UNION ALL SELECT 'enrolled', 1 UNION ALL SELECT 'withdrawn', 2 UNION ALL SELECT 'completed', 3 UNION ALL SELECT 'failed', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_enrollment WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report attendance-record-by-status title: Attendance Records by status entity: AttendanceRecord chart: pie x: status y: records help: One student's mark for one session. How attendance records divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_attendance_record WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report attendance-record-minutes-late-by-status title: Total minutes late by status entity: AttendanceRecord chart: bar x: status y: total_minutes_late help: One student's mark for one session. Attendance Records added up on minutes late, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(minutes_late)::numeric, 2) AS total_minutes_late FROM bus_attendance_record WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report attendance-record-minutes-late-per-month title: Average minutes late per month entity: AttendanceRecord chart: line x: month y: average_minutes_late help: One student's mark for one session. The average minutes late of attendance records created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(minutes_late)::numeric, 2) AS average_minutes_late FROM bus_attendance_record WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report assessment-by-status title: Assessments by status entity: Assessment chart: pie x: status y: records help: A marked piece of work set on a section — a quiz, an essay, a mock exam — with a maximum score, a weight and a due date. How assessments divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_assessment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report assessment-by-assessment-type title: Assessments by assessment type entity: Assessment chart: pie x: assessment_type y: records help: A marked piece of work set on a section — a quiz, an essay, a mock exam — with a maximum score, a weight and a due date. How assessments divide across assessment type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(assessment_type::text, '(unset)') AS assessment_type, COUNT(*) AS records FROM bus_assessment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report assessment-lifecycle title: Assessment lifecycle entity: Assessment chart: bar x: state y: records help: A marked piece of work set on a section — a quiz, an essay, a mock exam — with a maximum score, a weight and a due date. Where assessments sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'draft' AS state, 0 AS position UNION ALL SELECT 'published', 1 UNION ALL SELECT 'marking', 2 UNION ALL SELECT 'marked', 3 UNION ALL SELECT 'cancelled', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_assessment WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report assessment-result-by-status title: Assessment Results by status entity: AssessmentResult chart: pie x: status y: records help: One student's mark for one assessment. How assessment results divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_assessment_result WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report assessment-result-lifecycle title: Assessment Result lifecycle entity: AssessmentResult chart: bar x: state y: records help: One student's mark for one assessment. Where assessment results sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'pending' AS state, 0 AS position UNION ALL SELECT 'submitted', 1 UNION ALL SELECT 'missing', 2 UNION ALL SELECT 'excused', 3 UNION ALL SELECT 'marked', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_assessment_result WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report assessment-result-score-by-status title: Total score by status entity: AssessmentResult chart: bar x: status y: total_score help: One student's mark for one assessment. Assessment Results added up on score, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(score)::numeric, 2) AS total_score FROM bus_assessment_result WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report fee-invoice-by-status title: Fee Invoices by status entity: FeeInvoice chart: pie x: status y: records help: What a student's guardians owe for one term. How fee invoices divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_fee_invoice WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report fee-invoice-lifecycle title: Fee Invoice lifecycle entity: FeeInvoice chart: bar x: state y: records help: What a student's guardians owe for one term. Where fee invoices sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'draft' AS state, 0 AS position UNION ALL SELECT 'issued', 1 UNION ALL SELECT 'cancelled', 2 UNION ALL SELECT 'part_paid', 3 UNION ALL SELECT 'paid', 4 UNION ALL SELECT 'overdue', 5) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_fee_invoice WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report fee-invoice-total-amount-by-status title: Total total amount by status entity: FeeInvoice chart: bar x: status y: total_total_amount help: What a student's guardians owe for one term. Fee Invoices added up on total amount, split by status, to show where the quantity sits. sql: SELECT COALESCE(status::text, '(unset)') AS status, ROUND(SUM(total_amount)::numeric, 2) AS total_total_amount FROM bus_fee_invoice WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report fee-invoice-line-by-charge-type title: Fee Invoice Lines by charge type entity: FeeInvoiceLine chart: pie x: charge_type y: records help: One charge on an invoice — tuition, transport, examination entry or materials. How fee invoice lines divide across charge type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(charge_type::text, '(unset)') AS charge_type, COUNT(*) AS records FROM bus_fee_invoice_line WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report fee-invoice-line-quantity-by-charge-type title: Total quantity by charge type entity: FeeInvoiceLine chart: bar x: charge_type y: total_quantity help: One charge on an invoice — tuition, transport, examination entry or materials. Fee Invoice Lines added up on quantity, split by charge type, to show where the quantity sits. sql: SELECT COALESCE(charge_type::text, '(unset)') AS charge_type, ROUND(SUM(quantity)::numeric, 2) AS total_quantity FROM bus_fee_invoice_line WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report fee-invoice-line-quantity-per-month title: Average quantity per month entity: FeeInvoiceLine chart: line x: month y: average_quantity help: One charge on an invoice — tuition, transport, examination entry or materials. The average quantity of fee invoice lines created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(quantity)::numeric, 2) AS average_quantity FROM bus_fee_invoice_line WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report payment-by-method title: Payments by method entity: Payment chart: pie x: method y: records help: Money received against an invoice. How payments divide across method, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(method::text, '(unset)') AS method, COUNT(*) AS records FROM bus_payment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report payment-amount-by-method title: Total amount by method entity: Payment chart: bar x: method y: total_amount help: Money received against an invoice. Payments added up on amount, split by method, to show where the quantity sits. sql: SELECT COALESCE(method::text, '(unset)') AS method, ROUND(SUM(amount)::numeric, 2) AS total_amount FROM bus_payment WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC NULLS LAST
+    %%report payment-amount-per-month title: Average amount per month entity: Payment chart: line x: month y: average_amount help: Money received against an invoice. The average amount of payments created each month, to see whether the typical record is growing or shrinking. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, ROUND(AVG(amount)::numeric, 2) AS average_amount FROM bus_payment WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report discipline-incident-by-status title: Discipline Incidents by status entity: DisciplineIncident chart: pie x: status y: records help: A recorded conduct event, its investigation and its outcome. How discipline incidents divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_discipline_incident WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report discipline-incident-by-category title: Discipline Incidents by category entity: DisciplineIncident chart: pie x: category y: records help: A recorded conduct event, its investigation and its outcome. How discipline incidents divide across category, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(category::text, '(unset)') AS category, COUNT(*) AS records FROM bus_discipline_incident WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report discipline-incident-lifecycle title: Discipline Incident lifecycle entity: DisciplineIncident chart: bar x: state y: records help: A recorded conduct event, its investigation and its outcome. Where discipline incidents sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'reported' AS state, 0 AS position UNION ALL SELECT 'under_review', 1 UNION ALL SELECT 'dismissed', 2 UNION ALL SELECT 'action_taken', 3 UNION ALL SELECT 'closed', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_discipline_incident WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report consent-record-by-status title: Consent Records by status entity: ConsentRecord chart: pie x: status y: records help: One guardian's time-bounded decision about a student's participation, information use or emergency treatment. How consent records divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_consent_record WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report consent-record-by-consent-type title: Consent Records by consent type entity: ConsentRecord chart: pie x: consent_type y: records help: One guardian's time-bounded decision about a student's participation, information use or emergency treatment. How consent records divide across consent type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(consent_type::text, '(unset)') AS consent_type, COUNT(*) AS records FROM bus_consent_record WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report consent-record-lifecycle title: Consent Record lifecycle entity: ConsentRecord chart: bar x: state y: records help: One guardian's time-bounded decision about a student's participation, information use or emergency treatment. Where consent records sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'draft' AS state, 0 AS position UNION ALL SELECT 'active', 1 UNION ALL SELECT 'withdrawn', 2 UNION ALL SELECT 'expired', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_consent_record WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report support-plan-by-status title: Support Plans by status entity: SupportPlan chart: pie x: status y: records help: The controlled summary of a student's learning, accessibility, medical or behaviour support, its accountable owner and scheduled review. How support plans divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_support_plan WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report support-plan-by-plan-type title: Support Plans by plan type entity: SupportPlan chart: pie x: plan_type y: records help: The controlled summary of a student's learning, accessibility, medical or behaviour support, its accountable owner and scheduled review. How support plans divide across plan type, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(plan_type::text, '(unset)') AS plan_type, COUNT(*) AS records FROM bus_support_plan WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report support-plan-lifecycle title: Support Plan lifecycle entity: SupportPlan chart: bar x: state y: records help: The controlled summary of a student's learning, accessibility, medical or behaviour support, its accountable owner and scheduled review. Where support plans sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'draft' AS state, 0 AS position UNION ALL SELECT 'active', 1 UNION ALL SELECT 'under_review', 2 UNION ALL SELECT 'closed', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_support_plan WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report safeguarding-concern-by-status title: Safeguarding Concerns by status entity: SafeguardingConcern chart: pie x: status y: records help: A confidential welfare or child-protection concern recorded in factual language, triaged to an accountable owner and retained through referral or closure. How safeguarding concerns divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_safeguarding_concern WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report safeguarding-concern-by-category title: Safeguarding Concerns by category entity: SafeguardingConcern chart: pie x: category y: records help: A confidential welfare or child-protection concern recorded in factual language, triaged to an accountable owner and retained through referral or closure. How safeguarding concerns divide across category, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(category::text, '(unset)') AS category, COUNT(*) AS records FROM bus_safeguarding_concern WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report safeguarding-concern-lifecycle title: Safeguarding Concern lifecycle entity: SafeguardingConcern chart: bar x: state y: records help: A confidential welfare or child-protection concern recorded in factual language, triaged to an accountable owner and retained through referral or closure. Where safeguarding concerns sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'reported' AS state, 0 AS position UNION ALL SELECT 'triaged', 1 UNION ALL SELECT 'investigating', 2 UNION ALL SELECT 'referred', 3 UNION ALL SELECT 'closed', 4) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_safeguarding_concern WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report concern-feedback-by-outcome title: Concern Feedbacks by outcome entity: ConcernFeedback chart: pie x: outcome y: records help: What a member of staff who reported a safeguarding concern is told about it afterwards - that it was received, triaged, acted on, referred or closed. How concern feedbacks divide across outcome, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(outcome::text, '(unset)') AS outcome, COUNT(*) AS records FROM bus_concern_feedback WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report concern-feedback-created-per-month title: Concern Feedbacks created per month entity: ConcernFeedback chart: line x: month y: records help: What a member of staff who reported a safeguarding concern is told about it afterwards - that it was received, triaged, acted on, referred or closed. New concern feedbacks per month over two years - the volume the business actually handles. sql: SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*) AS records FROM bus_concern_feedback WHERE deleted_at IS NULL AND created_at >= now() - interval '24 months' GROUP BY 1 ORDER BY 1
+    %%report concern-feedback-per-safeguarding-concern title: Concern Feedbacks per safeguarding concern entity: ConcernFeedback chart: bar x: safeguarding_concern y: records help: What a member of staff who reported a safeguarding concern is told about it afterwards - that it was received, triaged, acted on, referred or closed. Which safeguarding concern the most concern feedbacks belong to; the head of the list is the concentration to know about. sql: SELECT COALESCE(p.reference::text, '(none)') AS safeguarding_concern, COUNT(*) AS records FROM bus_concern_feedback x LEFT JOIN bus_safeguarding_concern p ON p.id = x.safeguarding_concern_id AND p.deleted_at IS NULL WHERE x.deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    %%report communication-log-by-status title: Communication Logs by status entity: CommunicationLog chart: pie x: status y: records help: An auditable record of an operational message to a guardian about a student, including delivery failure. How communication logs divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_communication_log WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report communication-log-by-channel title: Communication Logs by channel entity: CommunicationLog chart: pie x: channel y: records help: An auditable record of an operational message to a guardian about a student, including delivery failure. How communication logs divide across channel, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(channel::text, '(unset)') AS channel, COUNT(*) AS records FROM bus_communication_log WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report communication-log-by-purpose title: Communication Logs by purpose entity: CommunicationLog chart: pie x: purpose y: records help: An auditable record of an operational message to a guardian about a student, including delivery failure. How communication logs divide across purpose, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(purpose::text, '(unset)') AS purpose, COUNT(*) AS records FROM bus_communication_log WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report communication-log-lifecycle title: Communication Log lifecycle entity: CommunicationLog chart: bar x: state y: records help: An auditable record of an operational message to a guardian about a student, including delivery failure. Where communication logs sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'queued' AS state, 0 AS position UNION ALL SELECT 'sent', 1 UNION ALL SELECT 'failed', 2 UNION ALL SELECT 'delivered', 3) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_communication_log WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%report refund-by-status title: Refunds by status entity: Refund chart: pie x: status y: records help: A controlled reversal of money previously received, requested and approved by different people, which the system enforces. How refunds divide across status, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(status::text, '(unset)') AS status, COUNT(*) AS records FROM bus_refund WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report refund-by-invoice-status-after title: Refunds by invoice status after entity: Refund chart: pie x: invoice_status_after y: records help: A controlled reversal of money previously received, requested and approved by different people, which the system enforces. How refunds divide across invoice status after, so the dominant group and the empty ones are both visible. sql: SELECT COALESCE(invoice_status_after::text, '(unset)') AS invoice_status_after, COUNT(*) AS records FROM bus_refund WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC
+    %%report refund-lifecycle title: Refund lifecycle entity: Refund chart: bar x: state y: records help: A controlled reversal of money previously received, requested and approved by different people, which the system enforces. Where refunds sit in their state machine, in the order the diagram draws it; a state nothing has reached shows as zero. sql: SELECT d.state, COALESCE(c.records, 0) AS records FROM (SELECT 'requested' AS state, 0 AS position UNION ALL SELECT 'under_review', 1 UNION ALL SELECT 'cancelled', 2 UNION ALL SELECT 'approved', 3 UNION ALL SELECT 'rejected', 4 UNION ALL SELECT 'paid', 5) d LEFT JOIN (SELECT status AS state, COUNT(*) AS records FROM bus_refund WHERE deleted_at IS NULL GROUP BY 1) c ON c.state = d.state ORDER BY d.position
+    %%dashboard principal-key-questions title: principal: Key questions role: principal reports: principal-roll-by-year, principal-attendance-by-year, principal-fee-collection-by-term, registrar-section-fill, hod-results-by-course, hod-marking-turnaround help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard principal-key-questions-2 title: principal: Key questions (2) role: principal reports: hod-teaching-load, admissions-conversion-by-band, finance-debt-ageing, finance-daily-takings, counsellor-repeat-incidents, counsellor-unauthorised-absence help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard principal-lifecycles title: principal: Where records stand role: principal reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, admission-application-lifecycle, class-section-lifecycle, class-session-lifecycle, enrollment-lifecycle, assessment-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard principal-lifecycles-2 title: principal: Where records stand (2) role: principal reports: assessment-result-lifecycle, fee-invoice-lifecycle, discipline-incident-lifecycle, consent-record-lifecycle, support-plan-lifecycle, safeguarding-concern-lifecycle, communication-log-lifecycle, refund-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard principal-breakdowns title: principal: Breakdowns role: principal reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, guardian-by-preferred-contact-method, guardian-top-city, student-by-status, student-guardian-by-relationship help: How the records this role works with divide across their categories.
+    %%dashboard principal-breakdowns-2 title: principal: Breakdowns (2) role: principal reports: admission-application-by-status, admission-application-by-admission-band, class-section-by-status, class-section-by-day-of-week, class-session-by-status, enrollment-by-status, enrollment-by-final-grade, attendance-record-by-status help: How the records this role works with divide across their categories.
+    %%dashboard principal-breakdowns-3 title: principal: Breakdowns (3) role: principal reports: assessment-by-status, assessment-by-assessment-type, assessment-result-by-status, fee-invoice-by-status, fee-invoice-line-by-charge-type, payment-by-method, discipline-incident-by-status, discipline-incident-by-category help: How the records this role works with divide across their categories.
+    %%dashboard principal-breakdowns-4 title: principal: Breakdowns (4) role: principal reports: consent-record-by-status, consent-record-by-consent-type, support-plan-by-status, support-plan-by-plan-type, safeguarding-concern-by-status, safeguarding-concern-by-category, concern-feedback-by-outcome, communication-log-by-status help: How the records this role works with divide across their categories.
+    %%dashboard principal-breakdowns-5 title: principal: Breakdowns (5) role: principal reports: communication-log-by-channel, communication-log-by-purpose, refund-by-status, refund-by-invoice-status-after help: How the records this role works with divide across their categories.
+    %%dashboard principal-measures title: principal: Amounts and totals role: principal reports: room-capacity-per-month, room-largest-by-capacity, course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard registrar-key-questions title: registrar: Key questions role: registrar reports: principal-roll-by-year, principal-attendance-by-year, principal-fee-collection-by-term, registrar-section-fill, hod-results-by-course, hod-marking-turnaround help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard registrar-key-questions-2 title: registrar: Key questions (2) role: registrar reports: hod-teaching-load, admissions-conversion-by-band, finance-debt-ageing, counsellor-unauthorised-absence help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard registrar-lifecycles title: registrar: Where records stand role: registrar reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, admission-application-lifecycle, class-section-lifecycle, class-session-lifecycle, enrollment-lifecycle, assessment-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard registrar-lifecycles-2 title: registrar: Where records stand (2) role: registrar reports: assessment-result-lifecycle, fee-invoice-lifecycle, consent-record-lifecycle, support-plan-lifecycle, communication-log-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard registrar-breakdowns title: registrar: Breakdowns role: registrar reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, guardian-by-preferred-contact-method, guardian-top-city, student-by-status, student-guardian-by-relationship help: How the records this role works with divide across their categories.
+    %%dashboard registrar-breakdowns-2 title: registrar: Breakdowns (2) role: registrar reports: admission-application-by-status, admission-application-by-admission-band, class-section-by-status, class-section-by-day-of-week, class-session-by-status, enrollment-by-status, enrollment-by-final-grade, attendance-record-by-status help: How the records this role works with divide across their categories.
+    %%dashboard registrar-breakdowns-3 title: registrar: Breakdowns (3) role: registrar reports: assessment-by-status, assessment-by-assessment-type, assessment-result-by-status, fee-invoice-by-status, fee-invoice-line-by-charge-type, consent-record-by-status, consent-record-by-consent-type, support-plan-by-status help: How the records this role works with divide across their categories.
+    %%dashboard registrar-breakdowns-4 title: registrar: Breakdowns (4) role: registrar reports: support-plan-by-plan-type, communication-log-by-status, communication-log-by-channel, communication-log-by-purpose help: How the records this role works with divide across their categories.
+    %%dashboard registrar-measures title: registrar: Amounts and totals role: registrar reports: room-capacity-per-month, room-largest-by-capacity, course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard registrar-measures-2 title: registrar: Amounts and totals (2) role: registrar reports: admission-application-year-group-applied-for-by-status, admission-application-year-group-applied-for-per-month, admission-application-largest-by-year-group-applied-for, admission-application-prior-attainment-score-by-status, admission-application-prior-attainment-score-per-month, admission-application-largest-by-prior-attainment-score, class-section-capacity-by-status, class-section-capacity-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard head-of-department-key-questions title: head of department: Key questions role: head_of_department reports: principal-roll-by-year, principal-attendance-by-year, registrar-section-fill, hod-results-by-course, hod-marking-turnaround, hod-teaching-load help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard head-of-department-lifecycles title: head of department: Where records stand role: head_of_department reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, class-section-lifecycle, class-session-lifecycle, enrollment-lifecycle, assessment-lifecycle, assessment-result-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard head-of-department-breakdowns title: head of department: Breakdowns role: head_of_department reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, student-by-status, class-section-by-status, class-section-by-day-of-week, class-session-by-status help: How the records this role works with divide across their categories.
+    %%dashboard head-of-department-breakdowns-2 title: head of department: Breakdowns (2) role: head_of_department reports: enrollment-by-status, enrollment-by-final-grade, attendance-record-by-status, assessment-by-status, assessment-by-assessment-type, assessment-result-by-status, support-plan-by-status, support-plan-by-plan-type help: How the records this role works with divide across their categories.
+    %%dashboard head-of-department-breakdowns-3 title: head of department: Breakdowns (3) role: head_of_department reports: concern-feedback-by-outcome, communication-log-by-status, communication-log-by-channel, communication-log-by-purpose help: How the records this role works with divide across their categories.
+    %%dashboard head-of-department-measures title: head of department: Amounts and totals role: head_of_department reports: room-capacity-per-month, room-largest-by-capacity, course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard head-of-department-measures-2 title: head of department: Amounts and totals (2) role: head_of_department reports: class-section-capacity-by-status, class-section-capacity-per-month, class-section-largest-by-capacity, class-section-enrolled-count-by-status, class-section-enrolled-count-per-month, class-section-largest-by-enrolled-count, class-section-period-by-status, class-section-period-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard head-of-department-measures-3 title: head of department: Amounts and totals (3) role: head_of_department reports: class-section-largest-by-period, attendance-record-minutes-late-by-status, attendance-record-minutes-late-per-month, assessment-result-score-by-status help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard head-of-department-concentrations title: head of department: Who the records belong to role: head_of_department reports: department-per-staff, class-section-per-course, class-section-capacity-per-course, class-session-per-class-section help: Which customers, owners or parents account for the most records and the most value.
+    %%dashboard head-of-department-volumes title: head of department: Volumes over time role: head_of_department reports: department-created-per-month, room-created-per-month, academic-term-created-per-month, concern-feedback-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+    %%dashboard teacher-key-questions title: teacher: Key questions role: teacher reports: principal-roll-by-year, principal-attendance-by-year, registrar-section-fill, hod-results-by-course, hod-marking-turnaround, hod-teaching-load help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard teacher-lifecycles title: teacher: Where records stand role: teacher reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, class-section-lifecycle, class-session-lifecycle, enrollment-lifecycle, assessment-lifecycle, assessment-result-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard teacher-breakdowns title: teacher: Breakdowns role: teacher reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, student-by-status, class-section-by-status, class-section-by-day-of-week, class-session-by-status help: How the records this role works with divide across their categories.
+    %%dashboard teacher-breakdowns-2 title: teacher: Breakdowns (2) role: teacher reports: enrollment-by-status, enrollment-by-final-grade, attendance-record-by-status, assessment-by-status, assessment-by-assessment-type, assessment-result-by-status, support-plan-by-status, support-plan-by-plan-type help: How the records this role works with divide across their categories.
+    %%dashboard teacher-breakdowns-3 title: teacher: Breakdowns (3) role: teacher reports: concern-feedback-by-outcome, communication-log-by-status, communication-log-by-channel, communication-log-by-purpose help: How the records this role works with divide across their categories.
+    %%dashboard teacher-measures title: teacher: Amounts and totals role: teacher reports: room-capacity-per-month, room-largest-by-capacity, course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard teacher-measures-2 title: teacher: Amounts and totals (2) role: teacher reports: class-section-capacity-by-status, class-section-capacity-per-month, class-section-largest-by-capacity, class-section-enrolled-count-by-status, class-section-enrolled-count-per-month, class-section-largest-by-enrolled-count, class-section-period-by-status, class-section-period-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard teacher-measures-3 title: teacher: Amounts and totals (3) role: teacher reports: class-section-largest-by-period, attendance-record-minutes-late-by-status, attendance-record-minutes-late-per-month, assessment-result-score-by-status help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard teacher-concentrations title: teacher: Who the records belong to role: teacher reports: department-per-staff, class-section-per-course, class-section-capacity-per-course, class-session-per-class-section help: Which customers, owners or parents account for the most records and the most value.
+    %%dashboard teacher-volumes title: teacher: Volumes over time role: teacher reports: department-created-per-month, room-created-per-month, academic-term-created-per-month, concern-feedback-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+    %%dashboard admissions-officer-lifecycles title: admissions officer: Where records stand role: admissions_officer reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, admission-application-lifecycle, class-section-lifecycle, communication-log-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard admissions-officer-breakdowns title: admissions officer: Breakdowns role: admissions_officer reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, guardian-by-preferred-contact-method, guardian-top-city, student-by-status, student-guardian-by-relationship help: How the records this role works with divide across their categories.
+    %%dashboard admissions-officer-breakdowns-2 title: admissions officer: Breakdowns (2) role: admissions_officer reports: admission-application-by-status, admission-application-by-admission-band, class-section-by-status, class-section-by-day-of-week, communication-log-by-status, communication-log-by-channel, communication-log-by-purpose help: How the records this role works with divide across their categories.
+    %%dashboard admissions-officer-measures title: admissions officer: Amounts and totals role: admissions_officer reports: course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group, admission-application-year-group-applied-for-by-status, admission-application-year-group-applied-for-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard admissions-officer-measures-2 title: admissions officer: Amounts and totals (2) role: admissions_officer reports: admission-application-largest-by-year-group-applied-for, admission-application-prior-attainment-score-by-status, admission-application-prior-attainment-score-per-month, admission-application-largest-by-prior-attainment-score, class-section-capacity-by-status, class-section-capacity-per-month, class-section-largest-by-capacity, class-section-enrolled-count-by-status help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard admissions-officer-measures-3 title: admissions officer: Amounts and totals (3) role: admissions_officer reports: class-section-enrolled-count-per-month, class-section-largest-by-enrolled-count, class-section-period-by-status, class-section-period-per-month, class-section-largest-by-period help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard admissions-officer-concentrations title: admissions officer: Who the records belong to role: admissions_officer reports: student-guardian-per-student, student-guardian-per-guardian, admission-application-per-guardian, admission-application-year-group-applied-for-per-guardian, admission-application-per-student, admission-application-year-group-applied-for-per-student, admission-application-per-academic-term, admission-application-year-group-applied-for-per-academic-term help: Which customers, owners or parents account for the most records and the most value.
+    %%dashboard admissions-officer-academicterm title: admissions officer: Academic Term at a glance role: admissions_officer reports: academic-term-by-status, academic-term-lifecycle, academic-term-created-per-month help: Everything the reports know about one kind of record, in one place.
+    %%dashboard admissions-officer-staff title: admissions officer: Staff at a glance role: admissions_officer reports: staff-by-status, staff-by-staff-type, staff-lifecycle help: Everything the reports know about one kind of record, in one place.
+    %%dashboard admissions-officer-course title: admissions officer: Course at a glance role: admissions_officer reports: course-by-level, course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours help: Everything the reports know about one kind of record, in one place.
+    %%dashboard finance-officer-key-questions title: finance officer: Key questions role: finance_officer reports: principal-roll-by-year, principal-attendance-by-year, principal-fee-collection-by-term, registrar-section-fill, finance-debt-ageing, finance-daily-takings help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard finance-officer-lifecycles title: finance officer: Where records stand role: finance_officer reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, class-section-lifecycle, enrollment-lifecycle, fee-invoice-lifecycle, communication-log-lifecycle, refund-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard finance-officer-breakdowns title: finance officer: Breakdowns role: finance_officer reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, guardian-by-preferred-contact-method, guardian-top-city, student-by-status, student-guardian-by-relationship help: How the records this role works with divide across their categories.
+    %%dashboard finance-officer-breakdowns-2 title: finance officer: Breakdowns (2) role: finance_officer reports: class-section-by-status, class-section-by-day-of-week, enrollment-by-status, enrollment-by-final-grade, fee-invoice-by-status, fee-invoice-line-by-charge-type, payment-by-method, communication-log-by-status help: How the records this role works with divide across their categories.
+    %%dashboard finance-officer-breakdowns-3 title: finance officer: Breakdowns (3) role: finance_officer reports: communication-log-by-channel, communication-log-by-purpose, refund-by-status, refund-by-invoice-status-after help: How the records this role works with divide across their categories.
+    %%dashboard finance-officer-measures title: finance officer: Amounts and totals role: finance_officer reports: course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group, class-section-capacity-by-status, class-section-capacity-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard finance-officer-measures-2 title: finance officer: Amounts and totals (2) role: finance_officer reports: class-section-largest-by-capacity, class-section-enrolled-count-by-status, class-section-enrolled-count-per-month, class-section-largest-by-enrolled-count, class-section-period-by-status, class-section-period-per-month, class-section-largest-by-period, fee-invoice-total-amount-by-status help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard finance-officer-measures-3 title: finance officer: Amounts and totals (3) role: finance_officer reports: fee-invoice-line-quantity-by-charge-type, fee-invoice-line-quantity-per-month, payment-amount-by-method, payment-amount-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard finance-officer-concentrations title: finance officer: Who the records belong to role: finance_officer reports: student-guardian-per-student, student-guardian-per-guardian, class-section-per-course, class-section-capacity-per-course help: Which customers, owners or parents account for the most records and the most value.
+    %%dashboard finance-officer-academicterm title: finance officer: Academic Term at a glance role: finance_officer reports: academic-term-by-status, academic-term-lifecycle, academic-term-created-per-month help: Everything the reports know about one kind of record, in one place.
+    %%dashboard counsellor-key-questions title: counsellor: Key questions role: counsellor reports: principal-roll-by-year, counsellor-repeat-incidents, counsellor-unauthorised-absence help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard counsellor-lifecycles title: counsellor: Where records stand role: counsellor reports: academic-term-lifecycle, staff-lifecycle, student-lifecycle, class-section-lifecycle, class-session-lifecycle, discipline-incident-lifecycle, consent-record-lifecycle, support-plan-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard counsellor-breakdowns title: counsellor: Breakdowns role: counsellor reports: academic-term-by-status, staff-by-status, staff-by-staff-type, course-by-level, guardian-by-preferred-contact-method, guardian-top-city, student-by-status, student-guardian-by-relationship help: How the records this role works with divide across their categories.
+    %%dashboard counsellor-breakdowns-2 title: counsellor: Breakdowns (2) role: counsellor reports: class-section-by-status, class-section-by-day-of-week, class-session-by-status, attendance-record-by-status, discipline-incident-by-status, discipline-incident-by-category, consent-record-by-status, consent-record-by-consent-type help: How the records this role works with divide across their categories.
+    %%dashboard counsellor-breakdowns-3 title: counsellor: Breakdowns (3) role: counsellor reports: support-plan-by-status, support-plan-by-plan-type, safeguarding-concern-by-status, safeguarding-concern-by-category, concern-feedback-by-outcome, communication-log-by-status, communication-log-by-channel, communication-log-by-purpose help: How the records this role works with divide across their categories.
+    %%dashboard counsellor-measures title: counsellor: Amounts and totals role: counsellor reports: course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group, class-section-capacity-by-status, class-section-capacity-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard counsellor-measures-2 title: counsellor: Amounts and totals (2) role: counsellor reports: class-section-largest-by-capacity, class-section-enrolled-count-by-status, class-section-enrolled-count-per-month, class-section-largest-by-enrolled-count, class-section-period-by-status, class-section-period-per-month, class-section-largest-by-period, attendance-record-minutes-late-by-status help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard counsellor-concentrations title: counsellor: Who the records belong to role: counsellor reports: student-guardian-per-student, student-guardian-per-guardian, class-section-per-course, class-section-capacity-per-course, class-session-per-class-section, concern-feedback-per-safeguarding-concern help: Which customers, owners or parents account for the most records and the most value.
+    %%dashboard counsellor-volumes title: counsellor: Volumes over time role: counsellor reports: academic-term-created-per-month, guardian-created-per-month, concern-feedback-created-per-month help: New records per month across everything this role can see: the workload the business handles.
+    %%dashboard counsellor-academicterm title: counsellor: Academic Term at a glance role: counsellor reports: academic-term-by-status, academic-term-lifecycle, academic-term-created-per-month help: Everything the reports know about one kind of record, in one place.
+    %%dashboard guardian-key-questions title: guardian: Key questions role: guardian reports: principal-roll-by-year, principal-attendance-by-year, principal-fee-collection-by-term, registrar-section-fill, hod-results-by-course, finance-debt-ageing help: The questions this role asks most often, written for it by the model's author.
+    %%dashboard guardian-lifecycles title: guardian: Where records stand role: guardian reports: academic-term-lifecycle, student-lifecycle, class-section-lifecycle, enrollment-lifecycle, assessment-lifecycle, assessment-result-lifecycle, fee-invoice-lifecycle, consent-record-lifecycle help: Every state machine this role can see, with the states nothing has reached shown as zero.
+    %%dashboard guardian-breakdowns title: guardian: Breakdowns role: guardian reports: academic-term-by-status, course-by-level, student-by-status, class-section-by-status, class-section-by-day-of-week, enrollment-by-status, enrollment-by-final-grade, attendance-record-by-status help: How the records this role works with divide across their categories.
+    %%dashboard guardian-breakdowns-2 title: guardian: Breakdowns (2) role: guardian reports: assessment-by-status, assessment-by-assessment-type, assessment-result-by-status, fee-invoice-by-status, fee-invoice-line-by-charge-type, payment-by-method, consent-record-by-status, consent-record-by-consent-type help: How the records this role works with divide across their categories.
+    %%dashboard guardian-breakdowns-3 title: guardian: Breakdowns (3) role: guardian reports: communication-log-by-status, communication-log-by-channel, communication-log-by-purpose, refund-by-status, refund-by-invoice-status-after help: How the records this role works with divide across their categories.
+    %%dashboard guardian-measures title: guardian: Amounts and totals role: guardian reports: course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours, student-year-group-by-status, student-year-group-per-month, student-largest-by-year-group, class-section-capacity-by-status, class-section-capacity-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard guardian-measures-2 title: guardian: Amounts and totals (2) role: guardian reports: class-section-largest-by-capacity, class-section-enrolled-count-by-status, class-section-enrolled-count-per-month, class-section-largest-by-enrolled-count, class-section-period-by-status, class-section-period-per-month, class-section-largest-by-period, attendance-record-minutes-late-by-status help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard guardian-measures-3 title: guardian: Amounts and totals (3) role: guardian reports: attendance-record-minutes-late-per-month, assessment-result-score-by-status, fee-invoice-total-amount-by-status, fee-invoice-line-quantity-by-charge-type, fee-invoice-line-quantity-per-month, payment-amount-by-method, payment-amount-per-month help: The quantities the business adds up, and the largest few records behind them.
+    %%dashboard guardian-academicterm title: guardian: Academic Term at a glance role: guardian reports: academic-term-by-status, academic-term-lifecycle, academic-term-created-per-month help: Everything the reports know about one kind of record, in one place.
+    %%dashboard guardian-course title: guardian: Course at a glance role: guardian reports: course-by-level, course-credit-hours-by-level, course-credit-hours-per-month, course-largest-by-credit-hours help: Everything the reports know about one kind of record, in one place.
+
+%% ---- Business rules — consent control -------------------------------------
+%%meta name: Consent Control
+%%meta kind: rules
+%%rule consentControl on ConsentRecord event: beforeUpdate priority: 10
+flowchart TD
+    A([Consent updated]) --> B{Withdrawn?}
+    B -->|Yes| C{Withdrawal time recorded?}
+    C -->|No| R[Refuse]
+    C -->|Yes| P[Accept]
+    B -->|No| P
+    R --> E([End])
+    P --> E
+
+    %%action requireConsentWithdrawalTime validation-error when: status == "withdrawn" and withdrawn_at == null message: Withdrawing consent requires the time authority ended so later activity cannot be mistaken for authorised activity.
+
+%% ---- Business rules — support-plan control --------------------------------
+%%meta name: Support Plan Control
+%%meta kind: rules
+%%rule supportPlanControl on SupportPlan event: beforeUpdate priority: 10
+flowchart TD
+    A([Plan updated]) --> B{Closing?}
+    B -->|Yes| C{Closure date recorded?}
+    C -->|No| R[Refuse]
+    C -->|Yes| P[Accept]
+    B -->|No| P
+    R --> E([End])
+    P --> E
+
+    %%action requireSupportPlanClosureDate validation-error when: status == "closed" and closed_on == null message: A closed support plan needs the date its adjustments stopped applying.
+    %%action requireSupportPlanClosureDateOnMove validation-error when: closed_at != null and closed_on == null message: A closed support plan needs the date its adjustments stopped applying.
+
+%% ---- Business rules — safeguarding control --------------------------------
+%%meta name: Safeguarding Control
+%%meta kind: rules
+%%rule safeguardingControl on SafeguardingConcern event: beforeUpdate priority: 10
+flowchart TD
+    A([Concern updated]) --> B{Closing?}
+    B -->|Yes| C{Date and reason recorded?}
+    C -->|No| R[Refuse]
+    C -->|Yes| P[Accept]
+    B -->|No| P
+    R --> E([End])
+    P --> E
+
+    %%action requireConcernClosureDate validation-error when: status == "closed" and closed_on == null message: A safeguarding concern cannot close without the date continuing responsibility ended.
+    %%action requireConcernClosureDateOnMove validation-error when: closed_at != null and closed_on == null message: A safeguarding concern cannot close without the date continuing responsibility ended.
+    %%action requireConcernClosureReason validation-error when: status == "closed" and closure_reason == null message: A safeguarding concern cannot close without explaining the action taken and where any continuing responsibility sits.
+    %%action requireConcernClosureReasonOnMove validation-error when: closed_at != null and closure_reason == null message: A safeguarding concern cannot close without explaining the action taken and where any continuing responsibility sits.
+
+%% ---- Business rules — communication delivery ------------------------------
+%%meta name: Communication Delivery Control
+%%meta kind: rules
+%%rule communicationDeliveryControl on CommunicationLog event: beforeUpdate priority: 10
+flowchart TD
+    A([Communication updated]) --> B{Failed?}
+    B -->|Yes| C{Failure reason recorded?}
+    C -->|No| R[Refuse]
+    C -->|Yes| P[Accept]
+    B -->|No| P
+    R --> E([End])
+    P --> E
+
+    %%action requireCommunicationFailureReason validation-error when: status == "failed" and failure_reason == null message: A failed communication needs a reason so staff can correct the address or choose another channel.
+    %%action requireCommunicationFailureReasonOnMove validation-error when: failed_at != null and failure_reason == null message: A failed communication needs a reason so staff can correct the address or choose another channel.
+
+%% ---- Business rules — refund approval -------------------------------------
+%%meta name: Refund Control
+%%meta kind: rules
+%%rule refundControl on Refund event: beforeUpdate priority: 10
+flowchart TD
+    A([Refund updated]) --> B{Approved or rejected?}
+    B -->|Yes| C{Decision evidence present?}
+    C -->|No| R1[Refuse]
+    C -->|Yes| D{Marked paid?}
+    B -->|No| D
+    D -->|Yes| F{Payment time recorded?}
+    F -->|No| R2[Refuse]
+    F -->|Yes| G{Approver is the requester?}
+    G -->|Yes| R3[Refuse: separation of duties]
+    G -->|No| H{Reaches the invoice?}
+    H -->|Part paid| T1[Return the invoice to part paid]
+    H -->|Issued| T2[Return the invoice to issued]
+    H -->|No| P[Accept]
+    D -->|No| G
+    R1 --> E([End])
+    R2 --> E
+    R3 --> E
+    T1 --> E
+    T2 --> E
+    P --> E
+
+    %%action refuseNonPositiveRefund validation-error when: amount <= 0 message: A refund must be a positive amount linked to the immutable payment it reverses.
+    %%action requireRefundDecisionTime validation-error when: status == "approved" and decided_at == null message: An approved refund needs the decision time for reconciliation and service reporting.
+    %%action requireRefundDecisionTimeOnMove validation-error when: approved_at != null and decided_at == null message: An approved refund needs the decision time for reconciliation and service reporting.
+    %%action requireRefundApproval validation-error when: status == "approved" and approved_by_id == null message: An approved refund needs the staff member who authorised the return of funds.
+    %%action requireRefundApprovalOnMove validation-error when: approved_at != null and approved_by_id == null message: An approved refund needs the staff member who authorised the return of funds.
+    %%action requireRefundRejectionNotes validation-error when: status == "rejected" and decision_notes == null message: A rejected refund needs the reason finance will explain to the family.
+    %%action requireRefundRejectionNotesOnMove validation-error when: rejected_at != null and decision_notes == null message: A rejected refund needs the reason finance will explain to the family.
+    %%action requireRefundPaidTime validation-error when: status == "paid" and paid_at == null message: A refund is paid only when the money actually left the school.
+    %%action refuseSelfApprovedRefund validation-error when: approved_by_id != null and approved_by_id == requested_by_id message: The person who approves a refund cannot be the person who requested it. A second member of staff must authorise the return of funds.
+    %%action returnInvoiceToPartPaid trigger-workflow when: status == "paid" and applied_to_invoice_at == null and invoice_status_after == "part_paid" workflow: RefundReopensInvoice
+    %%action returnInvoiceToIssued trigger-workflow when: status == "paid" and applied_to_invoice_at == null and invoice_status_after == "issued" workflow: RefundReissuesInvoice
+
 %% ---- Business rules — admission assessment (decides only, cannot act) -------
 %% This section carries a node graph and no %%action directives, deliberately.
 %% It is the judgement an admissions officer exercises today, written down so it
@@ -722,6 +1335,7 @@ flowchart TD
     %%action bandStandard transform when: has_sibling_enrolled == false and prior_attainment_score < 70 field: admission_band value: standard
     %%action bandForReview transform when: prior_attainment_score == null field: admission_band value: review
     %%action requireDecisionNotesOnRejection validation-error when: status == "rejected" and decision_notes == null message: A rejected application needs a note — it is what the appeal is answered from.
+    %%action requireDecisionNotesOnRejectionOnMove validation-error when: rejected_at != null and decision_notes == null message: A rejected application needs a note — it is what the appeal is answered from.
     %%action enrolOnAcceptance trigger-workflow when: status == "accepted" workflow: AdmissionToEnrolment
 
 %% ---- Business rules — the student record ----------------------------------
@@ -738,7 +1352,9 @@ flowchart TD
     P --> E
 
     %%action requireWithdrawalReason validation-error when: status == "withdrawn" and withdrawal_reason == null message: A withdrawal needs a reason — the retention report is built from it.
+    %%action requireWithdrawalReasonOnMove validation-error when: withdrawn_at != null and withdrawal_reason == null message: A withdrawal needs a reason — the retention report is built from it.
     %%action requireWithdrawalDate validation-error when: status == "withdrawn" and withdrawn_on == null message: A withdrawal needs the date the student left.
+    %%action requireWithdrawalDateOnMove validation-error when: withdrawn_at != null and withdrawn_on == null message: A withdrawal needs the date the student left.
 
 %% ---- Business rules — enrolment -------------------------------------------
 %%meta name: Enrolment Control
@@ -759,6 +1375,7 @@ flowchart TD
     %%action requireEnrolmentWithdrawalReason validation-error when: status == "withdrawn" and withdrawal_reason == null message: A student leaving a group needs a reason — the subject-change reports are built from it.
     %%action refuseGradeBeforeCompletion validation-error when: status == "pending" and final_grade != null message: A final grade cannot be recorded on an enrolment that has not been placed yet.
     %%action requireGradeOnCompletion validation-error when: status == "completed" and final_grade == null message: A completed enrolment needs a final grade.
+    %%action requireGradeOnCompletionOnMove validation-error when: completed_at != null and final_grade == null message: A completed enrolment needs a final grade.
 
 %% ---- Business rules — the register ----------------------------------------
 %%meta name: Attendance Marking
@@ -800,6 +1417,7 @@ flowchart TD
     %%action refuseScoreAboveMaximum validation-error when: score > max_score message: A score cannot exceed the paper's maximum as it stood when the result was created.
     %%action refuseNegativeScore validation-error when: score < 0 message: A score cannot be negative. A missing piece of work is the missing status, not a negative mark.
     %%action requireScoreWhenMarked validation-error when: status == "marked" and score == null message: A marked result needs a score. A blank is not a zero and the reports keep the two apart.
+    %%action requireScoreWhenMarkedOnMove validation-error when: marked_at != null and score == null message: A marked result needs a score. A blank is not a zero and the reports keep the two apart.
 
 %% ---- Business rules — invoicing -------------------------------------------
 %%meta name: Invoice Control
@@ -820,6 +1438,7 @@ flowchart TD
     P --> E
 
     %%action requireInvoiceCancellationReason validation-error when: status == "cancelled" and cancellation_reason == null message: A cancelled invoice is money the school chose not to collect — every one of them needs a reason.
+    %%action requireInvoiceCancellationReasonOnMove validation-error when: cancelled_at != null and cancellation_reason == null message: A cancelled invoice is money the school chose not to collect — every one of them needs a reason.
     %%action requireIssueDate validation-error when: status == "issued" and issued_on == null message: An issued invoice needs its issue date — the due date and every reminder are measured from it.
 
 %% ---- Business rules — taking money ----------------------------------------
@@ -856,6 +1475,7 @@ flowchart TD
     P --> E
 
     %%action requireSectionCancellationReason validation-error when: status == "cancelled" and cancellation_reason == null message: Families are told why a group was pulled, so the reason is written for them and it is required.
+    %%action requireSectionCancellationReasonOnMove validation-error when: cancelled_at != null and cancellation_reason == null message: Families are told why a group was pulled, so the reason is written for them and it is required.
     %%action withdrawEnrolmentsOnCancellation trigger-workflow when: status == "cancelled" workflow: SectionCancellation
 
 %% ---- Business rules — conduct ---------------------------------------------
@@ -877,8 +1497,10 @@ flowchart TD
     P --> E
 
     %%action requireSanction validation-error when: status == "action_taken" and sanction == null message: An incident cannot move to action taken with no sanction recorded — including a sanction of none, which is itself a decision.
+    %%action requireSanctionOnMove validation-error when: action_taken_at != null and sanction == null message: An incident cannot move to action taken with no sanction recorded — including a sanction of none, which is itself a decision.
     %%action requireSanctionNotes validation-error when: sanction == "suspension" and sanction_notes == null message: A suspension needs its detail — how long, from when, and who agreed it. The appeal is answered from this field.
     %%action requireClosureDate validation-error when: status == "closed" and closed_on == null message: A closed incident needs the date it was closed; the ageing on the open list is measured from it.
+    %%action requireClosureDateOnMove validation-error when: closed_at != null and closed_on == null message: A closed incident needs the date it was closed; the ageing on the open list is measured from it.
     %%action suspendOnSuspension trigger-workflow when: sanction == "suspension" workflow: SuspensionEscalation
 
 %% ---- Workflow — the student lifecycle -------------------------------------
@@ -1003,7 +1625,9 @@ stateDiagram-v2
     part_paid --> overdue   : mark_overdue
     overdue   --> part_paid : record_part_payment
     overdue   --> paid      : settle
-    paid      --> [*]
+    paid      --> part_paid : reopen_after_refund
+    paid      --> issued    : reissue_after_refund
+    part_paid --> issued    : reissue_after_refund
     cancelled --> [*]
 
 %% ---- Workflow — the conduct lifecycle -------------------------------------
@@ -1042,6 +1666,74 @@ stateDiagram-v2
     on_leave --> left     : leave_school
     left --> [*]
 
+%% ---- Workflow — consent lifecycle ----------------------------------------
+%%meta name: Consent Lifecycle
+%%meta kind: workflow
+%%workflow ConsentLifecycle entity: ConsentRecord kind: state
+stateDiagram-v2
+    [*] --> draft
+    draft  --> active    : activate
+    active --> withdrawn : withdraw
+    active --> expired   : expire
+    withdrawn --> [*]
+    expired   --> [*]
+
+%% ---- Workflow — support-plan lifecycle -----------------------------------
+%%meta name: Support Plan Lifecycle
+%%meta kind: workflow
+%%workflow SupportPlanLifecycle entity: SupportPlan kind: state
+stateDiagram-v2
+    [*] --> draft
+    draft        --> active       : activate
+    active       --> under_review : begin_review
+    under_review --> active       : renew
+    active       --> closed       : close
+    under_review --> closed       : close
+    closed --> [*]
+
+%% ---- Workflow — safeguarding lifecycle -----------------------------------
+%%meta name: Safeguarding Concern Lifecycle
+%%meta kind: workflow
+%%workflow SafeguardingConcernLifecycle entity: SafeguardingConcern kind: state
+stateDiagram-v2
+    [*] --> reported
+    reported      --> triaged       : triage
+    triaged       --> investigating : begin_investigation
+    triaged       --> referred      : refer
+    investigating --> referred      : refer
+    investigating --> closed        : close
+    referred      --> closed        : close
+    closed --> [*]
+
+%% ---- Workflow — communication lifecycle ----------------------------------
+%%meta name: Communication Lifecycle
+%%meta kind: workflow
+%%workflow CommunicationLifecycle entity: CommunicationLog kind: state
+stateDiagram-v2
+    [*] --> queued
+    queued --> sent      : send
+    queued --> failed    : fail
+    sent   --> delivered : confirm_delivery
+    sent   --> failed    : fail
+    delivered --> [*]
+    failed    --> [*]
+
+%% ---- Workflow — refund lifecycle -----------------------------------------
+%%meta name: Refund Lifecycle
+%%meta kind: workflow
+%%workflow RefundLifecycle entity: Refund kind: state
+stateDiagram-v2
+    [*] --> requested
+    requested    --> under_review : begin_review
+    requested    --> cancelled    : cancel
+    under_review --> approved     : approve
+    under_review --> rejected     : reject
+    under_review --> cancelled    : cancel
+    approved     --> paid         : pay
+    paid      --> [*]
+    rejected  --> [*]
+    cancelled --> [*]
+
 %% ---- Workflow — admission to enrolment (saga) -----------------------------
 %%meta name: Admission To Enrolment
 %%meta kind: workflow
@@ -1064,7 +1756,7 @@ flowchart TD
     A([Payment covers the balance]) --> B[Mark the invoice paid]
     B --> C([Settled])
 
-    %%step B UpdateEntity entity: FeeInvoice targetField: fee_invoice_id field: status value: paid
+    %%step B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: paid
 
 %% ---- Workflow — posting a part payment (saga) -----------------------------
 %%meta name: Part Payment Posting
@@ -1074,7 +1766,26 @@ flowchart TD
     A([Payment is less than the balance]) --> B[Mark the invoice part paid]
     B --> C([Posted])
 
-    %%step B UpdateEntity entity: FeeInvoice targetField: fee_invoice_id field: status value: part_paid
+    %%step B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: part_paid
+
+%% ---- Workflow — a paid refund reopens its invoice (sagas) ------------------
+%%meta name: Refund Reopens Invoice
+%%meta kind: workflow
+%%workflow RefundReopensInvoice entity: Refund kind: saga trigger: rule
+flowchart TD
+    A([Refund paid, money still held against the invoice]) --> B[Mark the invoice part paid]
+    B --> C([Reopened])
+
+    %%step B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: part_paid
+
+%%meta name: Refund Reissues Invoice
+%%meta kind: workflow
+%%workflow RefundReissuesInvoice entity: Refund kind: saga trigger: rule
+flowchart TD
+    A([Refund paid, nothing left paid against the invoice]) --> B[Mark the invoice issued]
+    B --> C([Reissued])
+
+    %%step B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: issued
 
 %% ---- Workflow — cancelling a section (saga) -------------------------------
 %%meta name: Section Cancellation
@@ -1094,7 +1805,7 @@ flowchart TD
     A([Suspension decided]) --> B[Suspend the student]
     B --> C([Suspended])
 
-    %%step B UpdateEntity entity: Student targetField: student_id field: status value: suspended
+    %%step B UpdateEntity entity: Student targetSource: student_id field: status value: suspended
 
 %% ---- Workflow — lifecycle hooks -------------------------------------------
 %%meta name: Enrolment Hooks
@@ -1153,6 +1864,47 @@ flowchart TD
     %%hook beforeCreate resolveInvoiceBalance on Payment
     %%hook afterCreate applyPaymentToInvoice on Payment
 
+%% ---- Workflow — refund hooks -----------------------------------------------
+%%meta name: Refund Hooks
+%%meta kind: workflow
+%%workflow RefundHooks entity: Refund kind: hook
+flowchart TD
+    A[Refund edited] --> B[beforeUpdate: resolveRefundInvoiceEffect]
+    B --> C[Store the refund]
+    C --> D[afterUpdate: applyRefundToInvoice]
+    D --> E[Response]
+
+    %%hook beforeUpdate resolveRefundInvoiceEffect on Refund
+    %%hook afterUpdate applyRefundToInvoice on Refund
+
+%% ---- Workflow — support plan hooks -----------------------------------------
+%%meta name: Support Plan Hooks
+%%meta kind: workflow
+%%workflow SupportPlanHooks entity: SupportPlan kind: hook
+flowchart TD
+    A[Plan written] --> B[Store the plan]
+    B --> C[afterCreate: syncStudentSupportFlagOnCreate]
+    C --> D[afterUpdate: syncStudentSupportFlagOnUpdate]
+    D --> E[afterDelete: syncStudentSupportFlagOnDelete]
+    E --> F[Response]
+
+    %%hook afterCreate syncStudentSupportFlagOnCreate on SupportPlan
+    %%hook afterUpdate syncStudentSupportFlagOnUpdate on SupportPlan
+    %%hook afterDelete syncStudentSupportFlagOnDelete on SupportPlan
+
+%% ---- Workflow — safeguarding feedback hooks --------------------------------
+%%meta name: Safeguarding Feedback Hooks
+%%meta kind: workflow
+%%workflow SafeguardingFeedbackHooks entity: SafeguardingConcern kind: hook
+flowchart TD
+    A[Concern written] --> B[Store the concern]
+    B --> C[afterCreate: acknowledgeConcernToReporter]
+    C --> D[afterUpdate: reportOutcomeToReporter]
+    D --> E[Response]
+
+    %%hook afterCreate acknowledgeConcernToReporter on SafeguardingConcern
+    %%hook afterUpdate reportOutcomeToReporter on SafeguardingConcern
+
 %% ---- Workflow — invoice line hooks -----------------------------------------
 %%meta name: Invoice Line Hooks
 %%meta kind: workflow
@@ -1185,3 +1937,89 @@ flowchart TD
     %%hook beforeCreate assignApplicationReference on AdmissionApplication
     %%hook beforeCreate assignIncidentReference on DisciplineIncident
     %%hook beforeCreate deriveSessionEndTime on ClassSession
+
+%% ---- When each status was reached: stamped by the application ----
+%% A record moves by an action button, along an edge its state diagram draws,
+%% and the application writes the <state>_at time when it does.
+%%field Student.on_leave_at help: When this student moved to on leave. Stamped by the application when the move is made; nobody types it.
+%%field Student.enrolled_at help: When this student moved to enrolled. Stamped by the application when the move is made; nobody types it.
+%%field Student.graduated_at help: When this student moved to graduated. Stamped by the application when the move is made; nobody types it.
+%%field Student.withdrawn_at help: When this student moved to withdrawn. Stamped by the application when the move is made; nobody types it.
+%%section entity: Student; name: Progress; help: When this student reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: on_leave_at, enrolled_at | graduated_at, withdrawn_at
+
+%%field AdmissionApplication.under_review_at help: When this admission application moved to under review. Stamped by the application when the move is made; nobody types it.
+%%field AdmissionApplication.offer_made_at help: When this admission application moved to offer made. Stamped by the application when the move is made; nobody types it.
+%%field AdmissionApplication.rejected_at help: When this admission application moved to rejected. Stamped by the application when the move is made; nobody types it.
+%%field AdmissionApplication.accepted_at help: When this admission application moved to accepted. Stamped by the application when the move is made; nobody types it.
+%%field AdmissionApplication.declined_at help: When this admission application moved to declined. Stamped by the application when the move is made; nobody types it.
+%%field AdmissionApplication.withdrawn_at help: When this admission application moved to withdrawn. Stamped by the application when the move is made; nobody types it.
+%%section entity: AdmissionApplication; name: Progress; help: When this admission application reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: under_review_at, offer_made_at | rejected_at, accepted_at | declined_at, withdrawn_at
+
+%%field ClassSection.open_at help: When this class section moved to open. Stamped by the application when the move is made; nobody types it.
+%%field ClassSection.in_progress_at help: When this class section moved to in progress. Stamped by the application when the move is made; nobody types it.
+%%field ClassSection.completed_at help: When this class section moved to completed. Stamped by the application when the move is made; nobody types it.
+%%field ClassSection.cancelled_at help: When this class section moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%section entity: ClassSection; name: Progress; help: When this class section reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: open_at, in_progress_at | completed_at, cancelled_at
+
+%%field ClassSession.held_at help: When this class session moved to held. Stamped by the application when the move is made; nobody types it.
+%%field ClassSession.cancelled_at help: When this class session moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%section entity: ClassSession; name: Progress; help: When this class session reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: held_at, cancelled_at
+
+%%field Enrollment.enrolled_at help: When this enrollment moved to enrolled. Stamped by the application when the move is made; nobody types it.
+%%field Enrollment.completed_at help: When this enrollment moved to completed. Stamped by the application when the move is made; nobody types it.
+%%field Enrollment.failed_at help: When this enrollment moved to failed. Stamped by the application when the move is made; nobody types it.
+%%section entity: Enrollment; name: Progress; help: When this enrollment reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: enrolled_at, completed_at | failed_at
+
+%%field Assessment.published_at help: When this assessment moved to published. Stamped by the application when the move is made; nobody types it.
+%%field Assessment.marking_at help: When this assessment moved to marking. Stamped by the application when the move is made; nobody types it.
+%%field Assessment.marked_at help: When this assessment moved to marked. Stamped by the application when the move is made; nobody types it.
+%%field Assessment.cancelled_at help: When this assessment moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%section entity: Assessment; name: Progress; help: When this assessment reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: published_at, marking_at | marked_at, cancelled_at
+
+%%field AssessmentResult.submitted_at help: When this assessment result moved to submitted. Stamped by the application when the move is made; nobody types it.
+%%field AssessmentResult.missing_at help: When this assessment result moved to missing. Stamped by the application when the move is made; nobody types it.
+%%field AssessmentResult.excused_at help: When this assessment result moved to excused. Stamped by the application when the move is made; nobody types it.
+%%section entity: AssessmentResult; name: Progress; help: When this assessment result reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: submitted_at, missing_at | excused_at
+
+%%field FeeInvoice.cancelled_at help: When this fee invoice moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%field FeeInvoice.overdue_at help: When this fee invoice moved to overdue. Stamped by the application when the move is made; nobody types it.
+%%section entity: FeeInvoice; name: Progress; help: When this fee invoice reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: cancelled_at, overdue_at
+
+%%field DisciplineIncident.under_review_at help: When this discipline incident moved to under review. Stamped by the application when the move is made; nobody types it.
+%%field DisciplineIncident.dismissed_at help: When this discipline incident moved to dismissed. Stamped by the application when the move is made; nobody types it.
+%%field DisciplineIncident.action_taken_at help: When this discipline incident moved to action taken. Stamped by the application when the move is made; nobody types it.
+%%field DisciplineIncident.closed_at help: When this discipline incident moved to closed. Stamped by the application when the move is made; nobody types it.
+%%section entity: DisciplineIncident; name: Progress; help: When this discipline incident reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: under_review_at, dismissed_at | action_taken_at, closed_at
+
+%%field AcademicTerm.current_at help: When this academic term moved to current. Stamped by the application when the move is made; nobody types it.
+%%field AcademicTerm.closed_at help: When this academic term moved to closed. Stamped by the application when the move is made; nobody types it.
+%%section entity: AcademicTerm; name: Progress; help: When this academic term reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: current_at, closed_at
+
+%%field Staff.on_leave_at help: When this staff moved to on leave. Stamped by the application when the move is made; nobody types it.
+%%field Staff.active_at help: When this staff moved to active. Stamped by the application when the move is made; nobody types it.
+%%field Staff.left_at help: When this staff moved to left. Stamped by the application when the move is made; nobody types it.
+%%section entity: Staff; name: Progress; help: When this staff reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: on_leave_at, active_at | left_at
+
+%%field ConsentRecord.active_at help: When this consent record moved to active. Stamped by the application when the move is made; nobody types it.
+%%field ConsentRecord.expired_at help: When this consent record moved to expired. Stamped by the application when the move is made; nobody types it.
+%%section entity: ConsentRecord; name: Progress; help: When this consent record reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: active_at, expired_at
+
+%%field SupportPlan.active_at help: When this support plan moved to active. Stamped by the application when the move is made; nobody types it.
+%%field SupportPlan.under_review_at help: When this support plan moved to under review. Stamped by the application when the move is made; nobody types it.
+%%field SupportPlan.closed_at help: When this support plan moved to closed. Stamped by the application when the move is made; nobody types it.
+%%section entity: SupportPlan; name: Progress; help: When this support plan reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: active_at, under_review_at | closed_at
+
+%%field SafeguardingConcern.triaged_at help: When this safeguarding concern moved to triaged. Stamped by the application when the move is made; nobody types it.
+%%field SafeguardingConcern.investigating_at help: When this safeguarding concern moved to investigating. Stamped by the application when the move is made; nobody types it.
+%%field SafeguardingConcern.referred_at help: When this safeguarding concern moved to referred. Stamped by the application when the move is made; nobody types it.
+%%field SafeguardingConcern.closed_at help: When this safeguarding concern moved to closed. Stamped by the application when the move is made; nobody types it.
+%%section entity: SafeguardingConcern; name: Progress; help: When this safeguarding concern reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: triaged_at, investigating_at | referred_at, closed_at
+
+%%field CommunicationLog.failed_at help: When this communication log moved to failed. Stamped by the application when the move is made; nobody types it.
+%%section entity: CommunicationLog; name: Progress; help: When this communication log reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: failed_at
+
+%%field Refund.under_review_at help: When this refund moved to under review. Stamped by the application when the move is made; nobody types it.
+%%field Refund.cancelled_at help: When this refund moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%field Refund.approved_at help: When this refund moved to approved. Stamped by the application when the move is made; nobody types it.
+%%field Refund.rejected_at help: When this refund moved to rejected. Stamped by the application when the move is made; nobody types it.
+%%section entity: Refund; name: Progress; help: When this refund reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: under_review_at, cancelled_at | approved_at, rejected_at

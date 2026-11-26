@@ -16,6 +16,20 @@ import { sql } from 'kysely';
 import { randomUUID } from 'crypto';
 import { DatabaseService } from '../../database/database.service';
 import { BusService } from '../bus/bus.service';
+import { parseLogic } from '../../common/field-logic';
+import { createCache } from '../../common/ttl-cache';
+
+/**
+ * The database table behind a sys_table row. The model's tables are recorded
+ * with their prefix (`bus_contract`) and a table created here without one, so
+ * prefixing unconditionally sent every column change on a generated table to
+ * `bus_bus_contract`, which does not exist: changing a column's length,
+ * mandatory flag or default in Table and Column failed with a 409.
+ */
+function physicalTableName(tableName: unknown): string {
+  const name = String(tableName);
+  return name.startsWith('bus_') ? name : `bus_${name}`;
+}
 import type { Kysely } from 'kysely';
 
 interface PaginationOptions {
@@ -24,15 +38,11 @@ interface PaginationOptions {
   prefix?: string;
 }
 
-interface CacheEntry<T> {
-  data: T;
-  expiry: number;
-}
-
 @Injectable()
 export class SysService {
-  private fieldCache = new Map<string, CacheEntry<unknown>>();
-  private readonly CACHE_TTL_MS = 5 * 60 * 1000;
+  // The dictionary's field lists, each for CACHE_TTL_DICTIONARY_FIELDS_MS
+  // (common/ttl-cache.ts), dropped at once by a dictionary edit made here.
+  private readonly fieldCache = createCache<string, unknown>('dictionaryFields');
 
   constructor(
     private readonly db: DatabaseService,
@@ -41,9 +51,9 @@ export class SysService {
 
   private async getCached<T>(key: string, factory: () => Promise<T>): Promise<T> {
     const cached = this.fieldCache.get(key);
-    if (cached && cached.expiry > Date.now()) return cached.data as T;
+    if (cached !== undefined) return cached as T;
     const data = await factory();
-    this.fieldCache.set(key, { data, expiry: Date.now() + this.CACHE_TTL_MS });
+    this.fieldCache.set(key, data);
     return data;
   }
 
@@ -223,7 +233,7 @@ export class SysService {
 
   async createTable(data: Record<string, unknown>) {
     const now = new Date().toISOString();
-    const dbTableName = `bus_${data.table_name}`;
+    const dbTableName = physicalTableName(data.table_name);
 
     const table = await this.db.kysely.transaction().execute(async (trx) => {
       const [inserted] = await trx.insertInto('sys_table')
@@ -292,7 +302,7 @@ export class SysService {
     const tableId = (data.sys_table_id ?? data.tableId) as string;
     if (!tableId) throw new NotFoundException('sys_table_id is required');
     const parentTable = await this.findTableById(tableId);
-    const dbTableName = `bus_${parentTable.table_name}`;
+    const dbTableName = physicalTableName(parentTable.table_name);
     const columnName = data.column_name as string;
     const sqlType = this.mapRefToSqlType(data.sys_reference_id as number, data.field_length as number | undefined);
 
@@ -515,7 +525,7 @@ export class SysService {
       .set({ is_active: false, updated_at: now, updated_by: 'system' } as any)
       .where('sys_table_id', '=', id).execute();
 
-    const dbTableName = `bus_${table.table_name}`;
+    const dbTableName = physicalTableName(table.table_name);
     await sql`DROP TABLE IF EXISTS ${sql.id(dbTableName)}`.execute(this.db.kysely);
 
     this.invalidateFieldCache();
@@ -551,6 +561,7 @@ export class SysService {
   }
 
   async updateColumn(id: string, data: Record<string, unknown>) {
+    data = this.normalizeLogic(data);
     const existing = await this.findColumnById(id);
     if ('column_name' in data && data.column_name !== existing.column_name) {
       throw new ConflictException('The database column name cannot be changed after creation');
@@ -562,7 +573,7 @@ export class SysService {
     }
 
     const parentTable = await this.findTableById(existing.sys_table_id as string);
-    const dbTableName = `bus_${parentTable.table_name}`;
+    const dbTableName = physicalTableName(parentTable.table_name);
     const columnName = existing.column_name as string;
 
     await this.db.kysely.transaction().execute(async (trx) => {
@@ -616,7 +627,7 @@ export class SysService {
   async deleteColumn(id: string) {
     const column = await this.findColumnById(id);
     const parentTable = await this.findTableById(column.sys_table_id as string);
-    const dbTableName = `bus_${parentTable.table_name}`;
+    const dbTableName = physicalTableName(parentTable.table_name);
     const now = new Date().toISOString();
 
     await (this.db.kysely.updateTable('sys_field' as any)
@@ -668,17 +679,13 @@ export class SysService {
       .selectFrom('sys_field')
       .innerJoin('sys_column', 'sys_column.sys_column_id', 'sys_field.sys_column_id')
       .innerJoin('sys_table', 'sys_table.sys_table_id', 'sys_column.sys_table_id')
+      // Every sys_field column, not a selection of them. The Windows, Tabs &
+      // Fields detail page opens a field from this list, so a column left out
+      // here showed as "—" on the record and was saved back as nothing: Same
+      // Line, Heading, Field Only, Encrypted, Sort Number, Obscure Type, the
+      // field group and all three logic expressions.
+      .selectAll('sys_field')
       .select([
-        'sys_field.sys_field_id',
-        'sys_field.sys_tab_id',
-        'sys_field.sys_column_id',
-        'sys_field.name',
-        'sys_field.seq_no',
-        'sys_field.seq_no_grid',
-        'sys_field.is_displayed',
-        'sys_field.is_displayed_grid',
-        'sys_field.is_read_only',
-        'sys_field.is_active',
         'sys_column.column_name',
         'sys_column.name as column_display_name',
         'sys_table.table_name',
@@ -709,8 +716,31 @@ export class SysService {
     return field;
   }
 
+  /**
+   * Display, Read Only and Mandatory Logic — Compiere's `@column@=value`
+   * conditions (common/field-logic.ts). Checked on the way in, as the checker
+   * checks the model's (EML156): a condition that does not parse would hide or
+   * lock nothing and say nothing, so it is refused with the reason instead of
+   * stored. An empty value clears the logic.
+   */
+  private normalizeLogic(data: Record<string, unknown>): Record<string, unknown> {
+    const errors: string[] = [];
+    const out = { ...data };
+    for (const key of ['display_logic', 'read_only_logic', 'mandatory_logic']) {
+      if (!(key in out)) continue;
+      const text = out[key] == null ? '' : String(out[key]).trim();
+      out[key] = text || null;
+      if (!text) continue;
+      const parsed = parseLogic(text);
+      if (!parsed.ok) errors.push(`${key}: ${parsed.error}`);
+    }
+    if (errors.length > 0) throw new BadRequestException({ message: 'Validation failed', errors });
+    return out;
+  }
+
   async updateField(id: string, data: Record<string, unknown>, version?: number) {
     const field = await this.findFieldById(id);
+    data = this.normalizeLogic(data);
 
     if (version !== undefined && (field as any).version !== version) {
       throw new ConflictException('Field was modified by another user');
@@ -719,10 +749,11 @@ export class SysService {
     // Whitelist only valid sys_field columns (strip joined columns from sys_column/sys_table)
     const SYS_FIELD_COLS = new Set([
       'sys_tab_id', 'sys_column_id', 'sys_field_group_id', 'name', 'description', 'help',
-      'seq_no', 'seq_no_grid', 'display_length', 'column_span', 'x_position', 'y_position',
+      'seq_no', 'seq_no_grid', 'display_length', 'column_span',
       'num_lines', 'is_displayed', 'is_displayed_grid', 'is_read_only', 'is_same_line',
       'is_heading', 'is_field_only', 'is_encrypted', 'default_value', 'sort_no', 'obscure_type',
       'display_logic', 'read_only_logic', 'mandatory_logic', 'is_active', 'sys_reference_id',
+      'included_tab_id', 'entity_type',
     ]);
     const { version: _v, ...rawData } = data as any;
     const safeData = Object.fromEntries(Object.entries(rawData).filter(([k]) => SYS_FIELD_COLS.has(k)));
@@ -753,13 +784,25 @@ export class SysService {
   }
 
   async createField(data: Record<string, unknown>) {
+    data = this.normalizeLogic(data);
     const now = new Date().toISOString();
+    // Every property the Field window offers, not only the first few: a field
+    // created with Same Line, a group or a logic expression keeps it.
+    const optional = [
+      'help', 'display_length', 'column_span', 'num_lines',
+      'is_same_line', 'is_heading', 'is_field_only', 'is_encrypted', 'default_value', 'sort_no',
+      'obscure_type', 'display_logic', 'read_only_logic', 'mandatory_logic', 'sys_reference_id',
+      'included_tab_id',
+    ];
+    const extra = Object.fromEntries(
+      optional.filter((key) => data[key] !== undefined && data[key] !== '').map((key) => [key, data[key]])
+    );
     const [field] = await (this.db.kysely.insertInto('sys_field' as any)
       .values({
         sys_field_id: randomUUID(),
         sys_tab_id: data.sys_tab_id ?? null,
         sys_column_id: data.sys_column_id ?? null,
-        sys_field_group_id: data.sys_field_group_id ?? null,
+        sys_field_group_id: data.sys_field_group_id || null,
         name: data.name ?? null,
         description: data.description ?? null,
         seq_no: data.seq_no ?? 999,
@@ -767,6 +810,7 @@ export class SysService {
         is_displayed: data.is_displayed ?? true,
         is_displayed_grid: data.is_displayed_grid ?? true,
         is_read_only: data.is_read_only ?? false,
+        ...extra,
         is_active: true,
         entity_type: 'U',
         created_at: now,
@@ -794,7 +838,20 @@ export class SysService {
   // SYS_FIELD_GROUP
   // ============================================================
 
-  async findAllFieldGroups(tableName?: string) {
+  async findAllFieldGroups(tableName?: string, tabId?: string) {
+    // The Field window's Field Group lookup asks by tab: a field can only sit
+    // in a group of the tab it is on.
+    if (tabId) {
+      const groups = await this.db.kysely
+        .selectFrom('sys_field_group')
+        .selectAll()
+        .where('sys_field_group.is_active', '=', true)
+        .where('sys_field_group.sys_tab_id', '=', tabId)
+        .orderBy('sys_field_group.seq_no')
+        .orderBy('sys_field_group.name')
+        .execute();
+      return { data: groups, meta: { total: groups.length } };
+    }
     if (tableName) {
       // Find the sys_tab_id for this table, then return field groups linked to it
       const tab = await this.db.kysely
@@ -1231,15 +1288,20 @@ export class SysService {
     // than an entity, so they have no sys_table row to look up. Fall back to
     // the window's own name, which is what those screens pass, so they can
     // carry help like every other window instead of being the only screens in
-    // the application that cannot explain themselves.
+    // the application that cannot explain themselves. A route (`/admin/roles`,
+    // an administrative window's description) is accepted too, and an
+    // administrative window wins a tie: a model may declare an entity named
+    // like one, and the seed then names the administrative window
+    // "Role Management", so the plain name would find the model's window.
     const windowId =
       table?.sys_window_id ??
       (
         await this.db.kysely
           .selectFrom('sys_window')
           .select(['sys_window_id'])
-          .where('name', '=', tableName)
+          .where((eb) => eb.or([eb('name', '=', tableName), eb('description', '=', tableName)]))
           .where('is_active', '=', true)
+          .orderBy(sql`entity_type = 'S'`, 'desc')
           .executeTakeFirst()
       )?.sys_window_id;
 
@@ -1409,6 +1471,54 @@ export class SysService {
     return { data: { sys_user_id: sysUserId, name, email, is_active: true } };
   }
 
+  /**
+   * Create a role. Administrators only (the controller's `@Roles('admin')`).
+   *
+   * A new role starts active and with no access of its own: what it may read
+   * or change is granted afterwards, and a role nobody has granted anything
+   * is a role that sees nothing — the safe default for a freshly made one.
+   */
+  async createSysRole(input: { name: string; description?: string; isMasterRole?: boolean }) {
+    const name = (input.name ?? '').trim();
+    if (!name) throw new ConflictException('A role needs a name');
+    if (name.length > 100) throw new ConflictException('A role name is at most 100 characters');
+
+    const existing = await this.db.kysely
+      .selectFrom('sys_role')
+      .select('sys_role_id')
+      .where(sql`lower(name)`, '=', name.toLowerCase())
+      .executeTakeFirst();
+    if (existing) throw new ConflictException(`A role named "${name}" already exists`);
+
+    const sysRoleId = randomUUID();
+    const isMasterRole = input.isMasterRole === true;
+    const description = input.description?.trim() || null;
+    await this.db.kysely
+      .insertInto('sys_role')
+      .values({
+        sys_role_id: sysRoleId,
+        name,
+        description,
+        user_level: isMasterRole ? 'S' : 'C',
+        is_master_role: isMasterRole,
+        is_active: true,
+        entity_type: 'D',
+        created_by: 'admin',
+        updated_by: 'admin',
+      } as any)
+      .execute();
+
+    return {
+      data: {
+        sys_role_id: sysRoleId,
+        name,
+        description,
+        is_master_role: isMasterRole,
+        is_active: true,
+      },
+    };
+  }
+
   async findAllSysRoles() {
     const roles = await this.db.kysely
       .selectFrom('sys_role')
@@ -1425,6 +1535,323 @@ export class SysService {
       .execute();
 
     return { data: roles };
+  }
+
+  /** The two roles every generated application has, which the platform itself relies on. */
+  private static readonly BUILT_IN_ROLES = new Set(['administrator', 'user']);
+
+  /** Active accounts holding a role that makes them an administrator. */
+  private administrators() {
+    return this.db.kysely
+      .selectFrom('sys_user as u')
+      .innerJoin('sys_user_roles as ur', 'ur.sys_user_id', 'u.sys_user_id')
+      .innerJoin('sys_role as r', 'r.sys_role_id', 'ur.sys_role_id')
+      .select('u.sys_user_id')
+      .distinct()
+      .where('u.is_active', '=', true)
+      .where('ur.is_active', '=', true)
+      .where((eb) => eb.or([eb('r.is_master_role', '=', true), eb(sql`lower(r.name)`, '=', 'administrator')]));
+  }
+
+  /**
+   * Tell every instance that an account's access changed, so its cached
+   * answers go now. Role and grant tables announce themselves by trigger;
+   * `sys_user` has none, so activating or removing an account says it here.
+   */
+  private async announceAccessChanged(): Promise<void> {
+    await sql`select pg_notify('access_changed', 'sys_user')`.execute(this.db.kysely);
+  }
+
+  /** Refuse a change that would leave no active administrator at all. */
+  private async keepAnAdministrator(id: string): Promise<void> {
+    const admins = (await this.administrators().execute()).map((r) => r.sys_user_id);
+    if (admins.includes(id) && admins.length === 1) {
+      throw new ConflictException('This is the last administrator; give another account the role first');
+    }
+  }
+
+  /**
+   * Change an account. Every field is optional; what is sent is changed.
+   *
+   * - `email` changes the sign-in address too, so the person signs in with the
+   *   new one from then on.
+   * - `isActive: false` ends every session the account has, and SessionAuthGuard
+   *   refuses an inactive account — deactivating is how to stop somebody now.
+   * - `roleNames` replaces the account's roles. Better Auth's own `role` follows
+   *   it (`admin` while Administrator is held), as the seed sets it.
+   * - `password` sets a new one, hashed by Better Auth's own `hashPassword`.
+   *
+   * An administrator cannot deactivate themselves or take away the last
+   * administrator's role: either would leave nobody able to undo it.
+   */
+  async updateSysUser(
+    id: string,
+    input: {
+      name?: string;
+      email?: string;
+      password?: string;
+      isActive?: boolean;
+      roleNames?: string[];
+    },
+    callerSysUserId?: string,
+  ) {
+    const current = await this.db.kysely
+      .selectFrom('sys_user')
+      .select(['sys_user_id', 'name', 'email', 'is_active'])
+      .where('sys_user_id', '=', id)
+      .executeTakeFirst();
+    if (!current) throw new NotFoundException('No such user');
+
+    const changes: Record<string, any> = {};
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new BadRequestException('A name is required');
+      changes.name = name;
+    }
+    if (input.email !== undefined) {
+      const email = input.email.trim().toLowerCase();
+      if (!email) throw new BadRequestException('An email address is required');
+      if (email !== current.email) {
+        const taken = await this.db.kysely
+          .selectFrom('sys_user')
+          .select('sys_user_id')
+          .where('email', '=', email)
+          .where('sys_user_id', '!=', id)
+          .executeTakeFirst();
+        if (taken) throw new ConflictException(`${email} already has an account`);
+        changes.email = email;
+      }
+    }
+    if (input.password !== undefined && input.password.length < 8) {
+      throw new BadRequestException('The password must be at least 8 characters');
+    }
+
+    let roleIds: string[] | undefined;
+    let grantsAdmin: boolean | undefined;
+    if (input.roleNames !== undefined) {
+      const wanted = [...new Set(input.roleNames.map((n) => n.trim()).filter(Boolean))];
+      const roles = wanted.length
+        ? await this.db.kysely
+            .selectFrom('sys_role')
+            .select(['sys_role_id', 'name', 'is_master_role'])
+            .where('is_active', '=', true)
+            .where(sql`lower(name)`, 'in', wanted.map((n) => n.toLowerCase()))
+            .execute()
+        : [];
+      const missing = wanted.filter((n) => !roles.some((r) => r.name.toLowerCase() === n.toLowerCase()));
+      if (missing.length) throw new BadRequestException(`No such role: ${missing.join(', ')}`);
+      roleIds = roles.map((r) => r.sys_role_id);
+      grantsAdmin = roles.some((r) => r.is_master_role || r.name.toLowerCase() === 'administrator');
+    }
+
+    const deactivating = input.isActive === false && current.is_active;
+    const losingAdmin = grantsAdmin === false;
+    if ((deactivating || losingAdmin) && id === callerSysUserId) {
+      throw new ConflictException(
+        deactivating
+          ? 'You cannot deactivate your own account'
+          : 'You cannot remove the administrator role from your own account',
+      );
+    }
+    if (deactivating || losingAdmin) await this.keepAnAdministrator(id);
+
+    await this.db.kysely.transaction().execute(async (trx) => {
+      const authUser = await trx
+        .selectFrom('user' as any)
+        .select(['id' as any])
+        .where((eb: any) => eb.or([eb('sysUserId', '=', id), eb('email', '=', current.email)]))
+        .executeTakeFirst() as { id: string } | undefined;
+
+      const sysChanges: Record<string, any> = { updated_by: callerSysUserId ?? 'admin', updated_at: new Date() };
+      if (changes.name !== undefined) sysChanges.name = changes.name;
+      if (changes.email !== undefined) sysChanges.email = changes.email;
+      if (input.isActive !== undefined) sysChanges.is_active = input.isActive;
+      await trx.updateTable('sys_user').set(sysChanges as any).where('sys_user_id', '=', id).execute();
+
+      if (authUser) {
+        const authChanges: Record<string, any> = { updatedAt: new Date() };
+        if (changes.name !== undefined) authChanges.name = changes.name;
+        if (changes.email !== undefined) authChanges.email = changes.email;
+        if (grantsAdmin !== undefined) authChanges.role = grantsAdmin ? 'admin' : 'user';
+        await trx.updateTable('user' as any).set(authChanges as any).where('id' as any, '=', authUser.id).execute();
+
+        if (input.password !== undefined) {
+          const { hashPassword } = await import('better-auth/crypto');
+          await trx
+            .updateTable('account' as any)
+            .set({ password: await hashPassword(input.password), updatedAt: new Date() } as any)
+            .where('userId' as any, '=', authUser.id)
+            .where('providerId' as any, '=', 'credential')
+            .execute();
+        }
+        // A new password or a deactivation ends the sessions already open.
+        if (deactivating || input.password !== undefined) {
+          await trx.deleteFrom('session' as any).where('userId' as any, '=', authUser.id).execute();
+        }
+      }
+
+      if (roleIds !== undefined) {
+        await trx.deleteFrom('sys_user_roles').where('sys_user_id', '=', id).execute();
+        for (const roleId of roleIds) {
+          await trx
+            .insertInto('sys_user_roles')
+            .values({
+              sys_user_roles_id: randomUUID(),
+              sys_user_id: id,
+              sys_role_id: roleId,
+              entity_type: 'S',
+              is_active: true,
+              created_by: callerSysUserId ?? 'admin',
+              updated_by: callerSysUserId ?? 'admin',
+            } as any)
+            .execute();
+        }
+      }
+    });
+
+    if (input.isActive !== undefined && input.isActive !== current.is_active) await this.announceAccessChanged();
+
+    const users = await this.findAllSysUsers();
+    return { data: users.data.find((u: any) => u.sys_user_id === id) };
+  }
+
+  /**
+   * Delete an account: its sign-in identity, sessions and role links go with
+   * it, and the change log keeps its rows with the person set to null. Never
+   * the caller's own account, and never the last administrator.
+   */
+  async deleteSysUser(id: string, callerSysUserId?: string) {
+    if (id === callerSysUserId) throw new ConflictException('You cannot delete your own account');
+    const current = await this.db.kysely
+      .selectFrom('sys_user')
+      .select(['sys_user_id', 'email'])
+      .where('sys_user_id', '=', id)
+      .executeTakeFirst();
+    if (!current) throw new NotFoundException('No such user');
+
+    await this.keepAnAdministrator(id);
+
+    await this.db.kysely.transaction().execute(async (trx) => {
+      // session and account cascade from "user".
+      await trx
+        .deleteFrom('user' as any)
+        .where((eb: any) => eb.or([eb('sysUserId', '=', id), eb('email', '=', current.email)]))
+        .execute();
+      await trx.updateTable('sys_user').set({ supervisor_id: null } as any).where('supervisor_id', '=', id).execute();
+      await trx.deleteFrom('sys_user').where('sys_user_id', '=', id).execute();
+    });
+    await this.announceAccessChanged();
+    return { success: true };
+  }
+
+  /**
+   * Change a role. The description and master flag can always change. The name
+   * can change only on a role no access rule names: `%%rbac` rules match a
+   * role by name (sys_operation_access.role_name), so renaming one the model
+   * declared would silently take its access away. Administrator and User keep
+   * their names for the same reason — the platform looks them up by name.
+   */
+  async updateSysRole(id: string, input: { name?: string; description?: string; isMasterRole?: boolean }) {
+    const role = await this.db.kysely
+      .selectFrom('sys_role')
+      .select(['sys_role_id', 'name', 'description', 'is_master_role', 'is_active'])
+      .where('sys_role_id', '=', id)
+      .executeTakeFirst();
+    if (!role) throw new NotFoundException('No such role');
+
+    const changes: Record<string, any> = { updated_at: new Date() };
+    if (input.name !== undefined && input.name.trim() !== role.name) {
+      const name = input.name.trim();
+      if (!name) throw new BadRequestException('A role needs a name');
+      if (name.length > 100) throw new BadRequestException('A role name is at most 100 characters');
+      if (SysService.BUILT_IN_ROLES.has(role.name.toLowerCase())) {
+        throw new ConflictException(`"${role.name}" is built in and keeps its name`);
+      }
+      const fold = (s: string) => s.trim().toLowerCase().replace(/[\s\-_]+/g, '');
+      const ruleNames = await this.db.kysely
+        .selectFrom('sys_operation_access' as any)
+        .select('role_name' as any)
+        .distinct()
+        .execute()
+        .catch(() => [] as any[]);
+      if ((ruleNames as any[]).some((r) => fold(r.role_name) === fold(role.name))) {
+        throw new ConflictException(
+          `"${role.name}" is named by the model's access rules, so renaming it would take its access away. Change the model instead.`,
+        );
+      }
+      const taken = await this.db.kysely
+        .selectFrom('sys_role')
+        .select('sys_role_id')
+        .where(sql`lower(name)`, '=', name.toLowerCase())
+        .where('sys_role_id', '!=', id)
+        .executeTakeFirst();
+      if (taken) throw new ConflictException(`A role named "${name}" already exists`);
+      changes.name = name;
+    }
+    if (input.description !== undefined) changes.description = input.description.trim() || null;
+    if (input.isMasterRole !== undefined) {
+      if (role.name.toLowerCase() === 'administrator' && input.isMasterRole === false) {
+        throw new ConflictException('Administrator stays a master role');
+      }
+      changes.is_master_role = input.isMasterRole;
+      changes.user_level = input.isMasterRole ? 'S' : 'C';
+    }
+
+    await this.db.kysely.updateTable('sys_role').set(changes as any).where('sys_role_id', '=', id).execute();
+    const updated = await this.db.kysely
+      .selectFrom('sys_role')
+      .select(['sys_role_id', 'name', 'description', 'is_master_role', 'is_active', 'created_at'])
+      .where('sys_role_id', '=', id)
+      .executeTakeFirstOrThrow();
+    return { data: updated };
+  }
+
+  /**
+   * Delete a role. Administrator and User are built in and stay. A role
+   * somebody still holds is refused with how many, rather than quietly taking
+   * their access away — reassign them first. Its grants go with it.
+   */
+  async deleteSysRole(id: string) {
+    const role = await this.db.kysely
+      .selectFrom('sys_role')
+      .select(['sys_role_id', 'name', 'role_key'])
+      .where('sys_role_id', '=', id)
+      .executeTakeFirst();
+    if (!role) throw new NotFoundException('No such role');
+    if (SysService.BUILT_IN_ROLES.has(role.name.toLowerCase())) {
+      throw new ConflictException(`"${role.name}" is built in and cannot be deleted`);
+    }
+
+    const held = await this.db.kysely
+      .selectFrom('sys_user_roles')
+      .select(sql<number>`count(*)`.as('n'))
+      .where('sys_role_id', '=', id)
+      .where('is_active', '=', true)
+      .executeTakeFirst();
+    const holders = Number(held?.n ?? 0);
+    if (holders > 0) {
+      throw new ConflictException(
+        `${holders} ${holders === 1 ? 'account holds' : 'accounts hold'} "${role.name}"; give them another role first`,
+      );
+    }
+
+    await this.db.kysely.transaction().execute(async (trx) => {
+      await trx.updateTable('sys_user').set({ default_sys_role_id: null } as any).where('default_sys_role_id', '=', id).execute();
+      if (role.role_key) {
+        const sharing = await trx
+          .selectFrom('sys_role')
+          .select('sys_role_id')
+          .where('role_key', '=', role.role_key)
+          .where('sys_role_id', '!=', id)
+          .executeTakeFirst();
+        if (!sharing) {
+          await (trx as any).deleteFrom('sys_access_grant').where('role_key', '=', role.role_key).execute();
+        }
+      }
+      // sys_user_roles and sys_access cascade from sys_role.
+      await trx.deleteFrom('sys_role').where('sys_role_id', '=', id).execute();
+    });
+    return { success: true };
   }
 
   // ============================================================
@@ -1572,4 +1999,108 @@ export class SysService {
       .execute();
     return { success: true };
   }
+
+  // ============================================================================
+  // Access Grants (sys_access_grant) — role × entity × operation matrix
+  // ============================================================================
+
+  async findAllAccessGrants(opts: { roleId?: string; tableName?: string } = {}) {
+    let query = (this.db.kysely as any)
+      .selectFrom('sys_access_grant as g')
+      .leftJoin('sys_role as r', 'r.role_key', 'g.role_key')
+      .select([
+        'g.sys_access_grant_id',
+        'g.kind',
+        'g.table_name',
+        'g.action',
+        'g.status_field',
+        'g.from_state',
+        'g.to_state',
+        'g.role_name',
+        'g.role_key',
+        'g.is_active',
+        'r.sys_role_id',
+        'r.name as role_display_name',
+        'r.is_master_role',
+      ])
+      .where('g.is_active', '=', true)
+      .orderBy('g.table_name', 'asc')
+      .orderBy('g.role_name', 'asc');
+
+    if (opts.roleId) {
+      query = query.where('r.sys_role_id', '=', opts.roleId);
+    }
+    if (opts.tableName) {
+      query = query.where('g.table_name', '=', opts.tableName);
+    }
+
+    const grants = await query.execute();
+    return { data: grants };
+  }
+
+  async getAccessGrantsSummary() {
+    const [roleCount, grantCount] = await Promise.all([
+      (this.db.kysely as any)
+        .selectFrom('sys_role')
+        .select((eb: any) => eb.fn.countAll().as('count'))
+        .where('is_active', '=', true)
+        .executeTakeFirst(),
+      (this.db.kysely as any)
+        .selectFrom('sys_access_grant')
+        .select((eb: any) => eb.fn.countAll().as('count'))
+        .where('is_active', '=', true)
+        .where('kind', '=', 'op')
+        .executeTakeFirst(),
+    ]);
+    return {
+      roles: Number(roleCount?.count ?? 0),
+      grants: Number(grantCount?.count ?? 0),
+    };
+  }
+
+  async createAccessGrant(data: {
+    tableName: string;
+    action: string;
+    roleName: string;
+    kind?: string;
+    statusField?: string;
+    fromState?: string;
+    toState?: string;
+  }) {
+    const { v4: uuidv4 } = await import('uuid');
+    const row = {
+      sys_access_grant_id: uuidv4(),
+      kind: (data.kind ?? 'op') as any,
+      table_name: data.tableName,
+      action: data.action,
+      role_name: data.roleName,
+      status_field: data.statusField ?? '',
+      from_state: data.fromState ?? '',
+      to_state: data.toState ?? '',
+      entity_type: 'D',
+      is_active: true,
+      created_by: 'admin',
+      updated_by: 'admin',
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    await (this.db.kysely as any)
+      .insertInto('sys_access_grant')
+      .values(row)
+      .onConflict((oc: any) => oc.doNothing())
+      .execute();
+    // Notify all instances to drop their capability caches
+    await this.db.kysely.executeQuery({ sql: "select pg_notify('access_changed', 'sys_access_grant')", parameters: [] } as any).catch(() => {});
+    return { success: true, sys_access_grant_id: row.sys_access_grant_id };
+  }
+
+  async deleteAccessGrant(id: string) {
+    await (this.db.kysely as any)
+      .deleteFrom('sys_access_grant')
+      .where('sys_access_grant_id', '=', id)
+      .execute();
+    await this.db.kysely.executeQuery({ sql: "select pg_notify('access_changed', 'sys_access_grant')", parameters: [] } as any).catch(() => {});
+    return { success: true };
+  }
 }
+

@@ -3,7 +3,7 @@
  *
  * `%%entity … help:` and `%%field … help:` are the only explanation a generated
  * application ever has: they become `sys_table.description` and
- * `sys_column.description`, the hint under the control, and the whole of the
+ * `sys_column.description`, what a field's `?` shows, and the whole of the
  * "what it is for" column of `manual.html`. There is no second source — no
  * hand-written tooltip, no README beside the form — so a model that skips help
  * produces an application whose manual is a table of dashes.

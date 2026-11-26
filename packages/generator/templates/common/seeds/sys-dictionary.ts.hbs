@@ -296,7 +296,8 @@ function fieldHelpText(entity: HelpEntity, col: HelpColumn): string {
  * declares, the dictionary describes, the API returns and the grid did not
  * show, with nothing anywhere saying why.
  *
- * `sys_field_group_id` is unset now and the grid is this set, both mirroring
+ * `sys_field_group_id` comes from the model's `%%section` lines or not at all,
+ * and the grid is this set, both mirroring
  * `generators/wasm/model-bundle.ts` — the other producer of this same
  * dictionary, and the one a reader compares against. The same model has to
  * describe the same application whether it was generated as the full stack or
@@ -592,7 +593,22 @@ export async function seed(db: Kysely<any>): Promise<void> {
   }).execute();
 
   // Create sys_column entries
-  const {{camelCase name}}Columns: Array<{ id: string; name: string; displayName: string; isKey: boolean }> = [];
+  const {{camelCase name}}Columns: Array<{
+    id: string;
+    name: string;
+    displayName: string;
+    isKey: boolean;
+    displayLogic: string | null;
+    readOnlyLogic: string | null;
+    mandatoryLogic: string | null;
+    /** `%%section` placement — absent on an entity that declares no sections. */
+    layout?: {
+      group: string;
+      seqNo: number;
+      sameLine: boolean;
+      columnSpan: number;
+    };
+  }> = [];
 
   let {{camelCase name}}ColumnSeqNo = 10;
   {{#each attributes}}
@@ -602,6 +618,19 @@ export async function seed(db: Kysely<any>): Promise<void> {
     name: '{{columnName}}',
     displayName: '{{displayName}}',
     isKey: {{#if (eq name ../primaryKey)}}true{{else}}false{{/if}},
+    {{!-- `%%field <E>.<c> display: | readonly: | mandatory:` — Compiere's
+          field logic, written to sys_field below. --}}
+    displayLogic: {{#if displayLogic}}{{tsString displayLogic}}{{else}}null{{/if}},
+    readOnlyLogic: {{#if readOnlyLogic}}{{tsString readOnlyLogic}}{{else}}null{{/if}},
+    mandatoryLogic: {{#if mandatoryLogic}}{{tsString mandatoryLogic}}{{else}}null{{/if}},
+    {{#if layout}}
+    layout: {
+      group: {{tsString layout.group}},
+      seqNo: {{layout.seqNo}},
+      sameLine: {{layout.sameLine}},
+      columnSpan: {{layout.columnSpan}},
+    },
+    {{/if}}
   });
 
   await db.insertInto('sys_column').values({
@@ -625,6 +654,9 @@ export async function seed(db: Kysely<any>): Promise<void> {
           meant a table with both `name` and `code` marked both, and the record
           read "Acme ACME-01" wherever it was referenced. --}}
     is_identifier: {{#if isIdentifier}}true{{else}}false{{/if}},
+    {{!-- Compiere's column logic, inherited by every window over this table. --}}
+    read_only_logic: {{#if readOnlyLogic}}{{tsString readOnlyLogic}}{{else}}null{{/if}},
+    mandatory_logic: {{#if mandatoryLogic}}{{tsString mandatoryLogic}}{{else}}null{{/if}},
     is_selection_column: {{#if (or (eq name 'name') unique)}}true{{else}}false{{/if}},
     is_translated: false,
     is_encrypted: false,
@@ -686,6 +718,58 @@ export async function seed(db: Kysely<any>): Promise<void> {
    * column order describes — the parity with the browser build that the note
    * on GRID_NOISE is about.
    */
+  {{#if formGroups}}
+  /*
+   * The model's `%%section` groups — headed sections of two-column rows, in the
+   * model's order, after the Highlights panel the layout manager still offers.
+   * Each field below is placed in its group, row and column; nothing here is
+   * decided by position, so this form and the browser build's agree.
+   */
+  const {{camelCase name}}GroupIds = new Map<string, string>();
+  await db.insertInto('sys_field_group').values([
+    {
+      sys_field_group_id: uuidv4(),
+      sys_tab_id: {{camelCase name}}TabId,
+      name: 'Highlights',
+      description:
+        'Shown in the record header, not the form. Drag the two or three fields worth reading at a glance into this group.',
+      layout_type: 'summary',
+      columns: 1,
+      seq_no: 10,
+      field_group_type: 'C',
+      is_collapsed_by_default: false,
+      entity_type: 'D',
+      is_active: true,
+      created_by: createdBy,
+      updated_by: createdBy,
+      created_at: now,
+      updated_at: now,
+    },
+  ]).execute();
+  {{#each formGroups}}
+  {
+    const groupId = uuidv4();
+    {{camelCase ../name}}GroupIds.set({{tsString name}}, groupId);
+    await db.insertInto('sys_field_group').values({
+      sys_field_group_id: groupId,
+      sys_tab_id: {{camelCase ../name}}TabId,
+      name: {{tsString name}},
+      description: {{#if description}}{{tsString description}}{{else}}null{{/if}},
+      layout_type: 'single',
+      columns: {{columns}},
+      seq_no: {{seqNo}} + 10,
+      field_group_type: 'C',
+      is_collapsed_by_default: {{collapsed}},
+      entity_type: 'D',
+      is_active: true,
+      created_by: createdBy,
+      updated_by: createdBy,
+      created_at: now,
+      updated_at: now,
+    }).execute();
+  }
+  {{/each}}
+  {{else}}
   await db.insertInto('sys_field_group').values([
     {
       sys_field_group_id: uuidv4(),
@@ -757,8 +841,10 @@ export async function seed(db: Kysely<any>): Promise<void> {
       updated_at: now,
     },
   ]).execute();
+  {{/if}}
 
-  // sys_field: sequential seq_no, no field group, grid by GRID_NOISE. See the
+  // sys_field: the `%%section` placement when the model declares one, else a
+  // sequential seq_no and no group; the grid by GRID_NOISE either way. See the
   // note on GRID_NOISE for why none of this is decided by position.
   for (let i = 0; i < {{camelCase name}}Columns.length; i++) {
     const col = {{camelCase name}}Columns[i];
@@ -766,18 +852,26 @@ export async function seed(db: Kysely<any>): Promise<void> {
       sys_field_id: uuidv4(),
       sys_tab_id: {{camelCase name}}TabId,
       sys_column_id: col.id,
+      {{#if formGroups}}
+      sys_field_group_id: col.layout ? {{camelCase name}}GroupIds.get(col.layout.group) : undefined,
+      {{else}}
       sys_field_group_id: undefined,
+      {{/if}}
       name: col.displayName,
       help: fieldHelpFor('{{tableName}}', col.name),
-      seq_no: (i + 1) * 10,
+      seq_no: col.layout?.seqNo ?? (i + 1) * 10,
       seq_no_grid: (i + 1) * 10,
       is_displayed: !col.isKey,
       is_displayed_grid: !col.isKey && !GRID_NOISE.has(col.name),
       is_read_only: ['created_at', 'updated_at', 'deleted_at'].includes(col.name),
       is_encrypted: false,
-      is_same_line: false,
+      is_same_line: col.layout?.sameLine ?? false,
+      column_span: col.layout?.columnSpan ?? null,
       is_heading: false,
       is_field_only: false,
+      display_logic: col.displayLogic,
+      read_only_logic: col.readOnlyLogic,
+      mandatory_logic: col.mandatoryLogic,
       entity_type: 'U',
       is_active: true,
       created_by: createdBy,
@@ -849,33 +943,16 @@ export async function seed(db: Kysely<any>): Promise<void> {
   // from Window, Tab and Field like any other help.
   const adminWindowDefs = [
     {
-      name: 'Business Rules',
-      route: '/admin/rules',
-      icon: 'shield-check',
+      name: 'Automations',
+      route: '/admin/automations',
+      icon: 'zap',
       help:
-        'Every rule that runs when a record is written. A rule belongs to one entity and one ' +
-        'operation — CREATE, UPDATE or ALL — and is evaluated as a decision table: the inputs are ' +
-        'columns of the record being saved, and the outputs are what the rule decides.\n\n' +
-        'Rules declared in the model are seeded here on generation. A rule can also emit an action: ' +
-        'reject the write with a message, overwrite a field, or trigger a workflow by name, which is ' +
-        'how a condition on a record starts a multi-step process.\n\n' +
-        'Rules run inside the transaction that saved the record. If one fails the write is rolled ' +
-        'back, so a rule is a guarantee about the data rather than a reminder after the fact.',
-    },
-    {
-      name: 'Workflow Designer',
-      route: '/admin/workflow-definitions',
-      icon: 'workflow',
-      help:
-        'Everything that runs automatically on your records. Each workflow is bound to one entity ' +
-        'and lists its steps in the order they run: look up a decision table, create a record on ' +
-        'another entity, write a field back, delete related rows, call an external service.\n\n' +
-        'The Runs when column is the difference that matters. EVERY WRITE means the workflow runs on ' +
-        'each matching save. WHEN A RULE TRIGGERS IT means it runs only when a business rule names ' +
-        'it, so the rule decides.\n\n' +
-        'Workflows marked FROM THE MODEL are owned by the model and are rewritten on the next ' +
-        'generation; anything built here is yours and is never overwritten. A run that fails rolls ' +
-        'back everything it changed and records the reason against the record.',
+        'Business rules and workflows in one place. Rules are decision tables that run on every ' +
+        'matching write — they can reject a save, overwrite a field, or trigger a workflow. ' +
+        'Workflows list the steps that run automatically: look up a table, create a record, ' +
+        'call a service, and more.\n\n' +
+        'Rules and workflows share this screen because a workflow hook is what gives a rule its ' +
+        'moment: attach a rule to a hook to choose when it runs.',
     },
     {
       name: 'Audit Log',
@@ -950,15 +1027,49 @@ export async function seed(db: Kysely<any>): Promise<void> {
         'file remains the bootstrap mechanism. The application description at the top is a detailed ' +
         'summary of what this application does — it appears in the manual and the dashboard header.',
     },
+    {
+      name: 'Access Controls',
+      route: '/admin/access-controls',
+      icon: 'shield-check',
+      help:
+        'Which operations each role may perform on each entity. A tick in a cell means the role ' +
+        'may carry out that operation — read, create, update or delete — on that entity.\n\n' +
+        'The Administrator role is not shown here: it always has full access. Grants are additive ' +
+        'across a user\'s roles, so a user with two roles holds the union of what both allow.\n\n' +
+        'Changes take effect immediately: the backend drops its cached capability map on every ' +
+        'change and rebuilds it from these rows on the next request.',
+    },
   ];
 
   for (const wd of adminWindowDefs) {
-    const existing = await db.selectFrom('sys_window').select(['sys_window_id', 'help', 'icon']).where('name', '=', wd.name).executeTakeFirst();
+    /*
+     * Found by its route, which an administrative window never changes, and
+     * named so that no two windows share a name. A model may declare an entity
+     * called User or Role, whose window is seeded above under that name. Matched
+     * on the name, that business window was taken for this one and the screen
+     * that manages sign-in was never created; created under the same name, the
+     * dictionary held two windows called User. So where the plain name is
+     * taken, the administrative window is "User Management" — what its screen
+     * is headed anyway — and a row left with a clashing name is renamed.
+     */
+    const existing = await db
+      .selectFrom('sys_window')
+      .select(['sys_window_id', 'name', 'help', 'icon'])
+      .where('description', '=', wd.route)
+      .where('entity_type', '=', 'S')
+      .executeTakeFirst();
     const windowId = existing?.sys_window_id ?? uuidv4();
+    const clash = await db
+      .selectFrom('sys_window')
+      .select('sys_window_id')
+      .where('name', '=', wd.name)
+      .where('sys_window_id', '!=', windowId)
+      .executeTakeFirst();
+    const name = clash ? `${wd.name} Management` : wd.name;
     if (!existing) {
       await db.insertInto('sys_window').values({
         sys_window_id: windowId,
-        name: wd.name,
+        name,
         description: wd.route,
         help: wd.help,
         icon: wd.icon,
@@ -969,7 +1080,13 @@ export async function seed(db: Kysely<any>): Promise<void> {
         created_at: now,
         updated_at: now,
       }).execute();
-    } else if (!existing.help || !existing.icon) {
+    } else if (clash && existing.name === wd.name) {
+      await db.updateTable('sys_window')
+        .set({ name, updated_by: createdBy, updated_at: now })
+        .where('sys_window_id', '=', windowId)
+        .execute();
+    }
+    if (existing && (!existing.help || !existing.icon)) {
       /*
        * Backfill only, per field. An administrator who has rewritten the help
        * text or chosen their own icon keeps it — re-seeding is not a licence to

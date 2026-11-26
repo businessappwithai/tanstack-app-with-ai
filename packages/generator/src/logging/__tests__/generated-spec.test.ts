@@ -19,7 +19,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import canonical from "../../../../core/src/logging/log-spec.json" with { type: "json" };
-import { generatedChannels, generatedEventIds, generatedLogSpec } from "../generated-spec";
+import {
+  generatedChannels,
+  generatedErrorCatalogue,
+  generatedErrorCodes,
+  generatedEventIds,
+  generatedLogSpec,
+} from "../generated-spec";
 
 const TEMPLATES = join(import.meta.dirname, "../../../templates/tanstack-start-nestjs/backend");
 
@@ -115,6 +121,40 @@ describe("the spec a generated application ships with", () => {
     expect(generatedChannels().sort()).toEqual(
       shipped.channels.map((channel) => channel.name).sort()
     );
+  });
+});
+
+describe("the error catalogue a generated application ships with", () => {
+  const catalogue = generatedErrorCatalogue();
+
+  it("ships every category and every generated code, without the generator's bookkeeping", () => {
+    const parsed = JSON.parse(generatedLogSpec()) as {
+      errorCategories: Array<{ name: string }>;
+      errors: Array<Record<string, unknown>>;
+    };
+    expect(parsed.errorCategories.length).toBe(12);
+    expect(parsed.errors.map((error) => error.code)).toEqual(generatedErrorCodes());
+    for (const error of parsed.errors) expect(error).not.toHaveProperty("surfaces");
+  });
+
+  it("is TypeScript whose ErrorCode union names each code, so a typo fails bun check", () => {
+    expect(catalogue).toContain("export type ErrorCode = keyof typeof ERROR_CATALOGUE;");
+    for (const code of generatedErrorCodes()) {
+      expect(catalogue, code).toContain(`  ${code}: { category:`);
+    }
+  });
+
+  it("types ErrorCategory as a closed union ending in a semicolon", () => {
+    expect(catalogue).toMatch(/export type ErrorCategory =\n(  \| "[a-z_]+"\n)*  \| "internal";/);
+  });
+
+  it("agrees with the canonical status of each code", () => {
+    const source = (canonical as unknown as { errors: Array<{ code: string; status: number }> })
+      .errors;
+    for (const error of source) {
+      expect(catalogue).toContain(`${error.code}: { category:`);
+      expect(catalogue).toMatch(new RegExp(`${error.code}: \\{[^}]*status: ${error.status},`));
+    }
   });
 });
 

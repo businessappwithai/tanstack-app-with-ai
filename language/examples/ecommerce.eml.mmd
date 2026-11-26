@@ -49,6 +49,12 @@ erDiagram
         decimal shipping_amount
         decimal total_amount
         datetime placed_at OPTIONAL
+        datetime paid_at OPTIONAL
+        datetime cancelled_at OPTIONAL
+        datetime packed_at OPTIONAL
+        datetime shipped_at OPTIONAL
+        datetime delivered_at OPTIONAL
+        datetime refunded_at OPTIONAL
     }
 
     OrderItem {
@@ -128,6 +134,18 @@ erDiagram
     %%field Payment.amount help: The sum this payment moves. It need not equal the order total: part payments, gift-card balances and partial refunds are all normal, which is why settlement is the sum of captured payments rather than a single figure.
     %%field Payment.captured_at help: When the money was actually taken, as opposed to reserved. Empty until capture, and it is the date that appears on the customer's statement and in the day's takings.
 
+    %% Form layout: headed sections of two-column rows (`|` between rows,
+    %% `,` within one; a row of one spans the full width).
+    %%section entity: Customer; name: Customer; help: Who is buying and how the shop reaches them about orders.; rows: first_name, last_name | email, phone
+    %%section entity: Customer; name: Account security; help: The sign-in secret and whether the email address has been proven to belong to the customer.; rows: password_hash, is_verified; collapsed: true
+    %%section entity: Product; name: Product; help: What is sold, the SKU it is picked by, and whether it is on sale.; rows: name, sku | is_active | description
+    %%section entity: Product; name: Price and stock; help: What one unit costs and how many can still be sold before the shelf is empty.; rows: unit_price, stock_qty
+    %%section entity: Category; name: Category; help: Where the category sits in the shop's navigation tree.; rows: name, parent_id
+    %%section entity: Order; name: Order; help: Which order this is, who placed it, when, and where it stands.; rows: order_number | customer_id, placed_at
+    %%section entity: Order; name: Totals; help: How the amount charged is made up — the lines, less discount, plus shipping.; rows: subtotal, discount_amount | shipping_amount, total_amount
+    %%section entity: OrderItem; name: Item; help: One product on the order, how many, and what the line adds to the subtotal.; rows: order_id, product_id | quantity, unit_price | line_total
+    %%section entity: Payment; name: Payment; help: The money taken for the order — how, how much, and whether it has been captured.; rows: order_id, status | method, amount | captured_at
+
 %% ---- Section 2: Business rule — pricing & discount -------------------------
 %%meta name: Order Pricing
 %%meta kind: rules
@@ -175,9 +193,6 @@ stateDiagram-v2
     cancelled --> [*]
     refunded  --> [*]
 
-    %%rbac role:customer on Order.place
-    %%rbac role:warehouse|admin on Order.pack
-    %%rbac role:admin on Order.refund
     %%trigger webhook:payment -> markPaid on Order
     %%trigger webhook:carrier -> markShipped on Order
 
@@ -198,3 +213,14 @@ flowchart TD
     %%hook beforeUpdate recomputeTotals on Order
     %%hook afterUpdate decrementInventory on Order
     %%hook afterUpdate sendOrderConfirmation on Order
+
+%% ---- When each status was reached: stamped by the application ----
+%% A record moves by an action button, along an edge its state diagram draws,
+%% and the application writes the <state>_at time when it does.
+%%field Order.paid_at help: When this order moved to paid. Stamped by the application when the move is made; nobody types it.
+%%field Order.cancelled_at help: When this order moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%field Order.packed_at help: When this order moved to packed. Stamped by the application when the move is made; nobody types it.
+%%field Order.shipped_at help: When this order moved to shipped. Stamped by the application when the move is made; nobody types it.
+%%field Order.delivered_at help: When this order moved to delivered. Stamped by the application when the move is made; nobody types it.
+%%field Order.refunded_at help: When this order moved to refunded. Stamped by the application when the move is made; nobody types it.
+%%section entity: Order; name: Progress; help: When this order reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: paid_at, cancelled_at | packed_at, shipped_at | delivered_at, refunded_at

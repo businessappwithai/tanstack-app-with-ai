@@ -35,12 +35,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { heldRoles, isAdministrator } from './admin-roles';
 
 /** Verbs that only read. Everything else changes the dictionary. */
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-/** Roles allowed to change the dictionary, beyond a master role. */
-const ADMIN_ROLES = ['admin', 'administrator'];
 
 @Injectable()
 export class DictionaryWriteGuard implements CanActivate {
@@ -57,17 +55,8 @@ export class DictionaryWriteGuard implements CanActivate {
     if (READ_METHODS.has(String(request.method).toUpperCase())) return true;
 
     const user = request.user ?? {};
-    if (user.isMaster === true) return true;
-
-    // Every place a role can arrive, matched case-insensitively — the seeded
-    // role is `Administrator`, Better Auth's field says `admin`.
-    const held = new Set<string>();
-    for (const value of [...(user.sysRoles ?? []), ...(user.roles ?? [])]) {
-      if (typeof value === 'string' && value) held.add(value.toLowerCase());
-    }
-    if (typeof user.role === 'string' && user.role) held.add(user.role.toLowerCase());
-
-    if (ADMIN_ROLES.some((role) => held.has(role))) return true;
+    if (isAdministrator(user)) return true;
+    const held = heldRoles(user);
 
     throw new ForbiddenException(
       'Changing the Application Dictionary requires an administrator. ' +

@@ -81,16 +81,15 @@ export async function up(db: Kysely<any>): Promise<void> {
   {{/each}}
 
   // Foreign key constraints (added after all tables to avoid ordering issues)
-  {{#each relationships}}
-  {{#if (eq cardinality 'oneToMany')}}
+  {{!-- Only where the child really carries the column: see buildFkConstraints. --}}
+  {{#each fkConstraints}}
   await sql`
-    ALTER TABLE bus_{{snakeCase targetEntity}}
-    ADD CONSTRAINT fk_bus_{{snakeCase targetEntity}}_{{snakeCase sourceEntity}}_id
-      FOREIGN KEY ({{snakeCase sourceEntity}}_id)
-      REFERENCES bus_{{snakeCase sourceEntity}}(id)
-      ON DELETE SET NULL ON UPDATE CASCADE
+    ALTER TABLE {{childTable}}
+    ADD CONSTRAINT {{name}}
+      FOREIGN KEY ({{column}})
+      REFERENCES {{parentTable}}(id)
+      ON DELETE {{onDelete}} ON UPDATE CASCADE
   `.execute(db).catch(() => {});
-  {{/if}}
   {{/each}}
 }
 

@@ -1,0 +1,186 @@
+%% ============================================================================
+%% EML Example — Helpdesk / Support Ticketing
+%% A simple, complete model: the data model (ERD), a declarative business rule
+%% (ticket prioritization), and a workflow (ticket lifecycle state machine)
+%% plus lifecycle hooks. Every diagram is valid, renderable Mermaid.
+%% ============================================================================
+
+%% ---- Section 1: ERD --------------------------------------------------------
+%%meta name: Helpdesk
+%%meta kind: erd
+%%meta version: 1.0.0
+%%enum TicketStatus: open, in_progress, resolved, closed
+%%enum TicketPriority: low, medium, high, urgent
+%%enum CustomerTier: free, pro, enterprise
+erDiagram
+    Customer {
+        string id PK
+        string email UK
+        string name
+        string tier
+        boolean is_active
+    }
+
+    Agent {
+        string  id PK
+        string  email UK
+        string  name
+        boolean is_active
+    }
+
+    Ticket {
+        string  id PK
+        string  customer_id FK
+        string  agent_id FK OPTIONAL
+        string  subject
+        text    description OPTIONAL
+        integer impact_score
+        string  priority OPTIONAL
+        string  status OPTIONAL
+        datetime in_progress_at OPTIONAL
+        datetime closed_at OPTIONAL
+        datetime resolved_at OPTIONAL
+    }
+
+    Comment {
+        string  id PK
+        string  ticket_id FK
+        string  author
+        text    body
+        boolean is_internal
+    }
+
+    Customer ||--o{ Ticket  : "opens"
+    Agent    ||--o{ Ticket  : "assigned"
+    Ticket   ||--o{ Comment : "has"
+
+    %%field Customer.tier enum: CustomerTier
+    %%field Ticket.status enum: TicketStatus
+    %%field Ticket.priority enum: TicketPriority
+    %%index Ticket(customer_id, status)
+    %%index Customer(email) unique
+    %%entity Ticket audited: true
+
+    %%entity Customer help: An organisation or individual entitled to support, and the reason a ticket is answered at all. The tier on this record is what decides how quickly a ticket is picked up, so a customer is set up before their first ticket rather than created alongside it.
+    %%field Customer.email help: The address support correspondence is sent to and the customer's identity in the system. Unique across the helpdesk — two records with the same address mean two histories for one customer, and the agent sees whichever they happen to open.
+    %%field Customer.name help: The organisation as the agent should address it in a reply. Shown wherever a ticket names its customer, so use the trading name rather than the legal entity.
+    %%field Customer.tier help: free — best effort, no target; pro — business-hours response; enterprise — round-the-clock, with an account manager. The tier is the support contract in one column and is set from the contract, never from the ticket.
+    %%field Customer.is_active help: Whether the customer's support entitlement still stands. Cleared when a contract lapses; their ticket history stays readable, and new tickets should not be opened against them.
+
+    %%entity Agent help: A member of the support team who answers tickets. Agents are the assignable side of a ticket: an unassigned ticket has no agent, and the lifecycle cannot leave `open` until one takes it.
+    %%field Agent.email help: The agent's work address — how they sign in, and where assignment notifications go. Unique, because it identifies the person rather than describing them.
+    %%field Agent.name help: The name that appears to the customer on a reply. Keep it the name the team actually uses in correspondence, not an internal handle.
+    %%field Agent.is_active help: Whether the agent is still taking work. Cleared when someone leaves the team or goes on extended absence; their closed tickets stay attributed to them, but they should not appear in the assignment list.
+
+    %%entity Ticket help: One customer problem, from the moment it arrives to the moment it is closed. A ticket is the unit of work the whole helpdesk is organised around: it carries the customer's account of the problem, who is answering it, how urgent it is, and where it has reached in its lifecycle. It is audited, because who changed a ticket and when is the first question asked whenever a response target is missed.
+    %%field Ticket.customer_id help: The customer this problem belongs to. It decides which support contract applies and therefore how quickly the ticket has to be answered, so it is set when the ticket is opened and changed only if the ticket was raised against the wrong account.
+    %%field Ticket.agent_id help: The agent who owns the answer. Empty while the ticket is unassigned, which is exactly the queue the team works from; assigning it is what moves the ticket to `in_progress`.
+    %%field Ticket.subject help: One line saying what is wrong, as the customer put it. This is what the agent reads in the queue before opening anything, so it should be specific enough to triage from.
+    %%field Ticket.description help: The customer's full account of the problem — what they did, what happened, and what they expected instead. Optional because a ticket can arrive as a subject line, but a ticket without it usually costs a round trip before any work starts.
+    %%field Ticket.impact_score help: 0-100, how much of the customer's operation this is blocking. It is the only input to the prioritisation rule: 80 and above becomes urgent, 50 and above high, anything less low. Set it from the business impact the customer describes, not from how loudly they describe it.
+    %%field Ticket.priority help: urgent — work starts now; high — today; low — when the queue allows. Written by the prioritisation rule from impact_score when the ticket is created, so an agent overriding it by hand is making a deliberate exception.
+    %%field Ticket.status help: open — waiting for an agent; in_progress — being worked; resolved — an answer has been given and the customer has not disagreed yet; closed — finished. Only the transitions the lifecycle diagram draws are allowed, which is why a ticket cannot jump from open to resolved without being assigned.
+
+    %%entity Comment help: One entry in the conversation on a ticket, from either side. Comments are the ticket's history in the participants' own words — the record of what was asked, tried and concluded — and an internal comment is how the team reasons about a problem without saying it to the customer.
+    %%field Comment.ticket_id help: The ticket this entry belongs to. A comment has no meaning away from its ticket, which is why the whole conversation is read inside the ticket rather than from a list of comments.
+    %%field Comment.author help: Who wrote it — an agent's name, or the customer's. Recorded as text rather than a reference because a comment can arrive from an address that belongs to neither an agent nor the account's registered contact.
+    %%field Comment.body help: What was said. This is the substance of the ticket's history, so it is written to be read months later by somebody who was not there.
+    %%field Comment.is_internal help: Whether this entry is for the team only. Internal comments are never shown to the customer, which is what makes them safe for diagnosis, escalation notes and anything not yet confirmed — set it before saving, because a comment cannot be unsent.
+
+%% ---- Section 2: Business rule — ticket prioritization ----------------------
+%% Decision reads the ticket's own impact_score, so it evaluates on real data.
+%%meta name: Ticket Prioritization
+%%meta kind: rules
+%%rule prioritize on Ticket event: beforeCreate priority: 10
+flowchart TD
+    A([Start: Ticket Created]) --> B{impact_score >= 80?}
+    B -->|Yes| P1[Set Priority urgent]
+    B -->|No| C{impact_score >= 50?}
+    C -->|Yes| P2[Set Priority high]
+    C -->|No| P3[Set Priority low]
+    P1 --> E([End: Prioritized])
+    P2 --> E
+    P3 --> E
+
+%% ---- Section 3: Workflow — ticket lifecycle (state machine) ----------------
+%%meta name: Ticket Lifecycle
+%%meta kind: workflow
+%%workflow TicketLifecycle entity: Ticket kind: state
+stateDiagram-v2
+    [*] --> open
+    open        --> in_progress : assign
+    open        --> closed      : cancel
+    in_progress --> resolved    : resolve
+    resolved    --> in_progress : reopen
+    resolved    --> closed      : close
+    closed      --> [*]
+
+    %%rbac role:agent|admin on Ticket.update
+    %%trigger cron:0 * * * * -> escalateStale on Ticket
+
+%% ---- Section 4: Workflow — ticket hooks ------------------------------------
+%%meta name: Ticket Hooks
+%%meta kind: workflow
+%%workflow TicketHooks entity: Ticket kind: hook
+flowchart TD
+    A[Client Request] --> B[Validate Request]
+    B --> C[beforeCreate: stampReference]
+    C --> D[Process Ticket]
+    D --> E[afterCreate: notifyCustomer]
+    E --> F[afterUpdate: logStatusChange]
+    F --> G[Response]
+
+    %%hook beforeCreate stampReference on Ticket
+    %%hook afterCreate notifyCustomer on Ticket
+    %%hook afterUpdate logStatusChange on Ticket
+
+%% ============================================================================
+%% Rule kinds — one graph rule per node type, and a process one of them starts.
+%% Used by scripts/e2e-rules-workflows (spec 08). Appended to the helpdesk model.
+%% ============================================================================
+
+%%meta name: Impact Not Negative
+%%meta kind: rules
+%%rule impactNotNegative on Ticket event: beforeCreate priority: 5
+flowchart TD
+    A([Rule]) --> B([Result])
+    %%jdm-graph {"nodes":[{"id":"input","type":"inputNode","name":"Ticket","position":{"x":80,"y":200}},{"id":"t","type":"decisionTableNode","name":"Impact not negative?","position":{"x":340,"y":200},"content":{"hitPolicy":"first","inputs":[{"id":"in1","name":"impact_score","field":"impact_score"}],"outputs":[{"id":"out1","name":"Action","field":"action"},{"id":"out2","name":"Message","field":"message"}],"rules":[{"_id":"r1","in1":"< 0","out1":"\"validation-error\"","out2":"\"Impact score cannot be negative\""},{"_id":"r2","in1":"","out1":"\"allow\"","out2":"\"\""}]}},{"id":"output","type":"outputNode","name":"Answer","position":{"x":680,"y":200}}],"edges":[{"id":"input-t","type":"edge","sourceId":"input","targetId":"t"},{"id":"t-output","type":"edge","sourceId":"t","targetId":"output"}]}
+
+%%meta name: Impact Ceiling
+%%meta kind: rules
+%%rule impactCeiling on Ticket event: beforeCreate priority: 6
+flowchart TD
+    A([Rule]) --> B([Result])
+    %%jdm-graph {"nodes":[{"id":"input","type":"inputNode","name":"Ticket","position":{"x":80,"y":200}},{"id":"x","type":"expressionNode","name":"Impact within range?","position":{"x":340,"y":200},"content":{"expressions":[{"id":"x1","key":"action","value":"impact_score > 100 ? \"validation-error\" : \"allow\""},{"id":"x2","key":"message","value":"impact_score > 100 ? \"Impact score cannot exceed 100\" : \"\""}]}},{"id":"output","type":"outputNode","name":"Answer","position":{"x":680,"y":200}}],"edges":[{"id":"input-x","type":"edge","sourceId":"input","targetId":"x"},{"id":"x-output","type":"edge","sourceId":"x","targetId":"output"}]}
+
+%%meta name: Forbidden Words
+%%meta kind: rules
+%%rule forbiddenWords on Ticket event: beforeCreate priority: 7
+flowchart TD
+    A([Rule]) --> B([Result])
+    %%jdm-graph {"nodes":[{"id":"input","type":"inputNode","name":"Ticket","position":{"x":80,"y":200}},{"id":"f","type":"functionNode","name":"No forbidden words","position":{"x":340,"y":200},"content":{"source":"export const handler = async (input) => {\n  const bad = String(input.subject || \"\").toLowerCase().includes(\"forbidden\");\n  return { action: bad ? \"validation-error\" : \"allow\", message: bad ? \"Subject contains a forbidden word\" : \"\" };\n};"}},{"id":"output","type":"outputNode","name":"Answer","position":{"x":680,"y":200}}],"edges":[{"id":"input-f","type":"edge","sourceId":"input","targetId":"f"},{"id":"f-output","type":"edge","sourceId":"f","targetId":"output"}]}
+
+%%meta name: Urgent Escalation
+%%meta kind: rules
+%%rule urgentEscalation on Ticket event: beforeCreate priority: 8
+flowchart TD
+    A([Rule]) --> B([Result])
+    %%jdm-graph {"nodes":[{"id":"input","type":"inputNode","name":"Ticket","position":{"x":80,"y":200}},{"id":"s","type":"switchNode","name":"Is it urgent?","position":{"x":340,"y":200},"content":{"hitPolicy":"first","statements":[{"id":"urgent","condition":"impact_score >= 80"},{"id":"normal","condition":"","isDefault":true}]}},{"id":"start","type":"expressionNode","name":"Start the escalation process","position":{"x":640,"y":200},"content":{"expressions":[{"id":"a1","key":"action","value":"\"trigger-workflow\""},{"id":"a2","key":"workflowName","value":"\"EscalateUrgent\""}]}},{"id":"skip","type":"expressionNode","name":"Nothing to do","position":{"x":640,"y":200},"content":{"expressions":[{"id":"b1","key":"action","value":"\"allow\""}]}},{"id":"output","type":"outputNode","name":"Answer","position":{"x":940,"y":200}}],"edges":[{"id":"input-s","type":"edge","sourceId":"input","targetId":"s"},{"id":"s-start","type":"edge","sourceId":"s","targetId":"start","sourceHandle":"urgent"},{"id":"s-skip","type":"edge","sourceId":"s","targetId":"skip","sourceHandle":"normal"},{"id":"start-output","type":"edge","sourceId":"start","targetId":"output"},{"id":"skip-output","type":"edge","sourceId":"skip","targetId":"output"}]}
+
+%% ---- Process — started by the Urgent Escalation rule ------------------------
+%%meta name: Escalate Urgent
+%%meta kind: workflow
+%%workflow EscalateUrgent entity: Ticket kind: saga trigger: rule
+flowchart TD
+    A([Urgent ticket]) --> B[Mark it urgent]
+    B --> C([Escalated])
+
+    %%step B UpdateEntity field: priority value: urgent
+
+%% ---- When each status was reached: stamped by the application ----
+%% A record moves by an action button, along an edge its state diagram draws,
+%% and the application writes the <state>_at time when it does.
+%%field Ticket.in_progress_at help: When this ticket moved to in progress. Stamped by the application when the move is made; nobody types it.
+%%field Ticket.closed_at help: When this ticket moved to closed. Stamped by the application when the move is made; nobody types it.
+%%field Ticket.resolved_at help: When this ticket moved to resolved. Stamped by the application when the move is made; nobody types it.
+%%section entity: Ticket; name: Progress; help: When this ticket reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: in_progress_at, closed_at | resolved_at | customer_id, agent_id | subject, description | impact_score, priority

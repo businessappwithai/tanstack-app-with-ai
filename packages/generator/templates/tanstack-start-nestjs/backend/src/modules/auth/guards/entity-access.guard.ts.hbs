@@ -1,10 +1,13 @@
 /**
  * Entity Access Guard — enforces the model's `%%rbac` directives.
  *
- * Runs after SessionAuthGuard, which is what puts the caller's roles on the
- * request. For each call naming an entity it asks one question: does
- * `sys_operation_access` close this (table, operation) pair to a set of roles,
- * and if so does the caller hold one of them?
+ * Runs after SessionAuthGuard, which is what puts the caller's capabilities on
+ * the request — every grant of every role they hold, read in one query through
+ * `sys_user_capability` and cached (CapabilityService). For each call naming an
+ * entity it asks one question: does some grant close this (table, operation)
+ * pair, and if so does the caller hold it? It also holds two things that are
+ * the model's shape rather than anyone's access: a record's state moves only by
+ * its action buttons, and a Final record is locked.
  *
  * ## It is not only /bus
  *
@@ -30,9 +33,10 @@
  * directive unsatisfiable — a restriction that locks out precisely the people
  * it was written to admit, which is worse than no restriction at all, and
  * invisible until someone is refused. Role names are names, not identifiers;
- * nothing distinguishes `manager` from `Manager`. The rules keep the author's
- * spelling so the admin UI shows what was written; only the comparison folds
- * case.
+ * nothing distinguishes `manager` from `Manager`. The grants keep the author's
+ * spelling so the admin UI shows what was written; the comparison is on
+ * `role_key`, which the database folds (case, and `_`/`-`/space as one
+ * separator) on both sides of the join.
  *
  * ## The table name must match the service's
  *
@@ -50,17 +54,23 @@
 
 import {
   CanActivate,
+  ConflictException,
   ExecutionContext,
   ForbiddenException,
   Inject,
   Injectable,
-  Logger,
   Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { DatabaseService } from '../../../database/database.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { getLogger } from '../../../common/logging/logger.service';
+import { STATE_FIELD_REFUSAL_CODE, stateFieldOf } from '../../../common/state-fields';
+import { isLocked, lifecycleOf } from '../../../common/lifecycle';
+import { CapabilityService, type Capabilities } from '../capability.service';
+
+/** `details.code` of the 409 a write to a Final record receives. */
+export const RECORD_FINAL_CODE = 'RECORD_FINAL';
 
 type Operation = 'create' | 'read' | 'update' | 'delete';
 
@@ -76,11 +86,11 @@ const METHOD_OPERATION: Record<string, Operation> = {
 
 @Injectable()
 export class EntityAccessGuard implements CanActivate {
-  private readonly logger = new Logger(EntityAccessGuard.name);
 
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
     @Optional() private readonly db?: DatabaseService,
+    @Optional() private readonly capabilities?: CapabilityService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -106,10 +116,10 @@ export class EntityAccessGuard implements CanActivate {
      * disabled every entity restriction in the application.
      */
     if (!this.db) {
-      this.logger.error(
-        'EntityAccessGuard has no DatabaseService, so %%rbac rules cannot be read. ' +
-          'Refusing rather than allowing — check the module wiring.',
-      );
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: 'module wiring',
+        reason: 'EntityAccessGuard has no DatabaseService, so %%rbac rules cannot be read; refusing',
+      });
       throw new ForbiddenException(
         'Access rules are unavailable. This is a server misconfiguration, not a permission you lack.',
       );
@@ -119,334 +129,220 @@ export class EntityAccessGuard implements CanActivate {
     const entity: string | undefined = request.params?.entity ?? request.params?.entityName;
     if (!entity) return true;
 
-    const operation = METHOD_OPERATION[String(request.method).toUpperCase()];
+    const operation = this.operationOf(request);
     if (!operation) return true;
 
     const tableName = this.getTableName(entity);
 
-    let allowedRoles: string[];
+    // What the caller's roles grant: put on the request by SessionAuthGuard from
+    // one query through sys_user_capability, cached per user. Read here, never
+    // queried — the decision is set membership.
+    let capabilities: Capabilities | undefined = request.capabilities;
     try {
-      const rows = await this.db.kysely
-        .selectFrom('sys_operation_access')
-        .select('role_name')
-        .where('table_name', '=', tableName)
-        .where('operation', '=', operation)
-        .where('is_active', '=', true)
-        .execute();
-      allowedRoles = rows.map((row: any) => row.role_name);
-    } catch (error: any) {
-      /*
-       * A missing table and a failed query are different things, and only the
-       * first is safe to read as "no rules".
-       *
-       * `sys_operation_access` is created by a migration, so an application
-       * whose database predates it must keep serving — that is the case this
-       * catch was written for. But it caught everything, so a connection blip,
-       * a lock timeout or a permissions error on the table also resolved to
-       * "unrestricted", and a transient fault silently disabled every entity
-       * restriction for the duration.
-       *
-       * PostgreSQL says which it is: 42P01 is undefined_table. That one keeps
-       * the old behaviour. Anything else is a lookup that should have worked,
-       * and an access decision that cannot be made is a refusal.
-       */
-      const undefinedTable =
-        error?.code === '42P01' || /relation .* does not exist/i.test(error?.message ?? '');
-
-      if (!undefinedTable) {
-        this.logger.error(
-          `Operation access lookup failed for ${tableName}.${operation}, refusing: ` +
-            `${error?.message ?? error}`,
-        );
-        throw new ForbiddenException(
-          'Access rules could not be read, so the request was refused. Please retry.',
-        );
+      if (!capabilities && this.capabilities) {
+        capabilities = await this.capabilities.forUser(request.user ?? {});
       }
-
-      this.logger.warn(
-        `Operation access lookup failed for ${tableName}.${operation}: ${error?.message ?? error}`,
+    } catch (error: any) {
+      capabilities = undefined;
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: "reading the caller's access",
+        reason: error?.message ?? String(error),
+      });
+    }
+    if (!capabilities || !this.capabilities) {
+      // An access decision that cannot be made is a refusal.
+      throw new ForbiddenException(
+        'Access rules could not be read, so the request was refused. Please retry.',
       );
-      return true;
     }
 
-    const user = request.user ?? {};
-
     // A master role is the administrator escape hatch the dictionary already
-    // recognises; it would be surprising for it to hold everywhere except here.
-    //
-    // It is an escape hatch from *access* rules — who may do a thing — and not
-    // from the model's own shape. The state machine is the latter: an edge the
-    // diagram never drew is not a permission an administrator is missing, it is
-    // a move that does not exist, and letting it through puts the record in a
-    // state every rule and workflow downstream was written without. So the
-    // master bypass stops here rather than returning, and the topology check
-    // below runs for everyone.
-    const isMaster = user.isMaster === true;
-
-    const held = this.rolesOf(user);
-    /*
-     * Case *and* separators, because the two sides are written differently by
-     * construction.
-     *
-     * `sys_operation_access.role_name` holds the model's own spelling —
-     * `computational_chemist`, straight out of the `%%rbac` directive — while
-     * `sys_role.name` holds the title-cased one the dictionary displays,
-     * `Computational Chemist`, and that is what the account is granted. Folding
-     * case alone left those two unequal, so every role whose name is more than
-     * one word was enforced as "nobody": the account the seed created for it
-     * was refused its own entities, and only a master role could read them. A
-     * single-word role matched by luck, which is why a model with `manager` and
-     * `member` in it showed nothing wrong.
-     */
-    /*
-     * Separators collapse to a single space rather than vanishing.
-     *
-     * Stripping them outright — `replace(/[\s\-_]+/g, '')` — folds
-     * `data_analyst` and `dataanalyst` to the same string, so two roles a model
-     * declares as distinct are enforced as one, and holding either grants both.
-     * Collapsing instead still equates the three spellings this has to equate
-     * (`computational_chemist`, `Computational Chemist`, `computational-chemist`)
-     * while keeping a word boundary that means something.
-     */
-    const foldRole = (role: string) =>
-      role.trim().toLowerCase().replace(/[\s\-_]+/g, ' ');
-    const heldFolded = new Set(held.map(foldRole));
-    const holdsOne = (roles: string[]) => roles.some((role) => heldFolded.has(foldRole(role)));
-
-    if (!isMaster && allowedRoles.length > 0 && !holdsOne(allowedRoles)) {
+    // recognises (CapabilityService.decide). It is an escape hatch from *access*
+    // rules, not from the model's own shape: the state field and the Final lock
+    // below hold for everyone.
+    const decision = await this.capabilities.decide(capabilities, 'op', tableName, operation);
+    if (!decision.allowed) {
       getLogger('auth').event('auth.access.denied', {
         resource: tableName,
         operation,
-        requiredRoles: allowedRoles,
+        requiredRoles: decision.roles,
       });
       throw new ForbiddenException(
         `Access denied. "${operation}" on "${tableName}" requires one of: ` +
-          `${allowedRoles.join(', ')}. Your roles: ${held.join(', ') || 'none'}.`,
+          `${decision.roles.join(', ')}. Your roles: ${capabilities.roles.join(', ') || 'none'}.`,
       );
     }
 
-    // An update may also be a state transition. Checked after the operation
-    // rule, because a caller refused the update outright never gets this far.
-    if (operation === 'update') {
-      await this.checkTransition(request, tableName, held, holdsOne, isMaster);
+    // A state field is system-managed: whoever is calling, a person never
+    // writes it. Checked after the operation rule, because a caller refused the
+    // write outright never gets this far.
+    if (operation === 'create' || operation === 'update') {
+      await this.checkStateFieldWrite(request, tableName, operation);
+    }
+
+    // The end of a flow is Final: such a record is neither edited nor deleted.
+    // Reopen (POST …/transition) is the way back, so only a record write is
+    // held here. A record with no flow is never locked — saving it is how it changes.
+    const method = String(request.method).toUpperCase();
+    if (['PUT', 'PATCH', 'DELETE'].includes(method)) {
+      await this.checkFinalLock(request, tableName);
     }
 
     return true;
   }
 
   /**
-   * Refuse an update that moves a record along a restricted transition.
-   *
-   * There is no named-transition endpoint in a generated application — moving a
-   * Lead along `convert` is a write to its status column — so the transition is
-   * identified by the pair of states the write crosses. Both ends matter: an
-   * event name can sit on several edges, and two events can land on the same
-   * state, so matching on the destination alone would restrict writes the model
-   * never mentioned.
+   * POST is a create, except on a record's own routes. Re-running the save
+   * pipeline (`…/:id/promote`) changes a record, so it needs update. Pressing a
+   * move (`…/:id/transition`) needs the record to be visible here, and the
+   * move's own grant in TransitionService: a role granted `close_won` may press
+   * it without being allowed to edit the record, and a move no grant names falls
+   * back to update permission there.
    */
-  private async checkTransition(
+  private operationOf(request: any): Operation | undefined {
+    const method = String(request.method).toUpperCase();
+    const url = String(request.url ?? '');
+    if (method === 'POST' && request.params?.id) {
+      if (/\/transition(\?|$)/.test(url)) return 'read';
+      if (/\/promote(\?|$)/.test(url)) return 'update';
+    }
+    return METHOD_OPERATION[method];
+  }
+
+  /** 409 RECORD_FINAL on a write to a record at the end of its flow. */
+  private async checkFinalLock(request: any, tableName: string): Promise<void> {
+    if (!String(request.url ?? '').includes('/bus/') || !request.params?.id) return;
+    const lifecycle = lifecycleOf(tableName);
+    if (!lifecycle) return;
+    let current: Record<string, any> | undefined;
+    try {
+      current = await this.db!.kysely
+        .selectFrom(tableName as any)
+        .select([lifecycle.column] as any)
+        .where('id' as any, '=', request.params.id)
+        .executeTakeFirst();
+    } catch (error: any) {
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: 'reading the lifecycle',
+        reason: error?.message ?? String(error),
+      });
+      return;
+    }
+    if (!current || !isLocked(lifecycle, current[lifecycle.column])) return;
+    throw new ConflictException({
+      message:
+        'This record is Final and cannot be changed. Reopen it to make changes — ' +
+        'an administrator, or a role allowed to reopen it, can.',
+      error: 'Conflict',
+      details: {
+        code: RECORD_FINAL_CODE,
+        entity: tableName,
+        id: request.params.id,
+        state: current[lifecycle.column],
+      },
+    });
+  }
+
+  /**
+   * Keep a person's request from changing a record's state.
+   *
+   * A state field — the column an entity's `kind: state` machine drives — is
+   * changed only by background workflows: a saga's UpdateEntity step, a rule
+   * that starts one, a hook, the application's own code. None of those passes
+   * through this guard, so anything that arrives here is a person's request,
+   * and the master role is no exception: the rule is about who writes a state,
+   * not about who is allowed to.
+   *
+   *   create   the value is dropped; the bus service starts the record in its
+   *            machine's initial state
+   *   update   a value equal to the stored one is dropped, so a form or a
+   *            client that sends the whole record back still saves; any other
+   *            value is refused with 403 and `STATE_FIELD_SYSTEM_MANAGED`
+   *
+   * A person moves a record by pressing one of its moves — POST
+   * `/bus/:entity/:id/transition`, which checks the edge, the role and the
+   * record's rules (TransitionService) — never by writing the column.
+   */
+  private async checkStateFieldWrite(
     request: any,
     tableName: string,
-    held: string[],
-    holdsOne: (roles: string[]) => boolean,
-    isMaster = false,
+    operation: 'create' | 'update',
   ): Promise<void> {
+    // Only /bus writes carry a record body; the workflow routes name an entity
+    // too, and their bodies are not records.
+    if (!String(request.url ?? '').includes('/bus/')) return;
     const body = request.body;
-    if (!body || typeof body !== 'object') return;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return;
 
-    // The two questions are asked of two different tables and must be asked
-    // independently:
-    //
-    //   sys_workflow_transitions   which moves exist at all — the shape of the
-    //                              lifecycle the model drew
-    //   sys_transition_access      who may make a given move — the `%%guard`
-    //                              directives layered on top of that shape
-    //
-    // They used to be asked together, from a single pass over the access rules,
-    // which made the topology check reachable only for edges that also carried
-    // a role restriction. A model that guards four of its six edges had the
-    // other two enforced by nothing: a record moved straight from `proposed` to
-    // `on_hold` with no such edge anywhere in the diagram, and no error.
-    let edges: Array<Record<string, any>>;
-    try {
-      edges = await this.db!.kysely
-        .selectFrom('sys_workflow_transitions' as any)
-        .select(['status_field', 'from_state', 'to_state'] as any)
-        .where('table_name' as any, '=', tableName)
-        .where('is_active' as any, '=', true)
-        .execute();
-    } catch (error: any) {
-      // A generated application whose database predates the transitions table
-      // still enforces role access below; it just cannot enforce topology.
-      this.logger.warn(
-        `Transition topology lookup failed for ${tableName}: ${error?.message ?? error}`,
-      );
-      edges = [];
+    const state = stateFieldOf(tableName);
+    if (!state || !(state.field in body)) return;
+
+    if (operation === 'create' || !request.params?.id) {
+      delete body[state.field];
+      return;
     }
-
-    let rules: Array<Record<string, any>>;
-    try {
-      rules = await this.db!.kysely
-        .selectFrom('sys_transition_access')
-        .select(['transition', 'status_field', 'from_state', 'to_state', 'role_name'])
-        .where('table_name', '=', tableName)
-        .where('is_active', '=', true)
-        .execute();
-    } catch (error: any) {
-      this.logger.warn(
-        `Transition access lookup failed for ${tableName}: ${error?.message ?? error}`,
-      );
-      rules = [];
-    }
-
-    if (edges.length === 0 && rules.length === 0) return;
-
-    // Every status column either table has an opinion about, narrowed to the
-    // ones this write actually sets. A write that touches none of them cannot
-    // move the record along an edge.
-    const statusFields = [
-      ...new Set(
-        [...edges, ...rules]
-          .map((row) => String(row.status_field))
-          .filter((field) => field && field in body),
-      ),
-    ];
-    if (statusFields.length === 0) return;
-
-    // The record's current state decides which edge is being crossed. Without
-    // an id there is no record to read — a create cannot be a transition — so
-    // there is nothing to enforce.
-    const id = request.params?.id;
-    if (!id) return;
 
     let current: Record<string, any> | undefined;
     try {
       current = await this.db!.kysely
         .selectFrom(tableName as any)
-        .select(statusFields as any)
-        .where('id' as any, '=', id)
+        .select([state.field] as any)
+        .where('id' as any, '=', request.params.id)
         .executeTakeFirst();
     } catch (error: any) {
-      this.logger.warn(
-        `Could not read current state of ${tableName}/${id}: ${error?.message ?? error}`,
-      );
+      getLogger('auth').event('auth.guard.unavailable', {
+        step: 'reading the state',
+        reason: error?.message ?? String(error),
+      });
+      current = undefined;
+    }
+
+    const stored = current ? String(current[state.field] ?? '') : undefined;
+    const sent = String(body[state.field] ?? '');
+    if (stored !== undefined && stored === sent) {
+      delete body[state.field];
       return;
     }
-    if (!current) return;
 
-    // ── Topology enforcement ─────────────────────────────────────────────────
-    // Refuse any status write that has no matching edge, regardless of role. A
-    // row in sys_workflow_transitions means the model drew the edge; its
-    // absence means it never did.
-    //
-    // Scoped per status column: a table whose lifecycle is declared on `status`
-    // says nothing about what some other status-like column may hold, and
-    // refusing a write to that column on the strength of `status`'s edges would
-    // block moves the model never restricted.
-    for (const field of statusFields) {
-      const fieldEdges = edges.filter((edge) => String(edge.status_field) === field);
-      if (fieldEdges.length === 0) continue;
-
-      const currentState = String(current[field] ?? '');
-      const targetState = String(body[field] ?? '');
-      if (!currentState || !targetState || currentState === targetState) continue;
-
-      const hasEdge = fieldEdges.some(
-        (edge) =>
-          String(edge.from_state) === currentState && String(edge.to_state) === targetState,
-      );
-      if (hasEdge) continue;
-
-      const reachable = fieldEdges
-        .filter((edge) => String(edge.from_state) === currentState)
-        .map((edge) => String(edge.to_state));
-      // Refused for every caller, the master role included: this is the model's
-      // shape, not an access rule. Logged as such — an operator seeing this
-      // needs to know the edge is missing from the diagram, not that somebody
-      // lacks a role.
-      getLogger('workflow').event('workflow.transition.refused', {
+    getLogger('workflow').event('workflow.transition.refused', {
+      entity: tableName,
+      recordId: request.params.id,
+      statusField: state.field,
+      from: stored ?? null,
+      to: sent,
+      reason: 'system-managed',
+    });
+    throw new ForbiddenException({
+      message:
+        `"${state.field}" on "${tableName}" is changed only by the record's moves, ` +
+        `never through a form. Use one of the record's action buttons (POST …/transition).`,
+      error: 'Forbidden',
+      details: {
+        code: STATE_FIELD_REFUSAL_CODE,
         entity: tableName,
-        recordId: id,
-        statusField: field,
-        from: currentState,
-        to: targetState,
-        reason: 'no-such-edge',
-      });
-      throw new ForbiddenException(
-        `Invalid transition: '${tableName}' has no edge from '${currentState}' to ` +
-          `'${targetState}'. Valid transitions from '${currentState}': ` +
-          // Parenthesised: without it the `||` binds to the whole concatenated
-          // message, which is never empty, so a state with no outgoing edge
-          // reported an empty list instead of saying so.
-          `${reachable.length > 0 ? reachable.join(', ') : 'none'}.`,
-      );
-    }
-
-    // ── Role enforcement ─────────────────────────────────────────────────────
-    // Only the edges the write is actually crossing, and only those the model
-    // put a `%%guard` on. An unguarded edge that passed the topology check
-    // above is open to anyone, which is what an unguarded edge means.
-    //
-    // This half is an access rule, so the master role does bypass it.
-    if (isMaster) return;
-
-    const targeted = rules.filter(
-      (rule) => String(body[rule.status_field] ?? '') === String(rule.to_state),
-    );
-    if (targeted.length === 0) return;
-
-    for (const rule of targeted) {
-      if (String(current[rule.status_field] ?? '') !== String(rule.from_state)) continue;
-
-      const allowed = targeted
-        .filter(
-          (candidate) =>
-            candidate.transition === rule.transition &&
-            candidate.from_state === rule.from_state &&
-            candidate.to_state === rule.to_state,
-        )
-        .map((candidate) => String(candidate.role_name));
-
-      if (holdsOne(allowed)) return;
-
-      getLogger('workflow').event('workflow.transition.refused', {
-        entity: tableName,
-        recordId: id,
-        statusField: String(rule.status_field),
-        from: String(rule.from_state),
-        to: String(rule.to_state),
-        reason: 'role-not-held',
-        requiredRoles: allowed,
-      });
-      throw new ForbiddenException(
-        `Access denied. Moving "${tableName}" from "${rule.from_state}" to ` +
-          `"${rule.to_state}" ("${rule.transition}") requires one of: ` +
-          `${allowed.join(', ')}. Your roles: ${held.join(', ') || 'none'}.`,
-      );
-    }
-  }
-
-  /**
-   * Every role name the caller holds, from all three places one can arrive.
-   *
-   * `sysRoles` is what SessionAuthGuard reads out of sys_user_roles; `roles`
-   * and `role` are Better Auth's. A rule may name a role from either system, so
-   * checking one source would make the directive work for some deployments and
-   * silently not others.
-   */
-  private rolesOf(user: Record<string, any>): string[] {
-    const names = new Set<string>();
-    for (const value of [...(user.sysRoles ?? []), ...(user.roles ?? [])]) {
-      if (typeof value === 'string' && value) names.add(value);
-    }
-    if (typeof user.role === 'string' && user.role) names.add(user.role);
-    return [...names];
+        field: state.field,
+        current: stored ?? null,
+      },
+    });
   }
 
   /** Deliberate copy of BusService.getTableName — see the note at the top. */
+  /**
+   * The tables the model declares. A bare name that is already one of them is
+   * not a plural: `dangerous_goods` is a table, and singularizing it to
+   * `dangerous_good` pointed the list, the form and the access check at a table
+   * that does not exist.
+   */
+  private static readonly MODEL_TABLES = new Set<string>([
+{{#each entities}}
+    '{{tableName}}',
+{{/each}}
+  ]);
+
   private getTableName(entity: string): string {
     const normalized = entity.toLowerCase().replace(/-/g, '_');
     if (normalized.startsWith('bus_')) return normalized;
+    if (EntityAccessGuard.MODEL_TABLES.has(`bus_${normalized}`)) return `bus_${normalized}`;
     return `bus_${this.singularize(normalized)}`;
   }
 

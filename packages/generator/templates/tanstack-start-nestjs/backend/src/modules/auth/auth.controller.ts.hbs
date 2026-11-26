@@ -12,11 +12,29 @@ import type { FastifyRequest } from 'fastify';
 import { SessionAuthGuard } from './guards/session-auth.guard';
 import { Public } from './decorators/public.decorator';
 import { DatabaseService } from '../../database/database.service';
+import { CapabilityService, type CapabilitiesView } from './capability.service';
 
 @Controller('me')
 @UseGuards(SessionAuthGuard)
 export class AuthController {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly capabilities: CapabilityService,
+  ) {}
+
+  /**
+   * What the caller's roles grant and what is restricted at all — so the front
+   * end draws a record's action buttons from where the record is, without a
+   * request per record. The server still decides every press.
+   */
+  private async access(req: any): Promise<CapabilitiesView | null> {
+    try {
+      const capabilities = req.capabilities ?? (await this.capabilities.forUser(req.user ?? {}));
+      return await this.capabilities.view(capabilities);
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * GET /api/me - Return the currently authenticated user
@@ -47,7 +65,7 @@ export class AuthController {
     }
 
     if (!sysUserId) {
-      return { role: user?.role ?? 'user', isMaster: false, windows: [] };
+      return { role: user?.role ?? 'user', isMaster: false, windows: [], access: await this.access(req) };
     }
 
     const roles = await this.db.kysely
@@ -59,7 +77,7 @@ export class AuthController {
       .execute();
 
     if (roles.length === 0) {
-      return { role: user?.role ?? 'user', isMaster: false, windows: [] };
+      return { role: user?.role ?? 'user', isMaster: false, windows: [], access: await this.access(req) };
     }
 
     const roleIds = roles.map((r: any) => r.sys_role_id);
@@ -89,6 +107,7 @@ export class AuthController {
     return {
       role: primaryRole,
       isMaster,
+      access: await this.access(req),
       windows: windows.map((w: any) => ({
         sys_window_id: w.sys_window_id,
         name: w.name,

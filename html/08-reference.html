@@ -62,7 +62,7 @@
     <tr><td><code>%%workflow</code></td><td><code>%%workflow Name entity: E kind: &lt;hook|state|saga&gt;</code></td><td>Names and classifies a workflow section.</td></tr>
     <tr><td><code>%%hook</code></td><td><code>%%hook &lt;type&gt; &lt;handler&gt; on E[field: c]</code></td><td>Binds a handler to a lifecycle event.</td></tr>
     <tr><td><code>%%step</code></td><td><code>%%step &lt;node&gt; &lt;StepType&gt; &lt;k&gt;: &lt;v&gt; …</code></td><td>Binds a saga flowchart node to an executable step.</td></tr>
-    <tr><td><code>%%rbac</code></td><td><code>%%rbac role:a|b on E.op</code></td><td>Restricts an operation or transition to roles.</td></tr>
+    <tr><td><code>%%rbac</code></td><td><code>%%rbac role:a|b on E.op</code></td><td>Restricts an operation (<code>create</code>, <code>read</code>, <code>update</code>, <code>delete</code>) to roles. Never a transition: only background workflows change a state (<code>EML215</code>).</td></tr>
     <tr><td><code>%%trigger</code></td><td><code>%%trigger cron:0 7 * * * -&gt; handler on E</code></td><td>An event source: <code>cron:</code>, <code>webhook:</code>, <code>message:</code>.</td></tr>
     <tr><td><code>%%guard</code></td><td><code>%%guard field &lt;op&gt; &lt;json&gt;</code></td><td>An automation condition (the builder's dialect).</td></tr>
     <tr><td><code>%%loop</code></td><td><code>%%loop L1 while: f &lt;op&gt; v max: n</code></td><td>Repeat-while inside an automation. <code>max:</code> is required.</td></tr>

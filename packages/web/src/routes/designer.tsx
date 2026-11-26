@@ -307,18 +307,18 @@ function DesignerPage() {
               <div className="space-y-4">
                 <div className="rounded-lg border bg-card">
                   <div className="border-b bg-muted/30 px-4 py-2">
-                    <h3 className="text-sm font-medium">Knex.js Migration</h3>
+                    <h3 className="text-sm font-medium">Kysely Migration</h3>
                   </div>
                   <pre className="overflow-auto p-4 text-sm">
                     <code className="text-muted-foreground">
                       {`// Code generation will be implemented here
 // Based on your ERD schema above
 
-export async function up(knex) {
+export async function up(db) {
   // Create tables
 }
 
-export async function down(knex) {
+export async function down(db) {
   // Drop tables
 }`}
                     </code>

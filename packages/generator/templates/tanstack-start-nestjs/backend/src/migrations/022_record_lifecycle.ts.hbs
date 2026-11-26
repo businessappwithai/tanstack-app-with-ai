@@ -1,0 +1,241 @@
+/**
+ * The record lifecycle — Draft, the status flow, Final — and who may move a record.
+ *
+ * ## One grant table
+ *
+ * `sys_operation_access` (may this role create / read / update / delete this
+ * table) and `sys_transition_access` (may this role press this move) said the
+ * same kind of thing in two shapes, and the second was filled by nothing. They are
+ * one table now, `sys_access_grant`:
+ *
+ *   kind = 'op'      action is create | read | update | delete
+ *   kind = 'move'    action is the move's event (or `from->to`), along a drawn edge
+ *   kind = 'reopen'  action is `reopen`: a Final record back to Draft
+ *
+ * The two old names stay, as read-only views over it, so a report or a screen that
+ * reads them keeps working.
+ *
+ * ## One query answers "what may this user do"
+ *
+ * `sys_user_capability` is one join chain — the user's roles, to the role, to its
+ * grants — on a role key both sides store already folded (`Sales Manager`,
+ * `sales_manager` and `sales-manager` are one role), so the join compares plain
+ * values on an index rather than folding in code on every request. A user with
+ * several roles gets the union of their grants: a role only ever adds access.
+ *
+ * `sys_access_version` is bumped by a trigger on any change to roles, role
+ * assignments or grants, and the trigger sends `pg_notify('access_changed')`, so
+ * every backend instance drops its cached capabilities on the next request.
+ *
+ * ## The rest
+ *
+ *   - `sys_record_transitions` — every move pressed, refused ones included
+ *   - `assigned_to` / `assigned_role` on every business table — who a record is with
+ *   - a draft that carries a failure message was an error all along; it says so now
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { Kysely, sql } from 'kysely';
+
+/** Every business table, for the per-table columns. */
+const BUS_TABLES: string[] = [
+{{#each entities}}
+  '{{tableName}}',
+{{/each}}
+];
+
+/** The fold every role name is compared under — one statement, in SQL. */
+const ROLE_KEY = sql.raw(`lower(regexp_replace(trim(name), '[[:space:]_-]+', ' ', 'g'))`);
+const GRANT_ROLE_KEY = sql.raw(`lower(regexp_replace(trim(role_name), '[[:space:]_-]+', ' ', 'g'))`);
+
+async function isTable(db: Kysely<any>, name: string): Promise<boolean> {
+  const { rows } = await sql<{ kind: string }>`
+    SELECT c.relkind AS kind FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = ${name} AND n.nspname = current_schema()
+  `.execute(db);
+  return rows[0]?.kind === 'r';
+}
+
+export async function up(db: Kysely<any>): Promise<void> {
+  // ── Role keys ──────────────────────────────────────────────────────────────
+  await sql`
+    ALTER TABLE sys_role
+    ADD COLUMN IF NOT EXISTS role_key VARCHAR(100) GENERATED ALWAYS AS (${ROLE_KEY}) STORED
+  `.execute(db);
+  await sql`CREATE INDEX IF NOT EXISTS idx_sys_role_role_key ON sys_role (role_key)`.execute(db);
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_sys_user_roles_user
+    ON sys_user_roles (sys_user_id) WHERE is_active
+  `.execute(db);
+
+  // ── The grant table ────────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS sys_access_grant (
+      sys_access_grant_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      kind VARCHAR(10) NOT NULL,
+      table_name VARCHAR(100) NOT NULL,
+      action VARCHAR(100) NOT NULL,
+      status_field VARCHAR(100) NOT NULL DEFAULT '',
+      from_state VARCHAR(100) NOT NULL DEFAULT '',
+      to_state VARCHAR(100) NOT NULL DEFAULT '',
+      role_name VARCHAR(100) NOT NULL,
+      role_key VARCHAR(100) GENERATED ALWAYS AS (${GRANT_ROLE_KEY}) STORED,
+      entity_type VARCHAR(40) NOT NULL DEFAULT 'D',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_by VARCHAR(100) NOT NULL DEFAULT 'system',
+      updated_by VARCHAR(100) NOT NULL DEFAULT 'system',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      CONSTRAINT sys_access_grant_kind CHECK (kind IN ('op', 'move', 'reopen')),
+      CONSTRAINT sys_access_grant_unique
+        UNIQUE (kind, table_name, action, from_state, to_state, role_name)
+    )
+  `.execute(db);
+  // The two lookups: one user's grants (through the view), and the policy — which
+  // (table, kind, action) are restricted at all, the same for every user.
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_sys_access_grant_role
+    ON sys_access_grant (role_key, table_name, kind) WHERE is_active
+  `.execute(db);
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_sys_access_grant_policy
+    ON sys_access_grant (table_name, kind, action) WHERE is_active
+  `.execute(db);
+
+  // ── The old tables: copied in, then views ──────────────────────────────────
+  if (await isTable(db, 'sys_operation_access')) {
+    await sql`
+      INSERT INTO sys_access_grant
+        (kind, table_name, action, role_name, entity_type, is_active, created_by, updated_by)
+      SELECT 'op', table_name, operation, role_name, entity_type, is_active, created_by, updated_by
+      FROM sys_operation_access
+      ON CONFLICT DO NOTHING
+    `.execute(db);
+    await sql`DROP TABLE sys_operation_access`.execute(db);
+  }
+  if (await isTable(db, 'sys_transition_access')) {
+    await sql`
+      INSERT INTO sys_access_grant
+        (kind, table_name, action, status_field, from_state, to_state, role_name,
+         entity_type, is_active, created_by, updated_by)
+      SELECT 'move', table_name, transition, status_field, from_state, to_state, role_name,
+             entity_type, is_active, created_by, updated_by
+      FROM sys_transition_access
+      ON CONFLICT DO NOTHING
+    `.execute(db);
+    await sql`DROP TABLE sys_transition_access`.execute(db);
+  }
+  await sql`
+    CREATE OR REPLACE VIEW sys_operation_access AS
+    SELECT sys_access_grant_id AS sys_operation_access_id, table_name, action AS operation,
+           role_name, entity_type, is_active, created_by, updated_by, created_at, updated_at
+    FROM sys_access_grant WHERE kind = 'op'
+  `.execute(db);
+  await sql`
+    CREATE OR REPLACE VIEW sys_transition_access AS
+    SELECT sys_access_grant_id AS sys_transition_access_id, table_name, action AS transition,
+           status_field, from_state, to_state, role_name, entity_type, is_active,
+           created_by, updated_by, created_at, updated_at
+    FROM sys_access_grant WHERE kind IN ('move', 'reopen')
+  `.execute(db);
+
+  // ── One join chain: what a user may do ─────────────────────────────────────
+  await sql`
+    CREATE OR REPLACE VIEW sys_user_capability AS
+    SELECT ur.sys_user_id, r.sys_role_id, r.name AS role_name, r.role_key, r.is_master_role,
+           g.kind, g.table_name, g.action, g.from_state, g.to_state
+    FROM sys_user_roles ur
+    JOIN sys_role r ON r.sys_role_id = ur.sys_role_id
+    LEFT JOIN sys_access_grant g ON g.role_key = r.role_key AND g.is_active
+    WHERE ur.is_active
+  `.execute(db);
+
+  // ── A change to access is announced ────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS sys_access_version (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      version BIGINT NOT NULL DEFAULT 1,
+      changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT sys_access_version_one CHECK (id = 1)
+    )
+  `.execute(db);
+  await sql`INSERT INTO sys_access_version (id) VALUES (1) ON CONFLICT DO NOTHING`.execute(db);
+  await sql`
+    CREATE OR REPLACE FUNCTION sys_access_changed() RETURNS trigger AS $$
+    BEGIN
+      UPDATE sys_access_version SET version = version + 1, changed_at = NOW() WHERE id = 1;
+      PERFORM pg_notify('access_changed', TG_TABLE_NAME);
+      RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql
+  `.execute(db);
+  for (const table of ['sys_role', 'sys_user_roles', 'sys_access_grant']) {
+    await sql.raw(`DROP TRIGGER IF EXISTS trg_${table}_access_changed ON ${table}`).execute(db);
+    await sql.raw(`
+      CREATE TRIGGER trg_${table}_access_changed
+      AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON ${table}
+      FOR EACH STATEMENT EXECUTE FUNCTION sys_access_changed()
+    `).execute(db);
+  }
+
+  // ── Every move pressed ─────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS sys_record_transitions (
+      sys_record_transition_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      table_name VARCHAR(100) NOT NULL,
+      record_id UUID NOT NULL,
+      event VARCHAR(100),
+      from_state VARCHAR(100),
+      to_state VARCHAR(100) NOT NULL,
+      outcome VARCHAR(20) NOT NULL,
+      message TEXT,
+      actor_id VARCHAR(100),
+      actor_name VARCHAR(255),
+      assigned_to UUID,
+      assigned_role VARCHAR(100),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT sys_record_transitions_outcome
+        CHECK (outcome IN ('moved', 'refused', 'failed'))
+    )
+  `.execute(db);
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_sys_record_transitions_record
+    ON sys_record_transitions (table_name, record_id, created_at DESC)
+  `.execute(db);
+
+  // ── Who a record is with, and errors called errors ─────────────────────────
+  for (const table of BUS_TABLES) {
+    await sql.raw(`
+      ALTER TABLE ${table}
+        ADD COLUMN IF NOT EXISTS assigned_to UUID,
+        ADD COLUMN IF NOT EXISTS assigned_role VARCHAR(100)
+    `).execute(db);
+    await sql.raw(`
+      UPDATE ${table} SET doc_status = 'error'
+      WHERE doc_status = 'draft' AND doc_status_message IS NOT NULL
+    `).execute(db);
+  }
+}
+
+export async function down(db: Kysely<any>): Promise<void> {
+  for (const table of BUS_TABLES) {
+    await sql.raw(`
+      ALTER TABLE ${table} DROP COLUMN IF EXISTS assigned_role, DROP COLUMN IF EXISTS assigned_to
+    `).execute(db);
+  }
+  await sql`DROP TABLE IF EXISTS sys_record_transitions`.execute(db);
+  for (const table of ['sys_role', 'sys_user_roles', 'sys_access_grant']) {
+    await sql.raw(`DROP TRIGGER IF EXISTS trg_${table}_access_changed ON ${table}`).execute(db);
+  }
+  await sql`DROP FUNCTION IF EXISTS sys_access_changed()`.execute(db);
+  await sql`DROP TABLE IF EXISTS sys_access_version`.execute(db);
+  await sql`DROP VIEW IF EXISTS sys_user_capability`.execute(db);
+  await sql`DROP VIEW IF EXISTS sys_transition_access`.execute(db);
+  await sql`DROP VIEW IF EXISTS sys_operation_access`.execute(db);
+  await sql`DROP TABLE IF EXISTS sys_access_grant`.execute(db);
+  await sql`DROP INDEX IF EXISTS idx_sys_user_roles_user`.execute(db);
+  await sql`ALTER TABLE sys_role DROP COLUMN IF EXISTS role_key`.execute(db);
+}

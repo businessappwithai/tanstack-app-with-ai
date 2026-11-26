@@ -61,6 +61,18 @@ interface ProjectStore {
   stopProject: (id: string) => Promise<void>;
 }
 
+// Preserve the same operation ID when a network failure leaves the outcome uncertain.
+const pendingSaves = new Map<string, { fingerprint: string; requestId: string }>();
+function saveRequest(projectId: string, kind: string, code: string, description?: string) {
+  const key = `${projectId}:${kind}`;
+  const fingerprint = JSON.stringify([code, description]);
+  const previous = pendingSaves.get(key);
+  if (previous?.fingerprint === fingerprint) return previous.requestId;
+  const requestId = crypto.randomUUID();
+  pendingSaves.set(key, { fingerprint, requestId });
+  return requestId;
+}
+
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   // Initial state
   projects: [],
@@ -202,12 +214,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       // Create a new version
-      await erdVersionsApi.create(id, {
+      await erdVersionsApi.saveDraft(id, {
         mermaidCode: code,
         description,
-        createdBy: "user",
+        requestId: saveRequest(id, "draft", code, description),
+        expectedCommit: get().currentProject?.gitCommit,
       });
 
+      pendingSaves.delete(`${id}:draft`);
       // Update the project's ERD code
       await get().loadProject(id);
       set({ isLoading: false });
@@ -227,8 +241,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       await erdVersionsApi.create(projectId, {
         mermaidCode: code,
         description,
-        createdBy: "user",
+        requestId: saveRequest(projectId, "version", code, description),
+        expectedCommit: get().currentProject?.gitCommit,
       });
+      pendingSaves.delete(`${projectId}:version`);
       await get().loadProject(projectId);
       set({ isLoading: false });
     } catch (error) {

@@ -90,6 +90,20 @@ export class DatabaseService {
 
       if (spec.value === undefined || spec.value === null || spec.value === '') continue;
 
+      // `in` over nothing matches nothing — a "waiting for me" list with no
+      // moves to make is empty, not unfiltered.
+      if (spec.operator === 'in' && Array.isArray(spec.value) && spec.value.length === 0) {
+        query = query.where(sql<boolean>`false`);
+        continue;
+      }
+      // Mine or nobody's: a record assigned to this person, or to no one.
+      if (spec.operator === '= or null') {
+        query = query.where((eb: any) =>
+          eb.or([eb(key as any, '=', spec.value as any), eb(key as any, 'is', null)]),
+        );
+        continue;
+      }
+
       if (spec.operator === 'ilike') {
         // Cast, so a pattern match works on any column the dictionary offers
         // rather than only the text ones.

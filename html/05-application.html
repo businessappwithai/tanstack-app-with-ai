@@ -183,7 +183,9 @@
   <img src="img/32-crm-enum-dropdowns.png" alt="The Lead form with Lead Source, Rating and Status rendered as Dropdown selects while Score stays an integer input and Owner Id stays a Direct Lookup.">
   <figcaption>
     <b>Enums and lookups side by side.</b> Three dropdowns from <code>%%field … enum:</code>, one integer,
-    two lookups. The difference between a dropdown and a text box here is one line in the model.
+    two lookups. The difference between a dropdown and a text box here is one line in the model. Status is
+    the one exception now: a state machine's column is shown read-only in the record's header, because
+    only background workflows change it.
   </figcaption>
 </figure>
 

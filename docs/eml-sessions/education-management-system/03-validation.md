@@ -3,6 +3,10 @@
 Every step that touched the `.mmd` closed the same way (§10.0): edit → fixer →
 checker → clean. One line per step, with the counts before and after.
 
+> **Revision 1.1.0.** The table and the two sections after it are the log of the original
+> nineteen-entity session and keep their original figures (19 entities, 11 machines, 68 `%%rbac`,
+> 40 reports). The log for the current 25-entity model is the last section.
+
 Engine: `bun language/checker.ts` from the checkout, which is
 `language/checker.ts` itself — the same engine `appwithai.org/guide/checker.js`
 is built from. The published runner and the site's scorer were then run over the
@@ -76,3 +80,55 @@ OK   saga writes Student    -> suspended
   `EML290`–`EML296` validate the shape and nothing else. `check-reporting-pack.ts`
   in `app-and-report-with-ai-tanstack` executes every query against a real
   generated schema; it was not run in this session.
+
+## Revision 1.1.0, then the four gaps closed — the current bytes
+
+Five entities were added after the original session (`00-research.md` §10). Nothing below
+reconstructs the steps that added them; it records what was run **over the file as it is**, with the
+published modules (`guide/checker.js`, `guide/audit-model.mjs`, EML 1.2.0), so the verdict is the one a
+reader gets from `appwithai.org`:
+
+```
+$ node guide/check-model.mjs education-management-system.mmd
+pass 1   checkAndFix 0e 0w 0i · repaired: false
+pass 2   check       0e 0w 0i
+pass 3   check       0e 0w 0i
+
+OK — 0 errors, 0 warnings (EML 1.2.0)        exit 0
+
+$ node guide/audit-model.mjs education-management-system.mmd
+23 passed, 0 failed
+```
+
+The audit reports, among its lines: 25 entities and 25 primary keys; 48 foreign keys, each ending
+`_id` and each carrying `FK`; 17 status columns bound to enums (38 `%%field … enum:` bindings);
+16 state machines, each with an initial transition and a terminal state; 63 sagas with 111 steps;
+26 `%%hook` directives; help on 25 entities and 274 columns; every form laid out in `%%section` rows
+(63 section lines); and 4 line items declared, none left on the dashboard.
+
+Two of its figures are not the model's. The scorer counts every line that *contains* `%%rbac` or
+`%%action`, and the file mentions each once or twice in comments, so it prints 96 and 44 where the
+model has **94 `%%rbac`** and **43 `%%action`** directives — the figures the rest of these documents and
+the website use.
+
+The header comment of the `.mmd` itself was out of date in the delivered file (it still said nineteen
+entities, five lifecycles and two sagas) and has been corrected to twenty-five, sixteen and seven.
+
+### Still not verified here
+
+- **The report SQL against a live schema** — by hand. CI does it (`02-cross-cutting.md`, "The reporting
+  pass"); this session did not.
+- **Anything that needs a running application.** The deployable archive for this model was generated in
+  a browser and inspected (24 `bus_` tables at the time, 25 now, the model byte-identical inside, the reporting pack present),
+  but `docker compose up --build` was not run on it.
+
+### The four gaps closed
+
+`progress.md` questions 6–8 and the refund approver were open; each is now in the model:
+
+1. **`Student.has_support_plan`** is derived by `SupportPlanHooks` (true while a plan is `active` or `under_review`) and its help says so.
+2. **A paid `Refund` moves its invoice.** `refundControl` starts `RefundReopensInvoice` or `RefundReissuesInvoice`, guarded by `applied_to_invoice_at == null` because the runtime does not de-duplicate a saga. Every state a saga writes is a state the invoice machine draws from every state the hook can leave it in: `paid → part_paid`, `paid → issued`, `part_paid → issued`, with `part_paid → part_paid` and `overdue → part_paid` already there. The hook leaves an overdue, draft or cancelled invoice alone.
+3. **A reporting teacher hears the outcome** through the new `ConcernFeedback` entity, readable by `teacher`, written by the concern's hooks, holding no student.
+4. **`refuseSelfApprovedRefund`** refuses an approver who is the requester.
+
+The checker reports 0 errors, 0 warnings and the audit 23 passed, 0 failed on the new bytes. What a running application does with the two refund sagas, the seven hooks' handler bodies and `refuseSelfApprovedRefund` has **not** been exercised here: the handlers are stubs an author fills in, and no application was generated from this revision.

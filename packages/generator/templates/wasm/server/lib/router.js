@@ -146,7 +146,7 @@ export class Router {
       const result = await matched.route.handler(request, ctx);
       return result instanceof Response ? result : errorResponse(new Error("Handler returned no Response"));
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, request.method);
     }
   }
 }

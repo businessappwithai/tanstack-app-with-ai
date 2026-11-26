@@ -70,8 +70,6 @@ export interface AD_Field {
   is_readonly: boolean;
   is_mandatory: boolean;
   sequence: number;
-  x_position?: number;
-  y_position?: number;
   field_group_id?: string;
   display_logic?: string;
   created_at: Date;

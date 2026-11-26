@@ -1,0 +1,24 @@
+import { Kysely, sql } from 'kysely';
+
+/**
+ * The Field window, made to match what the application does with it.
+ *
+ * - `sys_reference_id` — the Field window's Reference Type Override. The window
+ *   offered it and the service saved it, into a column `sys_field` never had, so
+ *   every save that carried it failed. The form now draws a field with this
+ *   reference when it is set, and with its column's when it is not.
+ * - `x_position` / `y_position` are dropped. A form is laid out by Sequence,
+ *   Same Line and Column Span alone; two more numbers saying the same thing
+ *   could only disagree with them.
+ */
+export async function up(db: Kysely<any>): Promise<void> {
+  await sql`ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS sys_reference_id INTEGER`.execute(db);
+  await sql`ALTER TABLE sys_field DROP COLUMN IF EXISTS x_position`.execute(db);
+  await sql`ALTER TABLE sys_field DROP COLUMN IF EXISTS y_position`.execute(db);
+}
+
+export async function down(db: Kysely<any>): Promise<void> {
+  await sql`ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS y_position INTEGER`.execute(db);
+  await sql`ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS x_position INTEGER`.execute(db);
+  await sql`ALTER TABLE sys_field DROP COLUMN IF EXISTS sys_reference_id`.execute(db);
+}

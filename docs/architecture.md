@@ -4,7 +4,7 @@
 
 APPWITHAI is an AI-powered Entity Relationship Design & Code Generation platform built with:
 
-- **Runtime**: Bun.js 1.3+ (Node.js 20+ compatible)
+- **Runtime**: Bun.js 1.4.4+ (Node.js 20+ compatible)
 - **AI Framework**: Mastra.ai, CopilotKit, AG-UI
 - **AI Model**: Anthropic Claude Sonnet 4
 - **Frontend**: TanStack Start 1+, Vite 5+, React 18+, Shadcn UI, TailwindCSS

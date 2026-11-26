@@ -25,6 +25,12 @@
 | `has_sibling_enrolled` | boolean | — | Set where a brother or sister is already enrolled. Sibling priority is school policy, and this is the field the admission banding rule reads. |
 | `admission_band` | string | OPTIONAL | priority — meets the attainment bar or carries sibling priority; standard — the ordinary offer queue; review — needs a person to look, because something is missing or borderline. Set by the admission banding rule on submission; an admissions officer may overwrite it, and the override is what the banding-override report shows. |
 | `decision_notes` | text | OPTIONAL | Why the decision went the way it did, written for the family's file rather than for the assessor. Required in practice for a rejection, because it is what the appeal is answered from. |
+| `under_review_at` | datetime | OPTIONAL | When the move to under review was recorded on this admission application. Recording it moves an admission application from submitted to under review: the workflows set the status, which nobody changes by hand. |
+| `offer_made_at` | datetime | OPTIONAL | When the move to offer made was recorded on this admission application. Recording it moves an admission application from under review to offer made: the workflows set the status, which nobody changes by hand. |
+| `rejected_at` | datetime | OPTIONAL | When the move to rejected was recorded on this admission application. Recording it moves an admission application from under review to rejected: the workflows set the status, which nobody changes by hand. |
+| `accepted_at` | datetime | OPTIONAL | When the move to accepted was recorded on this admission application. Recording it moves an admission application from offer made to accepted: the workflows set the status, which nobody changes by hand. |
+| `declined_at` | datetime | OPTIONAL | When the move to declined was recorded on this admission application. Recording it moves an admission application from offer made to declined: the workflows set the status, which nobody changes by hand. |
+| `withdrawn_at` | datetime | OPTIONAL | When the move to withdrawn was recorded on this admission application. Recording it moves an admission application from submitted, under review or offer made to withdrawn: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -73,7 +79,19 @@ No outputs: the engine finds no actions, by design (§3.4).
 - `bandStandard transform when: has_sibling_enrolled == false and prior_attainment_score < 70 field: admission_band value: standard`
 - `bandForReview transform when: prior_attainment_score == null field: admission_band value: review`
 - `requireDecisionNotesOnRejection validation-error when: status == "rejected" and decision_notes == null message: A rejected application needs a note — it is what the appeal is answered from.`
+- `requireDecisionNotesOnRejectionOnMove validation-error when: rejected_at != null and decision_notes == null message: A rejected application needs a note — it is what the appeal is answered from.`
 - `enrolOnAcceptance trigger-workflow when: status == "accepted" workflow: AdmissionToEnrolment`
+
+### `admissionApplicationStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `moveSubmittedToUnderReview trigger-workflow when: status == "submitted" and under_review_at != null workflow: AdmissionApplicationUnderReviewMove`
+- `moveUnderReviewToOfferMade trigger-workflow when: status == "under_review" and offer_made_at != null workflow: AdmissionApplicationOfferMadeMove`
+- `moveUnderReviewToRejected trigger-workflow when: status == "under_review" and rejected_at != null workflow: AdmissionApplicationRejectedMove`
+- `moveOfferMadeToAccepted trigger-workflow when: status == "offer_made" and accepted_at != null workflow: AdmissionApplicationAcceptedMove`
+- `moveOfferMadeToDeclined trigger-workflow when: status == "offer_made" and declined_at != null workflow: AdmissionApplicationDeclinedMove`
+- `moveSubmittedToWithdrawn trigger-workflow when: status == "submitted" and withdrawn_at != null workflow: AdmissionApplicationWithdrawnMove`
+- `moveUnderReviewToWithdrawn trigger-workflow when: status == "under_review" and withdrawn_at != null workflow: AdmissionApplicationWithdrawnMove`
+- `moveOfferMadeToWithdrawn trigger-workflow when: status == "offer_made" and withdrawn_at != null workflow: AdmissionApplicationWithdrawnMove`
 
 ## Hooks
 
@@ -89,6 +107,24 @@ Sagas that touch it:
   - `B CreateEntity entity: Student as: newStudentId fields: {"first_name":"applicant_first_name","last_name":"applicant_last_name","date_of_birth":"applicant_date_of_birth","year_group":"year_group_applied_for","status":"enrolled","has_support_plan":false}`
   - `C UpdateEntity field: student_id source: newStudentId`
   - `D CreateEntity entity: FeeInvoice as: newInvoiceId fields: {"student_id":"newStudentId","academic_term_id":"academic_term_id","status":"draft","total_amount":0,"amount_paid":0,"balance_due":0}`
+- **AdmissionApplicationUnderReviewMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: under_review`
+  - `C UpdateEntity field: offer_made_at value: null`
+  - `D UpdateEntity field: rejected_at value: null`
+  - `E UpdateEntity field: withdrawn_at value: null`
+- **AdmissionApplicationOfferMadeMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: offer_made`
+  - `C UpdateEntity field: accepted_at value: null`
+  - `D UpdateEntity field: declined_at value: null`
+  - `E UpdateEntity field: withdrawn_at value: null`
+- **AdmissionApplicationRejectedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: rejected`
+- **AdmissionApplicationAcceptedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: accepted`
+- **AdmissionApplicationDeclinedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: declined`
+- **AdmissionApplicationWithdrawnMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: withdrawn`
 
 ## Access
 
@@ -97,8 +133,6 @@ Sagas that touch it:
 | `read` | principal · admissions_officer · registrar |
 | `create` | admissions_officer |
 | `update` | admissions_officer · principal |
-| `make_offer` | admissions_officer · principal |
-| `reject` | principal |
 
 ## Open questions
 

@@ -11,6 +11,7 @@ coverage/
 *.spec.ts
 
 # Allow test files inside source packages and generated-projects
+!packages/yamltecture/test/*.test.ts
 !packages/**/__tests__/*.test.ts
 !packages/**/__tests__/*.spec.ts
 !generated-projects/**/*.test.ts
@@ -23,6 +24,10 @@ coverage/
 # the two specs beside it did not.
 !tests/**/*.e2e.spec.ts
 !tests/**/*.spec.ts
+# The rule and workflow editors' own suite lives in scripts/, and its specs were
+# never committed for the same reason: `bun run test:e2e:rules-workflows` found
+# a config and no tests.
+!scripts/e2e-rules-workflows/specs/*.spec.ts
 
 # Generated projects runtime artifacts
 packages/web/generated-projects/
@@ -106,7 +111,7 @@ docker/ca-certificates/*.crt
 # dependencies, build output or lockfile.
 
 # PGlite vendored beside the guide by `bun run vendor:pglite` — 17MB of
-# WebAssembly, fetched on demand rather than committed.
+# WebAssembly, put there by that script rather than committed. Never a CDN.
 html/assets/vendor/
 
 # The WASM stack's inlined assets are generated, and are committed anyway.
@@ -148,3 +153,15 @@ graphify-out/
 
 # A per-developer profile for a local model endpoint. Personal tooling.
 .openclaude-profile.json
+
+# Local runtime pid file
+.appwithai-web.pid
+language.zip
+
+# The rule and workflow editors are vendored from packages/editors/src at generation time.
+packages/generator/templates/tanstack-start-nestjs/frontend/src/editors/
+scripts/e2e-rules-workflows/screenshots/
+
+# TypeScript incremental-build caches. Every package builds with `bun build`;
+# nothing reads these, and a committed one records whatever toolchain wrote it.
+*.tsbuildinfo

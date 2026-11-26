@@ -7,20 +7,18 @@ import { apiClient } from "@/lib/api-client";
 import "ankareport/dist/ankareport.css";
 
 interface ReportDesignerProps {
+  /** The storage key the design is filed under. Never shown. */
   tableName: string;
-  /** Column names available in this entity for the data-source tree */
-  columns: string[];
+  /**
+   * The data-source tree: the window's fields under their own labels, bound by
+   * the key the record carries. Labels used to be guessed from column names
+   * (`balance_due` → "Balance Due"), which is right until a field is renamed.
+   */
+  fields: Array<{ label: string; field: string }>;
   onSaved?: () => void;
 }
 
-function toLabel(columnName: string): string {
-  return columnName
-    .replace(/_id$/, "")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-export function ReportDesigner({ tableName, columns, onSaved }: ReportDesignerProps) {
+export function ReportDesigner({ tableName, fields, onSaved }: ReportDesignerProps) {
   // A callback ref rather than `useRef`: the effect then runs when the element
   // exists rather than on the render that asked for it, which is the difference
   // wherever the mount is deferred — a portal, a tab, a suspended boundary.
@@ -35,7 +33,7 @@ export function ReportDesigner({ tableName, columns, onSaved }: ReportDesignerPr
     let cancelled = false;
     let instance: { dispose?: () => void } | undefined;
 
-    const dataSource = columns.map((col) => ({ label: toLabel(col), field: col }));
+    const dataSource = fields;
 
     const start = async () => {
       // AnkaReport's `browser` entry is its UMD build, so the bundler hands
@@ -99,7 +97,7 @@ export function ReportDesigner({ tableName, columns, onSaved }: ReportDesignerPr
         el.removeChild(el.firstChild);
       }
     };
-  }, [container, tableName, columns, onSaved]);
+  }, [container, tableName, fields, onSaved]);
 
   return (
     <div className="flex flex-col h-full">

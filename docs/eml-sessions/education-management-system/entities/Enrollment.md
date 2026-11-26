@@ -17,6 +17,9 @@
 | `withdrawal_reason` | text | OPTIONAL | Why the student left the group — timetable clash, subject change, medical, exclusion. Required on withdrawal, and the subject-change reports are built entirely from it. |
 | `final_grade` | string | OPTIONAL | distinction, merit, pass, borderline, fail — the outcome recorded when the section completes; incomplete — the student left or missed too much of the course to be graded. Written once at term end and never edited afterwards; a correction is a documented re-grade. |
 | `attendance_rate` | decimal | — | The percentage of held sessions this student was present for, maintained by the attendance hook as marks are entered. Held on the enrolment rather than computed because it is the number the pastoral team sorts by every week, and the statutory floor is measured against it. |
+| `enrolled_at` | datetime | OPTIONAL | When the move to enrolled was recorded on this enrollment. Recording it moves an enrollment from pending to enrolled: the workflows set the status, which nobody changes by hand. |
+| `completed_at` | datetime | OPTIONAL | When the move to completed was recorded on this enrollment. Recording it moves an enrollment from enrolled to completed: the workflows set the status, which nobody changes by hand. |
+| `failed_at` | datetime | OPTIONAL | When the move to failed was recorded on this enrollment. Recording it moves an enrollment from enrolled to failed: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -53,6 +56,13 @@ withdrawn --> [*]
 - `requireEnrolmentWithdrawalReason validation-error when: status == "withdrawn" and withdrawal_reason == null message: A student leaving a group needs a reason — the subject-change reports are built from it.`
 - `refuseGradeBeforeCompletion validation-error when: status == "pending" and final_grade != null message: A final grade cannot be recorded on an enrolment that has not been placed yet.`
 - `requireGradeOnCompletion validation-error when: status == "completed" and final_grade == null message: A completed enrolment needs a final grade.`
+- `requireGradeOnCompletionOnMove validation-error when: completed_at != null and final_grade == null message: A completed enrolment needs a final grade.`
+
+### `enrollmentStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `movePendingToEnrolled trigger-workflow when: status == "pending" and enrolled_at != null workflow: EnrollmentEnrolledMove`
+- `moveEnrolledToCompleted trigger-workflow when: status == "enrolled" and completed_at != null workflow: EnrollmentCompletedMove`
+- `moveEnrolledToFailed trigger-workflow when: status == "enrolled" and failed_at != null workflow: EnrollmentFailedMove`
 
 ## Hooks
 
@@ -68,6 +78,14 @@ Sagas that touch it:
 
 - **SectionCancellation**
   - `B UpdateEntity entity: Enrollment targetField: class_section_id field: status value: withdrawn`
+- **EnrollmentEnrolledMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: enrolled`
+  - `C UpdateEntity field: completed_at value: null`
+  - `D UpdateEntity field: failed_at value: null`
+- **EnrollmentCompletedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: completed`
+- **EnrollmentFailedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: failed`
 
 ## Access
 
@@ -76,7 +94,6 @@ Sagas that touch it:
 | `read` | principal · registrar · head_of_department · teacher · finance_officer · guardian |
 | `create` | registrar |
 | `update` | registrar · head_of_department |
-| `withdraw` | registrar · principal |
 
 ## Open questions
 

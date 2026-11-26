@@ -43,8 +43,8 @@ const app = (page: Page): FrameLocator => page.frameLocator("#frame");
 
 /** Console errors that are the page's own fault, as opposed to the noise below. */
 const IGNORED_CONSOLE = [
-  // The page probes for a vendored PGlite with a HEAD request and falls back to
-  // the CDN when there is none. A 404 there is the probe working.
+  // The page probes for the PGlite served beside it with a HEAD request; a 404
+  // there is the probe working (and the run step then says what is missing).
   /assets\/vendor\/pglite/,
   // `/api/auth/me` before sign-in is how the application discovers it has no
   // session. A 401 is the answer, not a failure.
@@ -191,14 +191,18 @@ test.describe
       }
 
       expect(tally.Entities).toBe("17");
-      expect(tally.Rules).toBe("8");
+      // 9 and 10: a record moves by its action buttons, so no rule or saga
+      // moves it; the ninth rule starts the closed-won handoff when a deal is
+      // won. The processes are the five status flows and the five sagas.
+      expect(tally.Rules).toBe("9");
       expect(tally.Processes).toBe("10");
-      // 32, not 15: the CRM model declares a `%%rbac … .read` rule per entity on
-      // top of its write restrictions, which is what gives each seeded role its
-      // own set of windows. html/models/crm.eml.mmd is the copy this page loads
-      // and it must stay identical to language/examples/crm.eml.mmd — they had
-      // drifted, and this number is what noticed.
-      expect(tally["Access rules"]).toBe("32");
+      // 72: the CRM model declares a `%%rbac … .read` rule per entity on top of
+      // its write restrictions, which is what gives each seeded role its own
+      // set of windows, and 48 moves, each the button of the roles it names.
+      // html/models/crm.eml.mmd is the copy this page loads and it must stay identical to
+      // language/examples/crm.eml.mmd — they had drifted, and this number is
+      // what noticed.
+      expect(tally["Access rules"]).toBe("72");
 
       await expect(page.locator("#build-phases .build__phase").nth(2)).toHaveAttribute(
         "data-state",
@@ -423,6 +427,96 @@ test.describe
       await shoot(page, "reports");
     });
 
+    /**
+     * The second application: Enterprise Reporting, drawn in the platform's
+     * own shell, with its own sign-in and a working Administration section.
+     *
+     * What this holds: the platform's sidebar is there; a report runs; the
+     * administrator can narrow a role's tables and the narrowing is enforced on
+     * the next request, not on the next boot; the log records it; and a
+     * reporting role that is not an administrator never sees the section.
+     */
+    test("the reporting application signs in separately and is administered", async () => {
+      await app(page).locator(".masthead__name").click();
+      await app(page).locator(".card--reporting").first().click();
+
+      const frame = app(page);
+      // The frame on this page is narrower than 1024px, so the preview is in
+      // the platform's small-screen layout: the sidebar is a slide-over behind
+      // the menu button, exactly as the platform's own is at that width.
+      const nav = async (label: string) => {
+        const toggle = frame.getByRole("button", { name: "Toggle menu" });
+        if (await toggle.isVisible()) {
+          // The slide-over stays open after a selection, so toggling on every
+          // visit closes it and leaves the item translated out of the viewport.
+          const open = await frame
+            .locator(".er-sidebar-mobile")
+            .evaluate((el) => el.classList.contains("is-open"));
+          if (!open) await toggle.click();
+          // The preview frame sits below the fold of the host page, and the
+          // drawer's scroller is nested under a fixed slide-over — Playwright's
+          // auto-scroll reaches neither, so bring both into view first.
+          await page.locator("#frame").evaluate((el) => el.scrollIntoView({ block: "center" }));
+          const item = frame.locator(".er-sidebar-mobile .er-nav__item", { hasText: label });
+          await item.evaluate((el) => el.scrollIntoView({ block: "center" }));
+          await item.click();
+        } else {
+          await frame.locator(".er-sidebar-desktop .er-nav__item", { hasText: label }).click();
+        }
+      };
+      const adminHeading = frame.locator(".er-sidebar-mobile .er-nav__heading", {
+        hasText: "Administration",
+      });
+
+      await expect(frame.locator(".er-login__title")).toHaveText("Welcome back", {
+        timeout: 30_000,
+      });
+      await frame.locator("button[type=submit]").click(); // the administrator is prefilled
+      await expect(frame.locator(".er-pageheader__title")).toHaveText("Dashboard");
+      await expect(frame.locator(".er-sidebar-mobile .er-sidebar__logo")).toContainText(
+        "Enterprise Reports"
+      );
+      await expect(adminHeading).toHaveCount(1);
+
+      // A report runs against the database in the tab.
+      await nav("Reports");
+      await frame.locator(".er-table tbody tr").first().click();
+      await expect(frame.locator(".er-card__description").first()).toContainText(
+        /\d+ rows? in \d+ms/
+      );
+
+      // Take one table away from the Support Agent, and it is refused at once.
+      await nav("Permissions");
+      await frame.locator(".er-select--inline").selectOption({ label: "Support Agent" });
+      const account = frame.locator(".er-grant", { hasText: "bus_account ·" });
+      await expect(account.locator("input")).toBeChecked();
+      await account.locator("input").uncheck();
+      await frame.getByRole("button", { name: "Save Permissions" }).click();
+      await expect(
+        frame.locator(".er-grant", { hasText: "bus_account ·" }).locator("input")
+      ).not.toBeChecked();
+
+      await nav("System Logs");
+      await expect(frame.locator(".er-table")).toContainText("update permissions");
+      await expect(frame.locator(".er-table")).toContainText("run report");
+      await shoot(page, "reporting-admin");
+
+      // As the Support Agent: no Administration, and the table it lost is gone.
+      await frame.locator(".er-avatar").click();
+      await frame.getByRole("button", { name: "Log out" }).click();
+      await frame.locator(".er-accounts__row", { hasText: "Support Agent" }).click();
+      await frame.locator("button[type=submit]").click();
+      await expect(frame.locator(".er-kpi").first()).toBeVisible();
+      await expect(adminHeading).toHaveCount(0);
+      await expect(frame.locator(".er-card", { hasText: "Data access" })).not.toContainText(
+        "bus_account"
+      );
+
+      // Leave the way a reader would, so the next test finds the application.
+      await frame.locator(".er-avatar").click();
+      await frame.getByRole("button", { name: /Back to/ }).click();
+    });
+
     test("nothing in the console was the page's own fault", async () => {
       expect(problems).toEqual([]);
     });
@@ -562,12 +656,13 @@ test.describe("@browser the checker refuses a broken model", () => {
 
     /* Help on the entity and the column, because the corrected half of this
        fixture has to be a model the checker finds *nothing* to say about:
-       EML152 and EML153 report an entity and columns with none, and the page
+       EML152 and EML153 report an entity and columns with none, EML170 an
+       entity with no %%section, and the page
        shows its diagnostics panel for a warning as readily as for an error. */
     const model = (entity: string) =>
       [
         "%%meta name: Bad RBAC",
-        `%%rbac role:admin on ${entity}.delete`,
+        `%%rbac role:administrator on ${entity}.delete`,
         "erDiagram",
         "    Customer {",
         "        string id PK",
@@ -576,6 +671,7 @@ test.describe("@browser the checker refuses a broken model", () => {
         "",
         "%%entity Customer help: A person or organisation that buys from us. Created when a lead converts, and never deleted while an unpaid invoice stands against it.",
         "%%field Customer.name help: The trading name to address on correspondence and to print on an invoice. Not necessarily the registered legal entity.",
+        "%%section entity: Customer; name: Details; help: The customer's trading name, as it appears on correspondence and invoices.; rows: name",
         "",
       ].join("\n");
 
@@ -626,7 +722,7 @@ test.describe("@browser assembling the real stack in a tab", () => {
       ).trim();
     }
     expect(tally.Entities).toBe("17");
-    expect(tally.Rules).toBe("8");
+    expect(tally.Rules).toBe("9");
     // The CLI writes 416 files for this model; the browser writes the same but
     // for the nine binary fonts, which do not survive a JSON transport.
     expect(Number(tally.Files)).toBeGreaterThan(400);
@@ -682,12 +778,13 @@ test.describe("@browser assembling the real stack in a tab", () => {
 
     /* Help on the entity and the column, because the corrected half of this
        fixture has to be a model the checker finds *nothing* to say about:
-       EML152 and EML153 report an entity and columns with none, and the page
+       EML152 and EML153 report an entity and columns with none, EML170 an
+       entity with no %%section, and the page
        shows its diagnostics panel for a warning as readily as for an error. */
     const model = (entity: string) =>
       [
         "%%meta name: Bad RBAC",
-        `%%rbac role:admin on ${entity}.delete`,
+        `%%rbac role:administrator on ${entity}.delete`,
         "erDiagram",
         "    Customer {",
         "        string id PK",
@@ -696,6 +793,7 @@ test.describe("@browser assembling the real stack in a tab", () => {
         "",
         "%%entity Customer help: A person or organisation that buys from us. Created when a lead converts, and never deleted while an unpaid invoice stands against it.",
         "%%field Customer.name help: The trading name to address on correspondence and to print on an invoice. Not necessarily the registered legal entity.",
+        "%%section entity: Customer; name: Details; help: The customer's trading name, as it appears on correspondence and invoices.; rows: name",
         "",
       ].join("\n");
 

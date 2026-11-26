@@ -1,0 +1,62 @@
+/**
+ * Shared by the browser specs: signing in to each of the two products, and the
+ * model facts the specs pick their subjects from.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { expect, type Page } from "@playwright/test";
+
+import { config } from "../harness/config.ts";
+import { reportConfig, reportingPack } from "../harness/reporting.ts";
+import { entities, stateMachines } from "../harness/index.ts";
+
+export const appUrl = process.env.E2E_APP_URL ?? "http://localhost:{{config.frontendPort}}";
+export const reportUrl = reportConfig.baseUrl;
+
+/** Sign in to the generated application and wait for its dashboard. */
+export async function signInToApp(page: Page): Promise<void> {
+  await page.goto(`${appUrl}/login`);
+  await page.locator('input[type="email"]').fill(config.admin.email);
+  await page.locator('input[type="password"]').fill(config.admin.password);
+  await page.locator('button[type="submit"]').click();
+  await page.waitForURL("**/dashboard", { timeout: 120_000 });
+}
+
+/** Sign in to the reporting platform (a separate product, a separate account). */
+export async function signInToPlatform(page: Page, email: string, password: string): Promise<void> {
+  await page.goto(`${reportUrl}/login`);
+  await page.getByPlaceholder("name@example.com").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign In" }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 60_000 });
+}
+
+/**
+ * A dashboard's id by name, read through the signed-in page's own session.
+ * The list is paginated, so a dashboard that is not on the first page is not
+ * one a test can click.
+ */
+export async function dashboardIdByName(page: Page, name: string): Promise<string> {
+  for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
+    const response = await page.request.get(`${reportUrl}/api/dashboards?page=${pageIndex}&pageSize=200`);
+    expect(response.ok()).toBe(true);
+    const body = (await response.json()) as { data?: { items?: Array<{ id: string; name: string }> } };
+    const items = body.data?.items ?? [];
+    const found = items.find((item) => item.name === name);
+    if (found) return found.id;
+    if (items.length < 200) break;
+  }
+  throw new Error(`The platform has no dashboard called "${name}"`);
+}
+
+/** The strings the platform draws when a chart or report could not be rendered. */
+export const renderFailures = [
+  "Error rendering chart",
+  "Error rendering report",
+  "No chart data available",
+  "No report data available",
+];
+
+export { entities, reportingPack, stateMachines };

@@ -163,6 +163,9 @@ describe("application dictionary — references", () => {
         for (const fk of foreignKeyFields(entity)) {
           const field = byColumn.get(fk.name);
           if (!field) continue; // absence is 02b's failure, not this one's
+          // A reference to an entity the model never declares has no table to
+          // point at; the application degrades it to a plain value on purpose.
+          if (!harness.resolveParentEntity(fk.name)) continue;
           const target = field.ref_table_name;
           if (!target || !registeredTables.has(target)) {
             unresolved.push(`${fk.name}→${target ?? "unresolved"}`);
@@ -179,6 +182,23 @@ describe("application dictionary — references", () => {
         for (const fk of foreignKeyFields(entity)) {
           const field = byColumn.get(fk.name);
           if (!field?.ref_table_name) continue; // covered by the test above
+          // The dictionary labels a record by a name-ish column, a code, the
+          // first text column, or — for a join entity — its first two parents.
+          // A target with none of those (a dated figure with one parent) has
+          // nothing to show but its id, which is the documented last resort.
+          const target = entities.find((item) => item.tableName === field.ref_table_name);
+          const hasLabelSource =
+            !target ||
+            foreignKeyFields(target).length >= 2 ||
+            target.fields.some(
+              (item) =>
+                !item.isForeignKey &&
+                item.name !== "id" &&
+                !(item.enumValues && item.enumValues.length > 0) &&
+                !item.name.endsWith("_id") &&
+                (item.type === "string" || item.type === "text")
+            );
+          if (!hasLabelSource) continue;
           const labels = field.ref_label_fields;
           if (!Array.isArray(labels) || labels.length === 0) unlabelled.push(fk.name);
         }

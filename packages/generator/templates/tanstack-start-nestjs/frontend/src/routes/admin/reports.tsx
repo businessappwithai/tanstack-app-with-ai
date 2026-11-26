@@ -1,18 +1,28 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useChildMatches } from "@tanstack/react-router";
 import { ArrowRight, FileText, Home, Plus } from "lucide-react";
+import { useMemo } from "react";
 import { ADSidebar } from "@/components/admin/ad-sidebar";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { useDictionaryTabs } from "@/hooks/use-dictionary-windows";
 
 export const Route = createFileRoute("/admin/reports")({
-  component: ReportsListPage,
+  component: ReportsRoute,
 });
 
-interface SysTable {
-  sys_table_id: number;
-  table_name: string;
-  name: string;
+/**
+ * The list, or the designer beneath it.
+ *
+ * `reports.$tableName.tsx` is this route's child, and a parent that renders no
+ * `<Outlet />` renders only itself — so every "Edit Design" link changed the
+ * address and left the list on screen, and no administrator could open the
+ * designer for any entity. A wrapper rather than an early return inside the
+ * list, whose hooks would then run on one render and not the next.
+ */
+function ReportsRoute() {
+  const children = useChildMatches();
+  return children.length > 0 ? <Outlet /> : <ReportsListPage />;
 }
 
 interface ReportDesign {
@@ -23,17 +33,22 @@ interface ReportDesign {
 }
 
 function ReportsListPage() {
-  const { data: tablesData } = useQuery({
-    queryKey: ["sys-tables-for-reports"],
-    queryFn: () => apiClient.get<{ data: SysTable[] }>("/sys/tables", { limit: 200 }),
-  });
+  // One card per record type, named as its window names it. The designs are
+  // filed under the storage key, which is the link's value and nothing more.
+  const { data: dictionary } = useDictionaryTabs();
 
   const { data: designs } = useQuery({
     queryKey: ["report-designs-list"],
     queryFn: () => apiClient.get<ReportDesign[]>("/sys/report-designs"),
   });
 
-  const tables: SysTable[] = tablesData?.data ?? [];
+  const tables = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(dictionary ?? [])]
+      .sort((a, b) => a.level - b.level)
+      .filter((tab) => (seen.has(tab.tableName) ? false : (seen.add(tab.tableName), true)))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [dictionary]);
   const designMap = new Map<string, ReportDesign>(
     (designs ?? []).map((d) => [d.table_name, d])
   );
@@ -72,15 +87,15 @@ function ReportsListPage() {
 
         <div className="flex-1 overflow-auto px-8 py-8">
           {tables.length === 0 ? (
-            <p className="text-muted-foreground">No entity tables found.</p>
+            <p className="text-muted-foreground">No windows found.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {tables.map((table) => {
-                const design = designMap.get(table.table_name);
+                const design = designMap.get(table.tableName);
                 return (
                   <Link
-                    key={table.sys_table_id}
-                    to={`/admin/reports/${table.table_name}` as never}
+                    key={table.tabId}
+                    to={`/admin/reports/${table.tableName}` as never}
                     className="group relative rounded-xl border border-border bg-card p-6 hover:border-primary/50 hover:shadow-md transition-all"
                   >
                     <div className="flex items-start justify-between mb-3">
@@ -96,8 +111,12 @@ function ReportsListPage() {
                         </span>
                       )}
                     </div>
-                    <h3 className="font-semibold text-foreground mb-1">{table.name}</h3>
-                    <p className="text-xs text-muted-foreground font-mono">{table.table_name}</p>
+                    <h3 className="font-semibold text-foreground mb-1">{table.label}</h3>
+                    {table.help && (
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {table.help.split("\n")[0]}
+                      </p>
+                    )}
                     {design && (
                       <p className="text-xs text-muted-foreground mt-2">
                         Last updated: {new Date(design.updated_at).toLocaleDateString()}

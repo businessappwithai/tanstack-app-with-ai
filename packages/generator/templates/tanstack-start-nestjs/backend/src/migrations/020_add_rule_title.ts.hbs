@@ -1,0 +1,19 @@
+import { Kysely, sql } from 'kysely';
+
+/**
+ * A rule's display title, beside its name.
+ *
+ * `rule_name` is an identifier — it is what a process looks a rule up by, and
+ * what the unique key on (entity, operation, name) is made of. The editor lets
+ * an author name a rule in words ("Late flag at fifteen") and files it under
+ * the identifier it makes of them (`lateFlagAtFifteen`). The modelling tool
+ * keeps the words in the model; this column is where a running application
+ * keeps them, so the rule reads the same in both places. Nothing evaluates it.
+ */
+export async function up(db: Kysely<any>): Promise<void> {
+  await sql`ALTER TABLE sys_rule_definitions ADD COLUMN IF NOT EXISTS title VARCHAR(200)`.execute(db);
+}
+
+export async function down(db: Kysely<any>): Promise<void> {
+  await sql`ALTER TABLE sys_rule_definitions DROP COLUMN IF EXISTS title`.execute(db);
+}

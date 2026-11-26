@@ -146,12 +146,12 @@ describe("transaction notifications", () => {
     if (!fetched.ok) return;
 
     // The notification and the badge on the record cannot disagree: a record
-    // reported final must be final, and one reported failed must still be a
-    // draft carrying its reason.
+    // reported done has moved on — into its flow, or to Final — and one
+    // reported failed is in Error, carrying its reason.
     if (finalize.outcome === "succeeded") {
-      expect(fetched.data.doc_status).toBe("final");
+      expect(["active", "final"]).toContain(fetched.data.doc_status);
     } else {
-      expect(fetched.data.doc_status).toBe("draft");
+      expect(fetched.data.doc_status).toBe("error");
     }
   });
 

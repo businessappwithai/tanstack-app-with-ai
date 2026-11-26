@@ -21,15 +21,16 @@ const EML = readFileSync(join(ROOT, "examples/drug-discovery.eml.mmd"), "utf-8")
 const PROJECT = "vitest-model-context";
 const embed = hashEmbedder();
 
-/** Skip rather than fail where no database is configured. */
+/** Skip rather than fail where no database is configured or pgvector is not installed. */
 async function databaseReachable(): Promise<boolean> {
   if (!process.env.DATABASE_URL) return false;
   try {
     const { Pool } = await import("pg");
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
     await pool.query("select 1");
+    const ext = await pool.query("SELECT 1 FROM pg_type WHERE typname = 'vector'");
     await pool.end();
-    return true;
+    return (ext.rowCount ?? 0) > 0;
   } catch {
     return false;
   }

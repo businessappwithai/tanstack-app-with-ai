@@ -27,7 +27,7 @@ import {
   type Relationship,
 } from "@appwithai/core/types";
 import { type CompiledHook, HOOK_CONTRACTS, hooksByEntity } from "../../hooks";
-import { generatedLogSpec } from "../../logging/generated-spec";
+import { generatedErrorCatalogue, generatedLogSpec } from "../../logging/generated-spec";
 import type { EntityCategory } from "../../parsers/category.parser";
 import { type CompiledRbac, hasRbacRules, rbacRoleNames } from "../../rbac";
 import { deriveAccess } from "../../rbac/roles";
@@ -45,6 +45,39 @@ import {
 } from "../../workflows";
 import { BaseGenerator } from "../base.generator";
 import { DEFAULT_FRONTEND_PORT } from "../ports";
+import { buildFkConstraints } from "./fk-constraints";
+import { formLayoutFor } from "../../parsers/section.parser";
+import {
+  DOC_STATUS_COLUMN,
+  STATE_FIELD_REFUSAL_CODE,
+  stateFieldOf,
+} from "../../../../../language/state-field";
+import { renderLifecycleModule } from "./lifecycle-module";
+
+/**
+ * Carry an entity's `%%section` layout into the template context.
+ *
+ * `formGroups` is the sections, in order, for the seed to insert as
+ * sys_field_group rows on the entity's tab; each attribute's `layout` is where
+ * its field sits — group, order, column, row, span. An entity with no sections
+ * gets neither, and the seed writes the flat list it always has. The browser
+ * stack takes the same layout from `formLayoutFor` through the dictionary
+ * generator, so one model lays out the same way in both.
+ */
+export function withFormLayout<
+  T extends { attributes: Array<{ name: string }>; formSections?: unknown[] },
+>(entity: T): T {
+  const layout = formLayoutFor(entity as unknown as Parameters<typeof formLayoutFor>[0]);
+  if (!layout) return entity;
+  return {
+    ...entity,
+    formGroups: layout.groups,
+    attributes: entity.attributes.map((attribute) => ({
+      ...attribute,
+      layout: layout.fields.get(attribute.name),
+    })),
+  };
+}
 
 /** Escape a value for embedding inside a single-quoted JS string literal. */
 function jsQuote(value: string): string {
@@ -227,6 +260,12 @@ export class NestJsBackendGenerator extends BaseGenerator {
     // Generate the notifications module (static files) — the bell's backend
     await this.generateNotificationsModule(outputDir);
 
+    // The route the browser reports its errors to
+    await this.generateClientLogsModule(outputDir);
+
+    // Administrators change a log level on a running process
+    await this.generateLoggingModule(outputDir, context);
+
     // Generate workflow-definitions module (static files)
     await this.generateWorkflowDefinitionsModule(outputDir);
 
@@ -293,6 +332,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
          never written, and creating it left every generated application with
          an empty directory. The auth decorators live under
          `src/modules/auth/decorators`, which is created with that module. */
+      "src/common/errors",
       "src/common/filters",
       "src/common/guards",
       "src/common/interceptors",
@@ -310,6 +350,8 @@ export class NestJsBackendGenerator extends BaseGenerator {
       "src/modules/rules/jdm",
       "src/modules/audit",
       "src/modules/notifications",
+      "src/modules/client-logs",
+      "src/modules/logging",
       "src/modules/workflow",
       "src/modules/workflow-definitions",
       "src/trigger",
@@ -340,7 +382,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
      */
     const declared = declaredEntityNames(entities);
     const busEntities = entities
-      .map((entity) => entityToBusEntity(entity, declared))
+      .map((entity) => withFormLayout(entityToBusEntity(entity, declared)))
       .sort((a, b) => Number(!!a.parentEntity) - Number(!!b.parentEntity));
 
     // Generate dictionary entries using the proper helper function
@@ -408,6 +450,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
         : "postgres";
 
     const fkOverrides = this.buildFkOverrides(busEntities, relationships);
+    const fkConstraints = buildFkConstraints(busEntities, relationships);
 
     return {
       project: {
@@ -432,6 +475,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
       projectKebab: this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       entities: busEntities,
       relationships,
+      fkConstraints,
       fkOverrides,
       sysTables,
       sysColumns,
@@ -452,8 +496,16 @@ export class NestJsBackendGenerator extends BaseGenerator {
         ...rule,
         // The status column the machine drives. Mirrors the resolution in the
         // workflow-definitions seed, which is what puts a record into a state
-        // in the first place.
-        statusField: this.statusFieldFor(rule.tableName, busEntities),
+        // in the first place. An entity with no machine moves on doc_status.
+        statusField: this.hasMachine(rule.entity)
+          ? this.statusFieldFor(rule.tableName, busEntities)
+          : DOC_STATUS_COLUMN,
+        // A drawn edge is a move; anything else the compiler accepted is a Final
+        // state back to Draft — a reopen, which only the roles named may make.
+        edges: rule.edges.map((edge) => ({
+          ...edge,
+          kind: this.isDrawnEdge(rule.entity, edge.from, edge.to) ? "move" : "reopen",
+        })),
       })),
       rbacRoles: rbacRoleNames(rbac),
       hasRbac: hasRbacRules(rbac),
@@ -473,6 +525,21 @@ export class NestJsBackendGenerator extends BaseGenerator {
    * transition rule has to name the same column the transition writes. Reading
    * a different one would make every transition restriction inert.
    */
+  /** The entity's state machine, when the model draws one. */
+  private machineOf(entity: string): CompiledWorkflow | undefined {
+    return (this.options.compiledWorkflows ?? []).find((workflow) => workflow.entity === entity);
+  }
+
+  private hasMachine(entity: string): boolean {
+    return this.machineOf(entity) !== undefined;
+  }
+
+  private isDrawnEdge(entity: string, from: string, to: string): boolean {
+    return (this.machineOf(entity)?.transitions ?? []).some(
+      (edge) => edge.from === from && edge.to === to
+    );
+  }
+
   private statusFieldFor(
     tableName: string,
     busEntities: Array<{
@@ -482,7 +549,7 @@ export class NestJsBackendGenerator extends BaseGenerator {
   ): string {
     const entity = busEntities.find((candidate) => candidate.tableName === tableName);
     const columns = (entity?.attributes ?? []).map((a) => a.columnName ?? a.name);
-    return columns.includes("status") ? "status" : "workflow_status";
+    return stateFieldOf(columns.filter((name): name is string => !!name)) ?? "workflow_status";
   }
 
   /**
@@ -688,6 +755,21 @@ export class NestJsBackendGenerator extends BaseGenerator {
       generatedLogSpec()
     );
 
+    // The errors the application can raise. The catalogue is derived from the
+    // same spec as log-spec.json, so a code means one thing in the log and in the
+    // response; the two modules beside it are plain TypeScript and are copied.
+    await fs.mkdir(path.join(outputDir, "src/common/errors"), { recursive: true });
+    await fs.writeFile(
+      path.join(outputDir, "src/common/errors/catalogue.ts"),
+      generatedErrorCatalogue()
+    );
+    for (const file of ["app-error.ts", "classify.ts"]) {
+      await fs.copyFile(
+        path.join(this.resolvedTemplateDir, "src/common/errors", file),
+        path.join(outputDir, "src/common/errors", file)
+      );
+    }
+
     // Auth module decorators and guards (in module path for BetterAuth integration)
     try {
       const publicDecoratorContent = await this.renderTemplate(
@@ -797,6 +879,12 @@ export class NestJsBackendGenerator extends BaseGenerator {
     } catch (_e) {
       console.warn("Dictionary write guard template not found");
     }
+
+    // What a user's roles grant, one query and cached — read by every guard.
+    await fs.writeFile(
+      path.join(outputDir, "src/modules/auth/capability.service.ts"),
+      await this.renderTemplate("src/modules/auth/capability.service.ts.hbs", context)
+    );
 
     // Auth controller and module
     try {
@@ -984,8 +1072,20 @@ export class NestJsBackendGenerator extends BaseGenerator {
   /** Shared JDM file writer — used by both full generation and generateSingleEntity. */
   private async writeEntityJdm(busEntity: any, outputDir: string): Promise<void> {
     try {
+      // A state field is never required of the writer: the system puts a new
+      // record into the machine's initial state, and a person may not send one.
+      // A "<Status> is required" row would refuse every create the guard had
+      // just stripped the state from.
+      const hasMachine = (this.options.compiledWorkflows ?? []).some(
+        (workflow) => workflow.entity === busEntity.name || workflow.entity === busEntity.className
+      );
+      const columns: string[] = (busEntity.attributes ?? []).map((a: any) => a.columnName ?? a.name);
+      const stateField = hasMachine ? stateFieldOf(columns) : undefined;
       let jdmContent = await this.renderTemplate("src/modules/rules/jdm/entity.jdm.json.hbs", {
         ...busEntity,
+        attributes: (busEntity.attributes ?? []).map((a: any) =>
+          stateField && (a.columnName ?? a.name) === stateField ? { ...a, required: false } : a
+        ),
       });
       jdmContent = cleanJsonContent(jdmContent);
       jdmContent = JSON.stringify(normalizeJdmDecisionTables(JSON.parse(jdmContent)), null, 2);
@@ -1506,7 +1606,12 @@ export async function executeCustomValidateHooks(
     );
 
     // Draft → final promotion pipeline
-    for (const name of ["entity-promotion.service", "promotion-dispatcher.service"]) {
+    // …and the moves a record makes after it: its action buttons.
+    for (const name of [
+      "entity-promotion.service",
+      "promotion-dispatcher.service",
+      "transition.service",
+    ]) {
       const content = await this.renderTemplate(`src/modules/bus/${name}.ts.hbs`, context);
       await fs.writeFile(path.join(outputDir, `src/modules/bus/${name}.ts`), content);
     }
@@ -1662,6 +1767,46 @@ export async function executeCustomValidateHooks(
         slug: "add_dictionary_icons",
         template: "src/migrations/019_add_dictionary_icons.ts.hbs",
       },
+      // A rule's display title, beside the identifier it is filed under.
+      {
+        slug: "add_rule_title",
+        template: "src/migrations/020_add_rule_title.ts.hbs",
+      },
+      // The Field window's Reference Type Override gets its column; X and Y
+      // Position go — Sequence, Same Line and Column Span lay a form out.
+      {
+        slug: "field_dictionary",
+        template: "src/migrations/021_field_dictionary.ts.hbs",
+      },
+      // The record lifecycle: one grant table (the two access tables become
+      // views over it), the one-join capability view, the transition log and
+      // the assignee columns.
+      {
+        slug: "record_lifecycle",
+        template: "src/migrations/022_record_lifecycle.ts.hbs",
+        required: true,
+      },
+      // A status flow an administrator redraws in Rules and workflows: the
+      // compiled lifecycle stored with the diagram, and a notification so
+      // every backend instance runs the new one on its next request.
+      {
+        slug: "editable_lifecycles",
+        template: "src/migrations/023_editable_lifecycles.ts.hbs",
+        required: true,
+      },
+      // A workflow bound to a status is stored as ENTER:<STATE>, which the
+      // original varchar(20) of the operation column cannot hold.
+      {
+        slug: "widen_workflow_operation",
+        template: "src/migrations/024_widen_workflow_operation.ts.hbs",
+        required: true,
+      },
+      // Log levels an administrator set through /api/logging/levels, kept across restarts.
+      {
+        slug: "log_level_overrides",
+        template: "src/migrations/025_log_level_overrides.ts.hbs",
+        required: true,
+      },
     ];
 
     // Drop previously generated scaffold migrations under *any* prefix. This
@@ -1729,10 +1874,14 @@ export async function executeCustomValidateHooks(
       console.warn("Entity categories seed template failed, skipping:", (e as Error).message);
     }
 
-    // Seed business data for E2E testing
+    // Seed business data for E2E testing. A state machine's move facts — the
+    // `<state>_at` column a person records to move a record along an edge — are
+    // left empty: filled with timestamps, the first edit of any seeded row
+    // matched every move at once, and with the rule's `collect` hit policy the
+    // last to run won (a prospecting opportunity jumped to closed_lost).
     const businessDataContent = await this.renderTemplate(
       "../../common/seeds/business-data.ts.hbs",
-      context
+      this.withMoveFacts(context)
     );
     await fs.writeFile(path.join(outputDir, "seeds/03_business_data.ts"), businessDataContent);
 
@@ -1775,6 +1924,53 @@ export async function executeCustomValidateHooks(
     await fs.writeFile(
       path.join(outputDir, "seeds/05b_workflow_transitions.ts"),
       this.renderWorkflowTransitionsSeed(context)
+    );
+
+    // The state field of every entity with a state machine, and the state a new
+    // record starts in. The guard reads it to refuse a person's write to that
+    // column, and the bus service to start a new record in its initial state.
+    await fs.mkdir(path.join(outputDir, "src/common"), { recursive: true });
+    await fs.writeFile(
+      path.join(outputDir, "src/common/state-fields.ts"),
+      this.renderStateFields(context)
+    );
+    // Every table's lifecycle — Draft, the status flow, Final — which the bus
+    // service, the transition service and the access guard all read.
+    await fs.writeFile(
+      path.join(outputDir, "src/common/lifecycle.ts"),
+      this.renderLifecycle(context)
+    );
+    // Every cache's expiry, read from .env (CACHE_TTL_<NAME>_MS).
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "src/common/ttl-cache.ts"),
+      path.join(outputDir, "src/common/ttl-cache.ts")
+    );
+    // The chat assistant's switches and chat-only mode, which the session
+    // guard asks on every request (see the file's own header).
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "src/common/chat-bridge.ts"),
+      path.join(outputDir, "src/common/chat-bridge.ts")
+    );
+
+    // Field logic — the bus service enforces mandatory and read-only logic on
+    // every write, and the sys service refuses a condition that does not parse.
+    // The same module the checker and the front end read (templates/common).
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "../../common/field-logic.ts"),
+      path.join(outputDir, "src/common/field-logic.ts")
+    );
+    // Default Value, read as the form reads it, so a record created through the
+    // API starts with what the form would have shown.
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "../../common/field-values.ts"),
+      path.join(outputDir, "src/common/field-values.ts")
+    );
+
+    // Cascading lookups: which reference fields wait for another, with any circular
+    // wait broken so a form can always be started (Portfolio: household / risk profile).
+    await fs.copyFile(
+      path.join(this.resolvedTemplateDir, "../../common/cascade-lookups.ts"),
+      path.join(outputDir, "src/common/cascade-lookups.ts")
     );
 
     // Seed default AnkaReport layouts for every entity into sys_report_designs.
@@ -1826,7 +2022,7 @@ export async function executeCustomValidateHooks(
       // Status lives on whichever column the model gave the entity; `status` is
       // the conventional one, `workflow_status` the fallback every bus table has.
       const columns: string[] = (entity.attributes ?? []).map((a: any) => a.columnName ?? a.name);
-      const statusField = columns.includes("status") ? "status" : "workflow_status";
+      const statusField = stateFieldOf(columns) ?? "workflow_status";
 
       const description = workflow
         ? describeWorkflow(workflow)
@@ -1978,6 +2174,106 @@ export async function seed(db: Kysely<any>): Promise<void> {
    * to refuse a status-field write that has no matching edge from the record's
    * current state — enforcing the topology, not just who may cross an edge.
    */
+  /**
+   * `src/common/state-fields.ts`: table → its state field and initial state.
+   *
+   * The state field is system-managed (language/state-field.ts): no person
+   * writes it through /bus, a new record starts in the machine's initial state,
+   * and only background workflows — saga steps, rules, hooks — move it. Written
+   * as a module rather than read from sys_workflow_transitions because the
+   * initial edge (`[*] --> x`) is not a row there, and the answer must not
+   * depend on a seed having run.
+   */
+  /**
+   * The seed context with each entity's move-fact columns marked
+   * (`attribute.isMoveFact`): `<state>_at` for every state its state machine
+   * declares. The seed writes them as null; the record's state is seeded on its
+   * own, and its history of moves is simply not recorded.
+   */
+  private withMoveFacts(context: any): any {
+    const byEntity = new Map<string, CompiledWorkflow>();
+    for (const workflow of this.options.compiledWorkflows ?? []) {
+      if (!byEntity.has(workflow.entity)) byEntity.set(workflow.entity, workflow);
+    }
+    const entities = (context.entities ?? []).map((entity: any) => {
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.className);
+      if (!workflow) return entity;
+      const facts = new Set(workflow.states.map((state) => `${state.name}_at`));
+      return {
+        ...entity,
+        attributes: (entity.attributes ?? []).map((attribute: any) =>
+          // A column the model requires is the model's own fact, not a stamp of a
+          // move: `SafeguardingConcern.reported_at` (required) beside a state
+          // called `reported` was nulled by the seed, and the NOT NULL it asked
+          // for refused the insert — seed 03 failed and the app never started.
+          facts.has(attribute.columnName ?? attribute.name) && !attribute.required
+            ? { ...attribute, isMoveFact: true }
+            : attribute
+        ),
+      };
+    });
+    return { ...context, entities };
+  }
+
+  private renderStateFields(context: any): string {
+    const byEntity = new Map<string, CompiledWorkflow>();
+    for (const workflow of this.options.compiledWorkflows ?? []) {
+      if (!byEntity.has(workflow.entity)) byEntity.set(workflow.entity, workflow);
+    }
+    const rows: string[] = [];
+    for (const entity of context.entities ?? []) {
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.className);
+      if (!workflow) continue;
+      const columns: string[] = (entity.attributes ?? []).map((a: any) => a.columnName ?? a.name);
+      const field = stateFieldOf(columns) ?? "workflow_status";
+      const initial = workflow.initial ? `'${workflow.initial}'` : "null";
+      rows.push(`  ${entity.tableName}: { field: '${field}', initial: ${initial} },`);
+    }
+    return [
+      `/**`,
+      ` * The state field of every entity with a state machine — generated from the`,
+      ` * model, do not edit.`,
+      ` *`,
+      ` * A state field is never changed by a person through a form or a direct API`,
+      ` * write: only background workflows (saga steps, rules, hooks) change it, and a`,
+      ` * new record starts in its machine's initial state. The form shows it`,
+      ` * read-only in the record header and the list grid always shows it.`,
+      ` */`,
+      `export interface StateField {`,
+      `  /** The column the state machine drives. */`,
+      `  field: string;`,
+      `  /** The state a new record starts in — the \`[*] --> x\` edge. */`,
+      `  initial: string | null;`,
+      `}`,
+      ``,
+      `export const STATE_FIELDS: Readonly<Record<string, StateField>> = {`,
+      ...rows,
+      `};`,
+      ``,
+      `/** \`details.code\` of the refusal a person's write to a state field receives. */`,
+      `export const STATE_FIELD_REFUSAL_CODE = '${STATE_FIELD_REFUSAL_CODE}';`,
+      ``,
+      `/** The state field of a \`bus_\` table, or undefined when it has no state machine. */`,
+      `export function stateFieldOf(tableName: string): StateField | undefined {`,
+      `  return STATE_FIELDS[tableName];`,
+      `}`,
+      ``,
+    ].join("\n");
+  }
+
+  /**
+   * `src/common/lifecycle.ts`: every business table's lifecycle.
+   *
+   * One statement of what language/state-field.ts defines, per table: the column
+   * the lifecycle is stored in, the value Draft is stored as, where a successful
+   * save goes, the Final values, and the drawn edges a button may move along. Who
+   * may press one is not here — that is `sys_access_grant`, which an
+   * administrator can change without regenerating.
+   */
+  private renderLifecycle(context: any): string {
+    return renderLifecycleModule(context.entities ?? [], this.options.compiledWorkflows ?? []);
+  }
+
   private renderWorkflowTransitionsSeed(context: any): string {
     const byEntity = new Map<string, CompiledWorkflow>();
     for (const workflow of this.options.compiledWorkflows ?? []) {
@@ -1990,7 +2286,7 @@ export async function seed(db: Kysely<any>): Promise<void> {
       if (!workflow || workflow.transitions.length === 0) continue;
 
       const columns: string[] = (entity.attributes ?? []).map((a: any) => a.columnName ?? a.name);
-      const statusField = columns.includes("status") ? "status" : "workflow_status";
+      const statusField = stateFieldOf(columns) ?? "workflow_status";
 
       for (const t of workflow.transitions) {
         if (t.from === "[*]" || t.to === "[*]") continue; // initial/terminal not stored
@@ -2032,9 +2328,17 @@ export async function seed(db: Kysely<any>): Promise<void> {
       // `as const` gives `TRANSITIONS.length` a literal type, so comparing it
       // to 0 is `TS2367` in the generated backend's own build. The empty case
       // returns the no-op module above.
-      `  // Replace all model-declared transitions on each table, keeping any`,
-      `  // hand-crafted rows (source = 'designer') untouched.`,
-      `  const tables = [...new Set(TRANSITIONS.map((t) => t.tableName))];`,
+      `  // Replace the model's transitions on each table — except a table whose`,
+      `  // flow an administrator redrew in Rules and workflows (a kind = 'state'`,
+      `  // definition): its edges are the administrator's, and the seed runs on`,
+      `  // every start.`,
+      `  const redrawn = new Set(`,
+      `    (await sql<{ entity_name: string }>\`SELECT entity_name FROM sys_workflow_definitions WHERE kind = 'state'\``,
+      `      .execute(db)`,
+      `      .then((result) => result.rows.map((row) => row.entity_name))`,
+      `      .catch(() => [] as string[]))`,
+      `  );`,
+      `  const tables = [...new Set(TRANSITIONS.map((t) => t.tableName))].filter((tbl) => !redrawn.has(tbl));`,
       `  for (const tbl of tables) {`,
       `    await sql\``,
       `      DELETE FROM sys_workflow_transitions`,
@@ -2042,6 +2346,7 @@ export async function seed(db: Kysely<any>): Promise<void> {
       `    \`.execute(db);`,
       `  }`,
       `  for (const t of TRANSITIONS) {`,
+      `    if (redrawn.has(t.tableName)) continue;`,
       `    await db`,
       `      .insertInto('sys_workflow_transitions')`,
       `      .values({`,
@@ -2210,6 +2515,9 @@ export async function seed(db: Kysely<any>): Promise<void> {
     for (const file of staticConfigFiles) {
       try {
         await fs.copyFile(path.join(this.resolvedTemplateDir, file), path.join(outputDir, file));
+        // A script keeps its execute bit whatever mode the template was
+        // checked in with. Best-effort: Windows filesystems reject chmod.
+        if (file.endsWith(".sh")) await fs.chmod(path.join(outputDir, file), 0o755).catch(() => {});
       } catch (_e) {
         console.warn(`Static config file not found: ${file}`);
       }
@@ -2248,13 +2556,6 @@ export async function seed(db: Kysely<any>): Promise<void> {
       await fs.writeFile(envPath, envContent);
     }
 
-    // Update Biome configuration
-    try {
-      const biomeContent = await this.renderTemplate("biome.json.hbs", context);
-      await fs.writeFile(path.join(outputDir, "biome.json"), biomeContent);
-    } catch (_e) {
-      console.warn("Custom Biome config template not found, using defaults");
-    }
 
     // Database module
     const dbModuleContent = await this.renderTemplate(
@@ -2416,6 +2717,65 @@ export async function seed(db: Kysely<any>): Promise<void> {
       } catch (_e) {
         console.warn(`Trigger test template not found: ${tpl}`);
       }
+    }
+  }
+
+  /**
+   * Copy the logging module (static): the administrator-only log-level routes.
+   */
+  private async generateLoggingModule(
+    outputDir: string,
+    context: any
+  ): Promise<void> {
+    const backend = resolveTemplateDir("tanstack-start-nestjs/backend");
+    const outDir = path.join(outputDir, "src/modules/logging");
+    await fs.mkdir(outDir, { recursive: true });
+    for (const file of [
+      "logging.controller.ts",
+      "logging.module.ts",
+      "log-level-store.service.ts",
+    ]) {
+      await fs.copyFile(path.join(backend, "src/modules/logging", file), path.join(outDir, file));
+    }
+    // Plain modules the controller and the guards import.
+    for (const file of ["level-control.ts", "trace-context.ts", "shutdown.ts"]) {
+      await fs.copyFile(
+        path.join(backend, "src/common/logging", file),
+        path.join(outputDir, "src/common/logging", file)
+      );
+    }
+    // Distributed tracing, off until OTEL_EXPORTER_OTLP_ENDPOINT is set.
+    await fs.mkdir(path.join(outputDir, "src/common/tracing"), { recursive: true });
+    await fs.copyFile(
+      path.join(backend, "src/common/tracing/tracing.ts"),
+      path.join(outputDir, "src/common/tracing/tracing.ts")
+    );
+    await fs.copyFile(
+      path.join(backend, "src/modules/auth/guards/admin-roles.ts"),
+      path.join(outputDir, "src/modules/auth/guards/admin-roles.ts")
+    );
+    await fs.writeFile(
+      path.join(outputDir, "src/modules/auth/guards/admin-only.guard.ts"),
+      await this.renderTemplate("src/modules/auth/guards/admin-only.guard.ts.hbs", context)
+    );
+  }
+
+  /**
+   * Copy the client-logs module (static): where the browser reports its errors.
+   */
+  private async generateClientLogsModule(outputDir: string): Promise<void> {
+    const templateDir = path.join(
+      resolveTemplateDir("tanstack-start-nestjs/backend"),
+      "src/modules/client-logs"
+    );
+    const outDir = path.join(outputDir, "src/modules/client-logs");
+    await fs.mkdir(outDir, { recursive: true });
+    for (const file of [
+      "client-log-rules.ts",
+      "client-logs.controller.ts",
+      "client-logs.module.ts",
+    ]) {
+      await fs.copyFile(path.join(templateDir, file), path.join(outDir, file));
     }
   }
 
@@ -2613,6 +2973,11 @@ export async function seed(db: Kysely<any>): Promise<void> {
       "workflow-definitions.controller.ts",
       "workflow-definitions.module.ts",
       "workflow-definitions.service.ts",
+      "automation-compiler.ts",
+      // The status flows an administrator redrew, loaded into common/lifecycle.ts,
+      // and GET /api/lifecycles for the front end.
+      "lifecycle-store.service.ts",
+      "lifecycles.controller.ts",
     ];
 
     for (const file of wdFiles) {

@@ -1,5 +1,6 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { Injectable, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { getLogger } from "../../common/logging/logger.service";
 
 interface ImmudbVerifyResult {
   key: string;
@@ -21,7 +22,6 @@ interface ImmudbScanEntry {
  */
 @Injectable()
 export class ImmudbService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(ImmudbService.name);
   private client: any = null;
   private enabled: boolean;
 
@@ -31,9 +31,11 @@ export class ImmudbService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     if (!this.enabled) {
-      this.logger.warn(
-        "immudb disabled via IMMUDB_ENABLED=false — audit writes go to PostgreSQL only"
-      );
+      getLogger("audit").event("audit.immudb.unavailable", {
+        host: null,
+        port: null,
+        reason: "disabled via IMMUDB_ENABLED=false; audit writes go to PostgreSQL only",
+      });
       return;
     }
 
@@ -60,14 +62,9 @@ export class ImmudbService implements OnModuleInit, OnModuleDestroy {
         // Database may already be selected; ignore
       });
 
-      this.logger.log(`immudb connected at ${host}:${port} (db: ${db})`);
+      getLogger("audit").event("audit.immudb.connected", { host, port, database: db });
     } catch (err) {
-      this.logger.error(
-        `immudb connection failed: ${err instanceof Error ? err.message : String(err)}`
-      );
-      this.logger.warn(
-        "Continuing without immudb — set IMMUDB_ENABLED=false to suppress this warning"
-      );
+      getLogger("audit").event("audit.immudb.failed", { operation: "connect", err });
       this.client = null;
     }
   }
@@ -96,9 +93,7 @@ export class ImmudbService implements OnModuleInit, OnModuleDestroy {
       const result = await this.client.verifiedSet({ key, value });
       return String(result?.id ?? result?.index ?? key);
     } catch (err) {
-      this.logger.error(
-        `immudb verifiedSet failed for key ${key}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      getLogger("audit").event("audit.immudb.failed", { operation: "verifiedSet", err });
       return key;
     }
   }
@@ -120,9 +115,7 @@ export class ImmudbService implements OnModuleInit, OnModuleDestroy {
       if (err?.clientErr === "proof") {
         return { key, value: "", txId: "", verified: false };
       }
-      this.logger.error(
-        `immudb verifiedGet failed for key ${key}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      getLogger("audit").event("audit.immudb.failed", { operation: "verifiedGet", err });
       return null;
     }
   }
@@ -136,7 +129,7 @@ export class ImmudbService implements OnModuleInit, OnModuleDestroy {
       const result = await this.client.scan({ seekKey: prefix, prefix, limit, desc: false });
       return (result?.entries ?? []).map((e: any) => ({ key: e.key, value: e.value }));
     } catch (err) {
-      this.logger.error(`immudb scan failed: ${err instanceof Error ? err.message : String(err)}`);
+      getLogger("audit").event("audit.immudb.failed", { operation: "scan", err });
       return [];
     }
   }

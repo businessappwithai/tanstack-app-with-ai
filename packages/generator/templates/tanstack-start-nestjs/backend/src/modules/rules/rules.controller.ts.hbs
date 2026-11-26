@@ -15,7 +15,7 @@
  * Project: {{project.name}}
  */
 
-import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards, } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -28,6 +28,7 @@ import {
   UpdateRuleSchema,
   ValidateJdmSchema,
   DryRunSchema,
+  SimulateRuleSchema,
   EvaluateRulesSchema,
 } from './dto/rules.dto';
 
@@ -36,7 +37,6 @@ import {
 @UseGuards(SessionAuthGuard, RolesGuard)
 @Controller('rules')
 export class RulesController {
-  private readonly logger = new Logger(RulesController.name);
 
   constructor(private readonly rulesService: RulesService) {}
 
@@ -90,6 +90,7 @@ export class RulesController {
       ruleName: string;
       operation: string;
       jdmContent: string;
+      title?: string | null;
     },
     @CurrentUser() user: { id: string },
   ) {
@@ -99,6 +100,7 @@ export class RulesController {
         ruleName: dto.ruleName,
         operation: dto.operation as any,
         jdmContent: dto.jdmContent,
+        title: dto.title,
       },
       user.id,
     );
@@ -114,6 +116,8 @@ export class RulesController {
     @Body(new ZodValidationPipe(UpdateRuleSchema)) dto: {
       jdmContent?: string;
       isActive?: boolean;
+      title?: string | null;
+      operation?: 'CREATE' | 'UPDATE' | 'DELETE' | 'ALL';
     },
     @CurrentUser() user: { id: string },
   ) {
@@ -122,9 +126,16 @@ export class RulesController {
 
   @Delete(':id')
   @Roles('admin')
-  @ApiOperation({ summary: 'Delete a rule (admin only)' })
-  @ApiResponse({ status: 200, description: 'Rule deactivated successfully' })
-  async delete(@Param('id') id: string) {
+  @ApiOperation({
+    summary:
+      'Deactivate a rule (admin only). With ?permanent=true, remove one that is already inactive.',
+  })
+  @ApiResponse({ status: 200, description: 'Rule deactivated, or removed' })
+  async delete(@Param('id') id: string, @Query('permanent') permanent?: string) {
+    if (permanent === 'true') {
+      await this.rulesService.purge(id);
+      return { message: 'Rule deleted permanently' };
+    }
     await this.rulesService.delete(id);
     return { message: 'Rule deactivated successfully' };
   }
@@ -149,6 +160,25 @@ export class RulesController {
   async dryRun(@Body(new ZodValidationPipe(DryRunSchema)) dto: { ruleId: string; testData: Record<string, unknown> }) {
     const rule = await this.rulesService.findById(dto.ruleId);
     return await this.rulesService.dryRun(rule.jdmContent, dto.testData);
+  }
+
+  /**
+   * Run a rule as the editor holds it — saved or not — and say what each node
+   * produced. A function node is code and this runs it, so it is admin only,
+   * like saving a rule.
+   */
+  @Post('simulate')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Run an unsaved rule graph against a sample record (admin only)' })
+  @ApiResponse({ status: 200, description: 'The result and a trace of each node' })
+  async simulate(
+    @Body(new ZodValidationPipe(SimulateRuleSchema)) dto: {
+      jdmContent: string | Record<string, unknown>;
+      testData: Record<string, unknown>;
+      entityName?: string;
+    },
+  ) {
+    return await this.rulesService.simulate(dto.jdmContent, dto.testData);
   }
 
   @Post('migrate')

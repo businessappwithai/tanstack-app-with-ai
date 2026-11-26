@@ -38,6 +38,7 @@ import {
   foreignKeyFields,
   harness,
   isFailure,
+  isStateField,
   isTerminal,
   runsForEntity,
   updateRule,
@@ -76,6 +77,12 @@ function stampableFields(entity: EntityMeta): FieldMeta[] {
       !field.name.endsWith("_id") &&
       field.name !== "id" &&
       !FORMAT_CONSTRAINED_COLUMNS.has(field.name) &&
+      // A column bound to a %%enum accepts only its declared values: the suite stamped
+      // `42` into Account.party_role and left that row behind for the enum check to find.
+      !(field.enumValues && field.enumValues.length > 0) &&
+      // Only a background workflow writes a state field; a person's write that
+      // stamps one is refused before the chain could start.
+      !isStateField(entity, field.name) &&
       (field.type === "string" || field.type === "text") &&
       (field.maxLength === undefined || field.maxLength >= 24)
   );
@@ -88,11 +95,22 @@ function stampableFields(entity: EntityMeta): FieldMeta[] {
  * the rows this suite created, the other receives the computed value. Reusing a
  * single column would erase the marker the assertions look the rows up by.
  *
+ * The value column must not be unique. The workflow writes the same number into
+ * it on every run, the suite leaves that row behind, and a second run against the
+ * same database is then refused by the unique index on its first write — a
+ * `code` column took `42` once and rejected it ever after.
+ *
  * Returns null when the model has no such pair, so the suite skips rather than
  * asserting against a shape this model does not have.
  */
+function pickColumns(entity: EntityMeta): [FieldMeta, FieldMeta] | null {
+  const [marker, ...rest] = stampableFields(entity);
+  const value = rest.find((field) => !field.unique);
+  return marker && value ? [marker, value] : null;
+}
+
 function pickPair(): { trigger: EntityMeta; target: EntityMeta } | null {
-  const target = entities.find((entity) => stampableFields(entity).length >= 2);
+  const target = entities.find((entity) => pickColumns(entity) !== null);
   if (!target) return null;
   const trigger = entities.find(
     (entity) => entity.tableName !== target.tableName && stampableFields(entity).length >= 1
@@ -121,7 +139,7 @@ describe("multi-step workflows triggered by rules", () => {
     triggerEntity = pair.trigger;
     targetEntity = pair.target;
     triggerField = stampableFields(triggerEntity)[0]!;
-    [targetMarker, targetValue] = stampableFields(targetEntity) as [FieldMeta, FieldMeta];
+    [targetMarker, targetValue] = pickColumns(targetEntity) as [FieldMeta, FieldMeta];
     workflowName = `${suiteId}-escalation`;
 
     try {
@@ -211,7 +229,7 @@ describe("multi-step workflows triggered by rules", () => {
         entityName: triggerEntity.tableName,
         ruleName: `${suiteId}-trigger`,
         operation: "CREATE",
-        jdmContent: buildTriggerJdm(workflowName),
+        jdmContent: buildTriggerJdm(workflowName, `${triggerField.name} == "${suiteId}-source"`),
       });
       registered.ruleId = rule.id;
       harness.trackRule(rule.id);
@@ -305,7 +323,12 @@ describe("multi-step workflows triggered by rules", () => {
     for (const fk of foreignKeyFields(targetEntity)) {
       const parent = harness.resolveParentEntity(fk.name);
       if (!parent) continue;
-      const id = await harness.anyRecordId(parent);
+      // `parentIdFor` gives a unique reference a parent of its own. Both rows this suite has the
+      // workflow create point at a parent, and two on one parent are refused by the unique index
+      // (Facility.facility_id on the hospital model) — which failed the workflow, not the suite.
+      const id = fk.unique
+        ? await harness.parentIdFor(fk, parent, 0)
+        : await harness.anyRecordId(parent);
       if (id) foreignKeys[fk.name] = id;
     }
 
@@ -378,8 +401,14 @@ describe("multi-step workflows triggered by rules", () => {
   }
 });
 
-/** A decision graph whose only row emits `trigger-workflow` naming one workflow. */
-function buildTriggerJdm(workflowName: string): string {
+/**
+ * A decision graph whose only row emits `trigger-workflow` naming one workflow.
+ *
+ * `when` narrows it to the record this suite writes. Firing on every write is wrong for an entity
+ * that references itself: creating a Department through its parents writes a chain of them, each
+ * would start the workflow, and the workflow's own fixed-code row then collides with itself.
+ */
+function buildTriggerJdm(workflowName: string, when = "true"): string {
   return JSON.stringify({
     nodes: [
       { id: "input", type: "inputNode", name: "Input", position: { x: 0, y: 0 } },
@@ -400,7 +429,7 @@ function buildTriggerJdm(workflowName: string): string {
           rules: [
             {
               _id: `${workflowName}-row`,
-              i1: "true",
+              i1: when,
               o1: "'trigger-workflow'",
               o2: "'Multi-step workflow triggered'",
               o3: `'${workflowName}'`,

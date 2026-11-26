@@ -28,25 +28,14 @@ setLanguageDefinition(languageDefinition);
 setCheckerDefinition(languageDefinition as unknown as Parameters<typeof setCheckerDefinition>[0]);
 
 import { RUNTIME_BYTES } from "../generators/wasm/runtime-assets.generated";
-import {
-  DEFAULT_PGLITE_URL,
-  generateWasmApp,
-  type WasmGeneratorOptions,
-} from "../generators/wasm/wasm-app.generator";
+import { generateWasmApp, type WasmGeneratorOptions } from "../generators/wasm/wasm-app.generator";
 
 export type { ModelReview, ParsedModel, WasmGeneratorOptions };
 // Exported on its own so the page can check a model the moment it is chosen,
 // rather than only finding out at the point of generating it.
 // Re-exported so `import { ModelCheckError } from "./appwithai-wasm.js"` keeps
 // working; it is defined next door so the full-stack bundle can have it alone.
-export {
-  DEFAULT_PGLITE_URL,
-  generateWasmApp,
-  ModelCheckError,
-  parseModel,
-  RUNTIME_BYTES,
-  reviewModel,
-};
+export { generateWasmApp, ModelCheckError, parseModel, RUNTIME_BYTES, reviewModel };
 
 export interface BrowserGenerateOptions extends Partial<WasmGeneratorOptions> {
   /** The EML document. */

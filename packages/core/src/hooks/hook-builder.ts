@@ -27,7 +27,7 @@ export class HookBuilder<T = any> {
     return this;
   }
 
-  // biome-ignore lint/suspicious/noConfusingVoidType: matches Hook.execute — see hook.types.ts.
+  // matches Hook.execute — see hook.types.ts.
   execute(fn: (context: HookContext<T>) => Promise<void | T>): this {
     this.hook.execute = fn;
     return this;

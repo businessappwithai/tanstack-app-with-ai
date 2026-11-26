@@ -19,6 +19,9 @@
 | `status` | string | — | active — may be timetabled; on_leave — keeps their sections but cannot be assigned new ones; left — retained for the marking and conduct trail, never assignable. |
 | `started_on` | date | — | The date the appointment began. Used for length-of-service reporting and never changed by a change of role. |
 | `phone` | phone | OPTIONAL | A direct number, used only for same-day cover arrangements where email is too slow. Optional. |
+| `on_leave_at` | datetime | OPTIONAL | When the move to on leave was recorded on this staff. Recording it moves a staff from active to on leave: the workflows set the status, which nobody changes by hand. |
+| `active_at` | datetime | OPTIONAL | When the move to active was recorded on this staff. Recording it moves a staff from on leave to active: the workflows set the status, which nobody changes by hand. |
+| `left_at` | datetime | OPTIONAL | When the move to left was recorded on this staff. Recording it moves a staff from active or on leave to left: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -35,6 +38,11 @@
 - `Staff ||--o{ AdmissionApplication` — decides
 - `Staff ||--o{ Payment` — received by
 - `Staff ||--o{ DisciplineIncident` — reported by
+- `Staff ||--o{ SupportPlan` — owns
+- `Staff ||--o{ SafeguardingConcern` — reports and owns
+- `Staff ||--o{ ConcernFeedback` — hears back through
+- `Staff ||--o{ CommunicationLog` — sends
+- `Staff ||--o{ Refund` — requests and approves
 
 ## Lifecycle
 
@@ -51,7 +59,12 @@ left --> [*]
 
 ## Rules
 
-None on this entity.
+### `staffStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `moveActiveToOnLeave trigger-workflow when: status == "active" and on_leave_at != null workflow: StaffOnLeaveMove`
+- `moveOnLeaveToActive trigger-workflow when: status == "on_leave" and active_at != null workflow: StaffActiveMove`
+- `moveActiveToLeft trigger-workflow when: status == "active" and left_at != null workflow: StaffLeftMove`
+- `moveOnLeaveToLeft trigger-workflow when: status == "on_leave" and left_at != null workflow: StaffLeftMove`
 
 ## Hooks
 
@@ -60,6 +73,19 @@ None.
 ## Cross-entity effects
 
 A member of staff going `on_leave` or `left` leaves their sections pointing at them; the `principal-teaching-cover-gap` report is what surfaces it. Deliberately not automated — reassigning a group mid-term is a timetabling decision, not a side effect of an HR field.
+
+Sagas that touch it:
+
+- **StaffOnLeaveMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: on_leave`
+  - `C UpdateEntity field: active_at value: null`
+  - `D UpdateEntity field: left_at value: null`
+- **StaffActiveMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: active`
+  - `C UpdateEntity field: on_leave_at value: null`
+  - `D UpdateEntity field: left_at value: null`
+- **StaffLeftMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: left`
 
 ## Access
 

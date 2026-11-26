@@ -33,6 +33,9 @@ import type { CompiledReport } from "../../reports";
 import { CliExecutor } from "../../utils/cli-executor";
 import { BaseGenerator } from "../base.generator";
 import { DEFAULT_FRONTEND_PORT } from "../ports";
+import { ensureEditorsVendored } from "./vendor-editors";
+import { renderLifecycleModule } from "./lifecycle-module";
+import type { CompiledWorkflow } from "../../workflows";
 
 /**
  * Resolve template directory path, handling both dev and bundled environments
@@ -97,6 +100,12 @@ export interface TanStackStartFrontendOptions {
    * of rendering an empty list that reads like a broken request.
    */
   compiledReports?: CompiledReport[];
+  /**
+   * The model's state machines, for `src/lib/lifecycle.ts` — the same module the
+   * backend reads (`renderLifecycleModule`), so the form draws a record's phase
+   * and locks the end of its flow exactly where the API does.
+   */
+  compiledWorkflows?: CompiledWorkflow[];
 }
 
 export class TanStackStartFrontendGenerator extends BaseGenerator {
@@ -219,6 +228,9 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
       "src/lib/workflow",
       "src/lib/automation",
       "src/components/automation",
+      "src/components/eml",
+      "src/components/rules",
+      "src/lib/eml",
       "src/components/reports",
       "src/components/notifications",
       "src/components/help",
@@ -291,6 +303,14 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
 
   private async generateCoreFiles(outputDir: string, context: any): Promise<void> {
     const templateDir = this.resolvedTemplateDir;
+
+    // The rule and workflow editors are one source shared with the modelling tool; a
+    // generated application receives them as source under src/editors/.
+    await ensureEditorsVendored(templateDir);
+    await this.copyDirRecursive(
+      path.join(templateDir, "src/editors"),
+      path.join(outputDir, "src/editors")
+    );
 
     // Entry files (client.tsx, ssr.tsx, router.tsx) - always generated to fix missing scaffolding
     const clientEntryContent = await this.renderTemplate("src/client.tsx.hbs", context);
@@ -473,6 +493,25 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
     const csvContent = await this.component("src/lib/csv.ts");
     await fs.writeFile(path.join(outputDir, "src/lib/csv.ts"), csvContent);
 
+    // How the browser logs, and how it reads what the API says went wrong. The API
+    // client, the query provider and the root error component all import them, so
+    // leaving them out fails the generated build.
+    for (const file of ["logger.ts", "api-error.ts"]) {
+      const content = await this.component(`src/lib/${file}`);
+      await fs.writeFile(path.join(outputDir, "src/lib", file), content);
+    }
+
+    // A window label's plural, for list titles and breadcrumbs. The list and record
+    // shells both import it, so leaving it out fails the generated build.
+    const pluralLabelContent = await this.component("src/lib/plural-label.ts");
+    await fs.writeFile(path.join(outputDir, "src/lib/plural-label.ts"), pluralLabelContent);
+
+    // Optimistic locking: the If-Match header, recognising a stale save, and
+    // which fields the other save changed. The record window and the update
+    // hook both import it, so leaving it out fails the generated build.
+    const versionConflictContent = await this.component("src/lib/version-conflict.ts");
+    await fs.writeFile(path.join(outputDir, "src/lib/version-conflict.ts"), versionConflictContent);
+
     // Vite's asset-import suffixes (`?url`, `?raw`), which the compiler cannot
     // resolve on its own — without these the root route fails to typecheck on a
     // freshly generated app over an import that is perfectly correct.
@@ -490,6 +529,22 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
     } catch (e) {
       console.warn("field-schema template not found, skipping:", (e as Error).message);
     }
+
+    // Field logic — Compiere's Display, Read Only and Mandatory Logic. A copy of
+    // language/field-logic.ts (templates/common/field-logic.ts, held identical
+    // by a test), so the form reads a condition exactly as the API and the
+    // checker do.
+    const fieldLogic = await this.component("../../common/field-logic.ts");
+    await fs.writeFile(path.join(outputDir, "src/lib/field-logic.ts"), fieldLogic);
+    // Default Value and Obscure Type, read the same way the API reads them.
+    const fieldValues = await this.component("../../common/field-values.ts");
+    await fs.writeFile(path.join(outputDir, "src/lib/field-values.ts"), fieldValues);
+    // Every table's lifecycle — Draft, the flow, Final — written by the same call
+    // that writes the backend's, so the screen and the API agree about a record.
+    await fs.writeFile(
+      path.join(outputDir, "src/lib/lifecycle.ts"),
+      renderLifecycleModule(context.entities ?? [], this.options.compiledWorkflows ?? [])
+    );
 
     // TanStack DB collections, synced by ElectricSQL through the role-scoped
     // shape proxy. The dictionary lives in these collections; nothing else on
@@ -697,6 +752,14 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
         src: "src/hooks/use-bus-entity-level.ts",
         dest: "src/hooks/use-bus-entity-level.ts",
       },
+      {
+        src: "src/hooks/use-rule-entities.ts",
+        dest: "src/hooks/use-rule-entities.ts",
+      },
+      {
+        src: "src/hooks/use-dictionary-windows.ts",
+        dest: "src/hooks/use-dictionary-windows.ts",
+      },
       // UI components
       {
         src: "src/components/ui/breadcrumb.tsx",
@@ -754,6 +817,23 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
         dest: "src/components/admin/ad-detail-shell.tsx",
       },
       {
+        // The record's lifecycle — Draft, its status, Final, Error — read-only
+        // in the detail header, and its action buttons beside it. ad-detail-shell
+        // imports both, so leaving either out of this list fails the build.
+        src: "src/components/admin/lifecycle-badge.tsx",
+        dest: "src/components/admin/lifecycle-badge.tsx",
+      },
+      {
+        src: "src/components/admin/record-actions.tsx",
+        dest: "src/components/admin/record-actions.tsx",
+      },
+      {
+        // Edit and two-step Delete on the User and Role screens. Both import
+        // it, so leaving it out of this list fails the generated app's build.
+        src: "src/components/admin/row-actions.tsx",
+        dest: "src/components/admin/row-actions.tsx",
+      },
+      {
         // The entity icon control on the Table and Column detail screen: a
         // lucide name or an uploaded image, written to sys_table.icon.
         // admin/table/$tableId/index.tsx imports it, so leaving it out of this
@@ -795,6 +875,12 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
         dest: "src/components/admin/entity-window-shell.tsx",
       },
       {
+        // The reload-or-overwrite choice the record window offers when
+        // someone else saved the record first.
+        src: "src/components/admin/version-conflict-dialog.tsx",
+        dest: "src/components/admin/version-conflict-dialog.tsx",
+      },
+      {
         src: "src/components/admin/unified-field-layout.tsx",
         dest: "src/components/admin/unified-field-layout.tsx",
       },
@@ -809,47 +895,26 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
       },
       // The workflow editor, shared verbatim with the modelling tool so a
       // workflow drawn in either behaves the same way.
+      // The date-picker fix the rule editor's Date operators need (GoRulesEditorPanel imports it).
+      // The `?worker` imports Monaco's editor and language workers are loaded through.
       {
-        src: "src/lib/workflow/bpmn-model.ts",
-        dest: "src/lib/workflow/bpmn-model.ts",
+        src: "src/worker-modules.d.ts",
+        dest: "src/worker-modules.d.ts",
       },
-      // The automation builder, shared verbatim with the modelling tool so an
-      // automation reads and behaves the same in both.
+      // The generated application's own wrappers around those editors.
       {
-        src: "src/lib/automation/model.ts",
-        dest: "src/lib/automation/model.ts",
+        src: "src/components/rules/RuleGraphEditor.tsx",
+        dest: "src/components/rules/RuleGraphEditor.tsx",
       },
+      // Where this application reads and writes the rules and workflows the screen edits.
       {
-        src: "src/lib/automation/rule-content.ts",
-        dest: "src/lib/automation/rule-content.ts",
+        src: "src/lib/logic-host.ts",
+        dest: "src/lib/logic-host.ts",
       },
+      // The status flows as the API runs them, laid over the compiled lib/lifecycle.ts.
       {
-        src: "src/components/automation/LadderCard.tsx",
-        dest: "src/components/automation/LadderCard.tsx",
-      },
-      {
-        src: "src/components/automation/RailList.tsx",
-        dest: "src/components/automation/RailList.tsx",
-      },
-      {
-        src: "src/components/automation/StepInspector.tsx",
-        dest: "src/components/automation/StepInspector.tsx",
-      },
-      {
-        src: "src/components/automation/AutomationBuilder.tsx",
-        dest: "src/components/automation/AutomationBuilder.tsx",
-      },
-      {
-        src: "src/components/automation/RuleTableEditor.tsx",
-        dest: "src/components/automation/RuleTableEditor.tsx",
-      },
-      {
-        src: "src/components/automation/AutomationHelp.tsx",
-        dest: "src/components/automation/AutomationHelp.tsx",
-      },
-      {
-        src: "src/components/admin/doc-status-badge.tsx",
-        dest: "src/components/admin/doc-status-badge.tsx",
+        src: "src/lib/use-lifecycles.ts",
+        dest: "src/lib/use-lifecycles.ts",
       },
       // Missing provider files
       {
@@ -1118,6 +1183,24 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
       console.warn("Admin roles page template not found");
     }
 
+    // System configuration page (admin/system-config.tsx). The admin index links
+    // to it; without this copy the card pointed at a route that did not exist.
+    try {
+      const systemConfigContent = await this.component("src/routes/admin/system-config.tsx");
+      await fs.writeFile(path.join(adminDir, "system-config.tsx"), systemConfigContent);
+    } catch (_e) {
+      console.warn("Admin system configuration page template not found");
+    }
+
+    // Access controls page (admin/access-controls.tsx). Lets administrators
+    // grant/revoke CRUD operations per role and entity from the dashboard.
+    try {
+      const accessControlsContent = await this.component("src/routes/admin/access-controls.tsx");
+      await fs.writeFile(path.join(adminDir, "access-controls.tsx"), accessControlsContent);
+    } catch (_e) {
+      console.warn("Admin access controls page template not found");
+    }
+
     // Recursively copy admin subdirectories (table/$tableId/, window/$windowId/, etc.)
     const adminSubdirs = [
       { src: "src/routes/admin/table", dest: "src/routes/admin/table" },
@@ -1244,13 +1327,6 @@ export class TanStackStartFrontendGenerator extends BaseGenerator {
       console.warn("Custom tsconfig template not found, keeping TanStack Start default");
     }
 
-    // Update Biome configuration
-    try {
-      const biomeContent = await this.renderTemplate("biome.json.hbs", context);
-      await fs.writeFile(path.join(outputDir, "biome.json"), biomeContent);
-    } catch (_e) {
-      console.warn("Custom Biome config template not found, using defaults");
-    }
 
     // Generate environment configuration for TanStack Start.
     //

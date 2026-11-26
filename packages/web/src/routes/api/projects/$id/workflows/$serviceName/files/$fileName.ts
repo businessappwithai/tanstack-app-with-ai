@@ -16,12 +16,10 @@
  * refused before the path is built.
  */
 
-import { readdir, writeFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { requireProjectAccess } from "@/lib/project-access";
-
-const GENERATED_HOOKS_BASE_PATH = join(process.cwd(), "generated-projects");
 
 /** A bare `*.ts` name — no separators, no traversal, no dotfiles. */
 const SAFE_FILE_NAME = /^[A-Za-z0-9._-]+\.ts$/;
@@ -55,9 +53,10 @@ export const Route = createFileRoute("/api/projects/$id/workflows/$serviceName/f
 
           const serviceName = params.serviceName as string;
           const entityName = serviceName.replace("Service", "");
+          const { projectDirectory } = await import("@/lib/server/project-git");
+          if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) return json({ error: "Invalid service" }, 400);
           const hooksDir = join(
-            GENERATED_HOOKS_BASE_PATH,
-            params.id as string,
+            await projectDirectory(params.id),
             "src",
             "modules",
             entityName.toLowerCase(),
@@ -79,7 +78,13 @@ export const Route = createFileRoute("/api/projects/$id/workflows/$serviceName/f
             return json({ success: false, error: "No such hook file" }, 404);
           }
 
-          await writeFile(join(hooksDir, fileName), code, "utf-8");
+          const { saveProjectFiles } = await import("@/lib/server/project-repository");
+          await saveProjectFiles(
+            params.id,
+            access.user.id,
+            { [`src/modules/${entityName.toLowerCase()}/hooks/${fileName}`]: code },
+            request.headers.get("Idempotency-Key") ?? undefined
+          );
 
           return json({ success: true, fileName, bytes: Buffer.byteLength(code, "utf8") });
         } catch (error) {

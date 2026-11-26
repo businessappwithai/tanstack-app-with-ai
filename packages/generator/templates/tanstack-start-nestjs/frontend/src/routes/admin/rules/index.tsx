@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ruleEntityLabel, useRuleEntities } from "@/hooks/use-rule-entities";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,26 +81,32 @@ function AdminRulesPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (ruleId: string) => {
-      await apiClient.delete(`/rules/${ruleId}`);
+    mutationFn: async (rule: Rule) => {
+      // An active rule is switched off; one that is already off is removed.
+      await apiClient.delete(`/rules/${rule.id}${rule.isActive ? "" : "?permanent=true"}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "rules"] });
-      toast.success("Rule deactivated successfully");
+      toast.success(ruleToDelete?.isActive ? "Rule deactivated successfully" : "Rule deleted");
       setDeleteDialogOpen(false);
       setRuleToDelete(null);
     },
     onError: (error: Error) => {
-      toast.error(`Failed to deactivate rule: ${error.message}`);
+      toast.error(`Failed to ${ruleToDelete?.isActive ? "deactivate" : "delete"} rule: ${error.message}`);
     },
   });
+
+  // Rules are filed under a storage key; people know the record type by the
+  // name its window shows. Every label on this screen comes from there.
+  const { data: entities = [] } = useRuleEntities();
+  const entityLabel = (tableName: string) => ruleEntityLabel(entities, tableName);
 
   const filteredRules =
     rules?.filter((rule) => {
       const matchesSearch =
         searchQuery === "" ||
         rule.ruleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        rule.entityName.toLowerCase().includes(searchQuery.toLowerCase());
+        entityLabel(rule.entityName).toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchesSearch;
     }) || [];
@@ -114,7 +121,7 @@ function AdminRulesPage() {
 
   const confirmDelete = () => {
     if (ruleToDelete) {
-      deleteMutation.mutate(ruleToDelete.id);
+      deleteMutation.mutate(ruleToDelete);
     }
   };
 
@@ -166,7 +173,7 @@ function AdminRulesPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-8 py-12">
+      <div className="max-w-7xl mx-auto px-8 py-12">
         {/* Stats Cards */}
         <section className="mb-12">
           <div className="grid grid-cols-4 gap-0 border-l border-r border-foreground">
@@ -215,7 +222,7 @@ function AdminRulesPage() {
               <option value="">All Entities</option>
               {entityNames.map((entity) => (
                 <option key={entity} value={entity}>
-                  {entity}
+                  {entityLabel(entity)}
                 </option>
               ))}
             </select>
@@ -273,13 +280,20 @@ function AdminRulesPage() {
                 key={rule.id}
                 className="grid grid-cols-12 gap-4 px-6 py-4 border-t border-border hover:bg-muted/40 items-center"
               >
-                <div className="col-span-3">
-                  <div className="font-semibold text-foreground">{rule.ruleName}</div>
+                <div className="col-span-3 min-w-0">
+                  <div className="font-semibold text-foreground break-words">{rule.ruleName}</div>
                   <div className="text-xs text-muted-foreground font-mono">{rule.id.slice(0, 8)}</div>
                 </div>
 
-                <div className="col-span-2">
-                  <code className="text-sm bg-muted px-2 py-1 font-mono">{rule.entityName}</code>
+                {/* A grid cell will not shrink below its content without min-w-0,
+                    and a long name ran over the Operation column. */}
+                <div className="col-span-2 min-w-0">
+                  <span
+                    className="block truncate text-sm font-medium"
+                    title={entityLabel(rule.entityName)}
+                  >
+                    {entityLabel(rule.entityName)}
+                  </span>
                 </div>
 
                 <div className="col-span-2">
@@ -328,7 +342,8 @@ function AdminRulesPage() {
                     size="sm"
                     onClick={() => handleDelete(rule)}
                     className="h-8 w-8 p-0 hover:bg-red-600 hover:text-background rounded-none"
-                    disabled={!rule.isActive}
+                    title={rule.isActive ? "Deactivate" : "Delete permanently"}
+                    aria-label={rule.isActive ? "Deactivate rule" : "Delete rule permanently"}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -337,15 +352,27 @@ function AdminRulesPage() {
             ))}
           </div>
         )}
-      </main>
+      </div>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="border-2 border-foreground rounded-none">
           <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate Rule</AlertDialogTitle>
+            <AlertDialogTitle>
+              {ruleToDelete?.isActive ? "Deactivate Rule" : "Delete Rule Permanently"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to deactivate the rule <strong>{ruleToDelete?.ruleName}</strong>
-              ? This will disable the rule but keep its history. You can reactivate it later.
+              {ruleToDelete?.isActive ? (
+                <>
+                  Are you sure you want to deactivate the rule{" "}
+                  <strong>{ruleToDelete?.ruleName}</strong>? This will disable the rule but keep
+                  it listed. You can reactivate it later, or delete it for good once it is off.
+                </>
+              ) : (
+                <>
+                  <strong>{ruleToDelete?.ruleName}</strong> is already inactive. Deleting it removes
+                  it for good; this cannot be undone.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -354,7 +381,7 @@ function AdminRulesPage() {
               onClick={confirmDelete}
               className="bg-red-600 hover:bg-red-700 rounded-none"
             >
-              Deactivate
+              {ruleToDelete?.isActive ? "Deactivate" : "Delete permanently"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -19,7 +19,7 @@
  *
  * The tokens listed below are the generator's own vocabulary: the context keys
  * `prepareContext` builds and the block helpers the templates use. Deliberately
- * not "any `{{`": `components/automation/AutomationHelp.tsx` documents the
+ * not "any `{{`": the generated application's help documents the
  * generated application's *own* reference syntax, which is spelled the same way
  * — `{{tier.discount_pct}}`, `{{L1.iteration}}` — inside string literals it is
  * meant to display. Those are content, not tokens.

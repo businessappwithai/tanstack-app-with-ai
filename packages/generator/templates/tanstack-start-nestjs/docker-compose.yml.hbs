@@ -64,7 +64,18 @@ services:
       - -c
       - wal_level=logical
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-app}"]
+      # `-d`, and it is not decoration. Without a database name `pg_isready`
+      # connects as `$DB_USER` to a database of the same name — `app` — which
+      # does not exist here. It still reports the server up, because a server
+      # that refuses a connection is a server that answered, so the check
+      # passes and nothing looks wrong. What it leaves behind is a line in the
+      # postgres log every ten seconds, for the life of the container:
+      #
+      #   FATAL:  database "app" does not exist
+      #
+      # Which is the first thing anyone reads when something else goes wrong,
+      # and it sends them after a database the application never wanted.
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-app} -d {{project.name | replace '-' '_'}}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -110,8 +121,19 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-in-production}
+      # The administrator's password (8+ characters). Unset: the seed's default.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}}}
       ELECTRIC_URL: http://electric:3000
+      # How long each in-process cache serves an entry, in ms; 0 turns one off.
+      # backend/.env.example says what each one holds.
+      CACHE_TTL_DEFAULT_MS: ${CACHE_TTL_DEFAULT_MS:-6000}
+      CACHE_TTL_CAPABILITIES_MS: ${CACHE_TTL_CAPABILITIES_MS:-6000}
+      CACHE_TTL_ACCESS_POLICY_MS: ${CACHE_TTL_ACCESS_POLICY_MS:-6000}
+      CACHE_TTL_ENTITY_METADATA_MS: ${CACHE_TTL_ENTITY_METADATA_MS:-6000}
+      CACHE_TTL_IDENTIFIER_FIELDS_MS: ${CACHE_TTL_IDENTIFIER_FIELDS_MS:-6000}
+      CACHE_TTL_DICTIONARY_FIELDS_MS: ${CACHE_TTL_DICTIONARY_FIELDS_MS:-6000}
+      CACHE_TTL_LIFECYCLE_MS: ${CACHE_TTL_LIFECYCLE_MS:-6000}
       # The AI assistant — retrieval over this application's own model.
       #
       # One endpoint serves it: OpenAI-compatible `POST /v1/embeddings`. Point
@@ -158,9 +180,35 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-in-production}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}}}
+      # The administrator's password (8+ characters). Unset: the seed's default.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # The origins the browser may sign in from. The second is the front end's
+      # address *on the compose network*, which is where the `e2e-ui` service's
+      # browser is. A deployment names its own (comma separated) and keeps that
+      # entry if it runs the end-to-end suite in compose.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:{{project.frontendPort}},http://frontend:{{project.frontendPort}}}
+      # The rate limiter's ceiling per window. The end-to-end suite (`e2e`
+      # below) makes thousands of requests from one address; it backs off on a
+      # 429 either way, but a ceiling it never reaches keeps a run short.
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100000}
       PORT: {{project.backendPort}}
+      # Tracing: off until a collector is named. With `--profile observability`, set this to
+      # http://otel-collector:4318 and open Jaeger on http://localhost:16686.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-{{project.id}}-backend}
+      # No immudb service is composed here; left unset the backend tries to
+      # connect on start and logs a gRPC login error. Audit rows go to PostgreSQL.
+      IMMUDB_ENABLED: ${IMMUDB_ENABLED:-false}
       ELECTRIC_URL: http://electric:3000
+      # How long each in-process cache serves an entry, in ms; 0 turns one off.
+      # backend/.env.example says what each one holds.
+      CACHE_TTL_DEFAULT_MS: ${CACHE_TTL_DEFAULT_MS:-6000}
+      CACHE_TTL_CAPABILITIES_MS: ${CACHE_TTL_CAPABILITIES_MS:-6000}
+      CACHE_TTL_ACCESS_POLICY_MS: ${CACHE_TTL_ACCESS_POLICY_MS:-6000}
+      CACHE_TTL_ENTITY_METADATA_MS: ${CACHE_TTL_ENTITY_METADATA_MS:-6000}
+      CACHE_TTL_IDENTIFIER_FIELDS_MS: ${CACHE_TTL_IDENTIFIER_FIELDS_MS:-6000}
+      CACHE_TTL_DICTIONARY_FIELDS_MS: ${CACHE_TTL_DICTIONARY_FIELDS_MS:-6000}
+      CACHE_TTL_LIFECYCLE_MS: ${CACHE_TTL_LIFECYCLE_MS:-6000}
       # The AI assistant — retrieval over this application's own model.
       #
       # One endpoint serves it: OpenAI-compatible `POST /v1/embeddings`. Point
@@ -216,6 +264,13 @@ services:
         # See the note at the top of this file.
         VITE_API_URL: ${VITE_API_URL:-}
         VITE_APP_URL: ${VITE_APP_URL:-http://localhost:{{project.frontendPort}}}
+        # Dictionary shape requests go straight to the API's port, a separate
+        # connection pool from the page's. Through this origin the long-polling
+        # shapes occupy all six HTTP/1.1 slots and starve every other request.
+        # Needs CORS_ORIGIN to name the page's origin (its default does). Behind
+        # a reverse proxy or on another host, set VITE_ELECTRIC_PROXY_URL to the
+        # API's public address, or to '/api/v1/shape' to stay on one origin.
+        VITE_ELECTRIC_PROXY_URL: ${VITE_ELECTRIC_PROXY_URL:-http://localhost:{{project.backendPort}}/api/v1/shape}
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-{{project.frontendPort}}}:{{project.frontendPort}}"
@@ -278,6 +333,11 @@ services:
       AUTH_SECRET: ${REPORT_AUTH_SECRET:-change-me-in-production-at-least-32-chars}
       ENCRYPTION_KEY: ${REPORT_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # The origins the platform trusts for a sign-in that already carries a
+      # cookie. Unset it trusts only localhost:4050, so a second sign-in from the
+      # published port, or from the end-to-end container, was refused as "Invalid origin".
+      CORS_ORIGIN: ${REPORT_CORS_ORIGIN:-http://localhost:${REPORT_PORT:-3100},http://report:3000}
+      BETTER_AUTH_URL: ${REPORT_BASE_URL:-http://localhost:${REPORT_PORT:-3100}}
     # `restart: unless-stopped` above is the whole dependency story, and there
     # is deliberately no `depends_on` for the database: the platform bootstraps
     # its own schema on the first request, so it may start first and be
@@ -314,18 +374,142 @@ services:
       REPORTING_PACK: /pack/reporting-pack.json
       ENCRYPTION_KEY: ${REPORT_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       AUTH_SECRET: ${REPORT_AUTH_SECRET:-change-me-in-production-at-least-32-chars}
+      # The reporting administrator's password — the one reporting/README.md
+      # lists. The platform will not take an ADMIN_PASSWORD under eight
+      # characters and otherwise generates a random one, so without this the
+      # administrator was the one documented account that could not sign in.
+      # The seeder sets it on first start only; a password changed later in the
+      # platform survives every restart. Set REPORT_ADMIN_PASSWORD in `.env`
+      # before this is reachable by anyone else.
+      SEED_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
     volumes:
       # The pack, read-only. It is the one reporting artefact this project
       # contains, and it is derived entirely from the model.
       - ./reporting/reporting-pack.json:/pack/reporting-pack.json:ro
-    # It waits for what it needs itself, and for the right things: both
-    # databases reachable, then the application's `bus_` tables to *exist*.
-    # `depends_on` covers a container, not a schema — the application migrates
-    # on start, and an empty database means "not migrated yet" rather than
-    # "nothing to report on", which would cache a data source the platform
-    # believes has no tables in it. Calling `getDb()` bootstraps the platform's
-    # own schema, so the seeder needs no running `report` service either.
+    # Wait for the backend to be healthy — not just for PostgreSQL — because
+    # the backend runs migrations on start (`run-app.sh`), and the seeder must
+    # find the `bus_` tables already there when it introspects the schema.
+    # A healthy backend means migrations completed; an empty database on first
+    # connect means something went wrong in `run-app.sh`, not that the seeder
+    # started too early. `getDb()` bootstraps the platform's own schema, so
+    # the seeder still needs no running `report` service.
+    depends_on:
+      backend:
+        condition: service_healthy
     command: ["bun", "scripts/seed-reporting-pack.ts"]
+
+  # <e2e>
+  # ─────────────────────────────────────────────────────────────────────────
+  # The end-to-end suite, on demand.
+  #
+  #   docker compose run --rm e2e          the API suites against both applications
+  #   docker compose run --rm e2e test     the same, spelled out
+  #   docker compose run --rm e2e test:crud | test:rules | test:workflows
+  #
+  # It is the `tests/` project generated beside this application, derived from the
+  # same model: CRUD for every entity, the business rules, the workflows, the
+  # editor's API, every state machine and who may press its buttons, and the
+  # reporting platform held to the pack the seeder loaded — signed in as each
+  # reporting role. It starts nothing: it waits for both applications to be up
+  # and the seeder to have finished, then talks to them over the compose network.
+  #
+  # The `test` profile keeps it out of `docker compose up`. Naming the service
+  # with `run` starts it (and what it depends on) without the profile flag.
+  # Results are written to ./test-results.
+  # ─────────────────────────────────────────────────────────────────────────
+  e2e:
+    profiles: ["test"]
+    image: {{project.id}}-e2e:${IMAGE_TAG:-latest}
+    build:
+      context: ./tests
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      E2E_BASE_URL: http://backend:{{project.backendPort}}
+      E2E_ORIGIN: ${E2E_ORIGIN:-http://frontend:{{project.frontendPort}}}
+      E2E_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
+      # Unset here and in the backend, the seed uses admin123.
+      E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      E2E_REPORT_URL: http://report:3000
+      # In compose the platform is a dependency: an unreachable one is a failure, not a skip.
+      E2E_REPORTING: required
+      E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
+      E2E_REPORT_PACK: /app/reporting/reporting-pack.json
+      E2E_RECORDS_PER_ENTITY: ${E2E_RECORDS_PER_ENTITY:-10}
+    volumes:
+      - ./reporting/reporting-pack.json:/app/reporting/reporting-pack.json:ro
+      - ./test-results:/app/test-results
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      report:
+        condition: service_healthy
+      report-seeder:
+        condition: service_completed_successfully
+
+  # The same suite's browser layer: Chromium drives the front end, the rules &
+  # workflows editor, a record's action buttons and the reporting platform's
+  # dashboards. A separate service because the Playwright image is large and the
+  # API suites should not pay for it.
+  #
+  #   docker compose run --rm e2e-ui
+  e2e-ui:
+    profiles: ["test"]
+    image: {{project.id}}-e2e-ui:${IMAGE_TAG:-latest}
+    build:
+      context: ./tests
+      dockerfile: Dockerfile.ui
+    restart: "no"
+    ipc: host
+    environment:
+      E2E_BASE_URL: http://backend:{{project.backendPort}}
+      E2E_APP_URL: http://frontend:{{project.frontendPort}}
+      E2E_ORIGIN: ${E2E_ORIGIN:-http://frontend:{{project.frontendPort}}}
+      E2E_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@admin.com}
+      E2E_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      E2E_REPORT_URL: http://report:3000
+      # In compose the platform is a dependency: an unreachable one is a failure, not a skip.
+      E2E_REPORTING: required
+      E2E_REPORT_ADMIN_PASSWORD: ${REPORT_ADMIN_PASSWORD:-admin}
+      E2E_REPORT_PACK: /app/reporting/reporting-pack.json
+    volumes:
+      - ./reporting/reporting-pack.json:/app/reporting/reporting-pack.json:ro
+      - ./test-results:/app/test-results
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      report:
+        condition: service_healthy
+      report-seeder:
+        condition: service_completed_successfully
+  # </e2e>
+
+  # ── Tracing (optional) ──────────────────────────────────────────────────────
+  # docker compose --profile observability up -d
+  # Nothing here starts without the profile, and the backend exports nothing until
+  # OTEL_EXPORTER_OTLP_ENDPOINT is set.
+  otel-collector:
+    image: otel/opentelemetry-collector:0.116.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
 
 volumes:
   postgres_data:

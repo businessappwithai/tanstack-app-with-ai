@@ -22,6 +22,7 @@ const MACHINES: RbacStateMachine[] = [
       { from: "submitted", to: "rejected", trigger: "close won" },
       { from: "approved", to: "[*]" },
     ],
+    terminal: ["approved", "rejected"],
   },
 ];
 
@@ -116,7 +117,7 @@ describe("compileRbac", () => {
     expect(warnings[0]).toContain("unknown entity");
   });
 
-  it("skips a name that is neither an operation nor a transition", () => {
+  it("skips a name that is neither an operation nor a move", () => {
     const warnings: string[] = [];
     const compiled = compileRbac("%%rbac role:admin on Order.teleport", ENTITIES, MACHINES, (m) =>
       warnings.push(m)
@@ -126,7 +127,7 @@ describe("compileRbac", () => {
     // The message must name both possibilities: with state machines in play,
     // "unknown operation" alone would send the author looking in one place.
     expect(warnings[0]).toContain("neither a CRUD operation");
-    expect(warnings[0]).toContain("transition");
+    expect(warnings[0]).toContain("a move in Order's state machine");
   });
 
   it("skips a directive that names no role, which would lock everyone out", () => {
@@ -167,62 +168,93 @@ describe("compileRbac", () => {
   });
 });
 
-describe("compileRbac — state transitions", () => {
+describe("compileRbac — moves along the status flow", () => {
   const compile = (source: string) => compileRbac(source, ENTITIES, MACHINES);
 
-  it("resolves a non-CRUD name against the entity's state machine", () => {
-    const { transitions, operations } = compile("%%rbac role:manager on Order.submit");
-    expect(operations).toEqual([]);
-    expect(transitions).toEqual([
+  // A record moves by an action button, along an edge the diagram draws. A move
+  // an `%%rbac` line names is limited to those roles; seeded into sys_access_grant.
+  it("grants a move by its event, on every edge the event labels", () => {
+    const compiled = compile("%%rbac role:manager on Order.approve");
+    expect(compiled.transitions).toEqual([
       {
         entity: "Order",
         tableName: "bus_order",
-        transition: "submit",
-        edges: [{ from: "draft", to: "submitted" }],
+        transition: "approve",
+        edges: [
+          { from: "submitted", to: "approved" },
+          { from: "draft", to: "approved" },
+        ],
         roles: ["manager"],
       },
     ]);
   });
 
-  it("carries every edge an event names, not just the first", () => {
-    // `approve` appears twice — from draft and from submitted. Keeping one
-    // would leave the other path unguarded while looking restricted.
-    const { transitions } = compile("%%rbac role:manager on Order.approve");
-    expect(transitions[0]?.edges).toEqual([
-      { from: "submitted", to: "approved" },
-      { from: "draft", to: "approved" },
-    ]);
+  it("reads an event written with spaces or dashes in the diagram as one token", () => {
+    const compiled = compile("%%rbac role:manager on Order.close_won");
+    expect(compiled.transitions[0]?.edges).toEqual([{ from: "submitted", to: "rejected" }]);
   });
 
-  it("matches an event written with spaces or dashes in the diagram", () => {
-    // A diagram reads `submitted --> rejected : close won`; a directive spells
-    // the same event `close_won`.
-    const { transitions } = compile("%%rbac role:manager on Order.close_won");
-    expect(transitions[0]?.edges).toEqual([{ from: "submitted", to: "rejected" }]);
+  it("grants an edge the diagram did not label, named from->to", () => {
+    const compiled = compile("%%rbac role:clerk on Order.draft->submitted");
+    expect(compiled.transitions[0]).toMatchObject({
+      transition: "draft->submitted",
+      edges: [{ from: "draft", to: "submitted" }],
+      roles: ["clerk"],
+    });
   });
 
-  it("merges two directives naming the same transition", () => {
-    const { transitions } = compile(
-      ["%%rbac role:manager on Order.submit", "%%rbac role:admin on Order.submit"].join("\n")
+  it("grants reopen: one edge from each Final state back to Draft", () => {
+    const compiled = compile("%%rbac role:sales_ops on Order.reopen");
+    expect(compiled.transitions[0]).toMatchObject({
+      transition: "reopen",
+      edges: [
+        { from: "approved", to: "draft" },
+        { from: "rejected", to: "draft" },
+      ],
+    });
+  });
+
+  it("lets a model's own edge labelled reopen win over the lifecycle's", () => {
+    const machines: RbacStateMachine[] = [
+      {
+        entity: "Order",
+        transitions: [{ from: "resolved", to: "in_progress", trigger: "reopen" }],
+        terminal: ["closed"],
+      },
+    ];
+    const compiled = compileRbac("%%rbac role:agent on Order.reopen", ENTITIES, machines);
+    expect(compiled.transitions[0]?.edges).toEqual([{ from: "resolved", to: "in_progress" }]);
+    // …and Final → Draft is still grantable, named as the edge it is.
+    const finalToDraft = compileRbac("%%rbac role:ops on Order.closed->draft", ENTITIES, machines);
+    expect(finalToDraft.transitions[0]?.edges).toEqual([{ from: "closed", to: "draft" }]);
+  });
+
+  it("merges two lines naming one move, as | inside one line does", () => {
+    const compiled = compile(
+      ["%%rbac role:rep on Order.submit", "%%rbac role:manager|rep on Order.submit"].join("\n")
     );
-    expect(transitions).toHaveLength(1);
-    expect(transitions[0]?.roles).toEqual(["admin", "manager"]);
+    expect(compiled.transitions).toHaveLength(1);
+    expect(compiled.transitions[0]?.roles).toEqual(["manager", "rep"]);
+    expect(rbacRoleNames(compiled)).toEqual(["manager", "rep"]);
   });
 
-  it("keeps CRUD and transition rules in separate buckets", () => {
+  it("keeps a CRUD rule and a move side by side", () => {
     const compiled = compile(
       ["%%rbac role:admin on Order.delete", "%%rbac role:manager on Order.submit"].join("\n")
     );
     expect(compiled.operations).toHaveLength(1);
     expect(compiled.transitions).toHaveLength(1);
-  });
-
-  it("collects roles from both kinds for seeding", () => {
-    const compiled = compile(
-      ["%%rbac role:admin on Order.delete", "%%rbac role:manager on Order.submit"].join("\n")
-    );
     expect(rbacRoleNames(compiled)).toEqual(["admin", "manager"]);
     expect(hasRbacRules(compiled)).toBe(true);
+  });
+
+  it("skips an edge the diagram does not draw", () => {
+    const warnings: string[] = [];
+    const compiled = compileRbac("%%rbac role:x on Order.submitted->draft", ENTITIES, MACHINES, (m) =>
+      warnings.push(m)
+    );
+    expect(compiled.transitions).toEqual([]);
+    expect(warnings[0]).toContain("a move in Order's state machine");
   });
 
   it("reports nothing declared when the model has no directives", () => {
@@ -230,7 +262,7 @@ describe("compileRbac — state transitions", () => {
     expect(hasRbacRules(compiled)).toBe(false);
   });
 
-  it("cannot resolve a transition when no machine is supplied", () => {
+  it("cannot resolve a move when no machine is supplied", () => {
     const warnings: string[] = [];
     const compiled = compileRbac("%%rbac role:manager on Order.submit", ENTITIES, [], (m) =>
       warnings.push(m)

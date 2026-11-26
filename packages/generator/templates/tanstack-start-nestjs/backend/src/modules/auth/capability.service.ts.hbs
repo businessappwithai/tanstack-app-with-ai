@@ -1,0 +1,290 @@
+/**
+ * What a user may do — every grant of every role they hold, in one query.
+ *
+ * A user holds any number of roles and gets the **union** of their grants: a
+ * role only ever adds access. A grant (`sys_access_grant`) is one of
+ *
+ *   op      may perform create / read / update / delete on a table
+ *   move    may press one move of a record's lifecycle (an edge the diagram drew)
+ *   reopen  may take a Final record back to Draft
+ *
+ * and a (table, operation) or a move with no grant at all is open — to anyone
+ * with update permission, for a move. Reopen with no grant is the
+ * administrator's alone, because Final is meant to be the end.
+ *
+ * ## One query, then none
+ *
+ * `sys_user_capability` (migration `record_lifecycle`) is one join chain — the
+ * user's roles, to the role, to its grants — on a role key stored already folded,
+ * so `SELECT … WHERE sys_user_id = $1` answers the whole question and the guard
+ * compares nothing in code but set membership. The answer is cached per user
+ * (`CACHE_TTL_CAPABILITIES_MS`), and which pairs and moves are restricted at all —
+ * the same for everyone — once per process (`CACHE_TTL_ACCESS_POLICY_MS`).
+ *
+ * A change to roles, assignments or grants is announced by the database
+ * (`pg_notify('access_changed')`) and every instance drops both caches on it;
+ * the expiry is only what bounds a lost notification.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { DatabaseService } from '../../database/database.service';
+import { cacheTtl, createCache } from '../../common/ttl-cache';
+import { getLogger } from '../../common/logging/logger.service';
+
+export type GrantKind = 'op' | 'move' | 'reopen';
+
+/** `Sales Manager`, `sales_manager`, `sales-manager` → `sales manager`. The migration's fold. */
+export function roleKey(role: string): string {
+  return role.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+}
+
+/** The key one grant is stored under: an operation, or an edge. */
+export function grantKey(kind: GrantKind, table: string, action: string, from = '', to = ''): string {
+  return kind === 'op' ? `${kind}:${table}:${action}` : `${kind}:${table}:${from}->${to}`;
+}
+
+/** Which keys are restricted at all, and to which role names (for the refusal's message). */
+export interface AccessPolicy {
+  restricted: Map<string, string[]>;
+  /** Every grant key, per role key — what a role name not in sys_user_roles still grants. */
+  byRole: Map<string, Set<string>>;
+}
+
+export interface Capabilities {
+  /** The role names the user holds. */
+  roles: string[];
+  isMaster: boolean;
+  /** Every grant key the user's roles hold — the union. */
+  grants: Set<string>;
+}
+
+export interface Decision {
+  allowed: boolean;
+  /** True when some grant names this key: it is not open to everyone. */
+  restricted: boolean;
+  /** The roles that may, when restricted. */
+  roles: string[];
+}
+
+/** What GET /api/me/permissions hands the front end, so it can draw buttons without asking per record. */
+export interface CapabilitiesView {
+  roles: string[];
+  isMaster: boolean;
+  /** Grant keys the user holds. */
+  grants: string[];
+  /** Grant keys that are restricted at all; anything else is open. */
+  restricted: string[];
+}
+
+const EMPTY_POLICY: AccessPolicy = { restricted: new Map(), byRole: new Map() };
+
+function undefinedRelation(error: any): boolean {
+  return error?.code === '42P01' || /relation .* does not exist/i.test(error?.message ?? '');
+}
+
+@Injectable()
+export class CapabilityService implements OnModuleInit, OnModuleDestroy {
+  private readonly users = createCache<string, Capabilities>('capabilities');
+  private readonly policies = createCache<'policy', AccessPolicy>('accessPolicy', { maxEntries: 1 });
+  /** Whether an account is active. Same expiry as a user's capabilities — it is the same question. */
+  private readonly accounts = createCache<string, boolean>('accountActive', { ttlMs: cacheTtl('capabilities').ttlMs });
+  private listener: { end(): Promise<void> } | null = null;
+  private stopped = false;
+  /** Queries made, for the test that holds this to one per cold user. */
+  queries = 0;
+
+  constructor(@Optional() private readonly db?: DatabaseService) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.listen();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.stopped = true;
+    await this.listener?.end().catch(() => undefined);
+  }
+
+  /** Drop every cached answer — a change to access was announced, or a test asks. */
+  invalidate(): void {
+    this.users.clear();
+    this.policies.clear();
+    this.accounts.clear();
+  }
+
+  /**
+   * Whether `sys_user` still holds this account as active. An account that was
+   * deactivated or deleted is not, and SessionAuthGuard refuses it — at once,
+   * rather than when Better Auth's five-minute session cookie next asks the
+   * database. Deactivating announces `access_changed`, which empties this.
+   */
+  async isActive(sysUserId: string): Promise<boolean> {
+    const cached = this.accounts.get(sysUserId);
+    if (cached !== undefined) return cached;
+    if (!this.db) return true;
+    const row = await this.db.kysely
+      .selectFrom('sys_user')
+      .select('is_active')
+      .where('sys_user_id', '=', sysUserId)
+      .executeTakeFirst();
+    const active = row?.is_active === true;
+    this.accounts.set(sysUserId, active);
+    return active;
+  }
+
+  /**
+   * Listen for `access_changed` on a connection of its own. Best-effort: a
+   * database or a driver that cannot listen leaves the expiry as the only way
+   * an entry leaves, which is what it is for.
+   */
+  private async listen(): Promise<void> {
+    const url = process.env.DATABASE_URL;
+    if (!url || this.stopped) return;
+    try {
+      const pg: any = await import('pg');
+      const Client = pg.Client ?? pg.default?.Client;
+      if (!Client) return;
+      const client = new Client({ connectionString: url });
+      await client.connect();
+      client.on?.('notification', () => this.invalidate());
+      const reconnect = () => {
+        this.invalidate();
+        this.listener = null;
+        if (!this.stopped) setTimeout(() => void this.listen(), 5000).unref?.();
+      };
+      client.on?.('error', reconnect);
+      client.on?.('end', () => {
+        if (!this.stopped) reconnect();
+      });
+      await client.query('LISTEN access_changed');
+      this.listener = client;
+    } catch (error: any) {
+      getLogger('auth').event('auth.capability.unsynced', { err: error });
+    }
+  }
+
+  /** Which keys are restricted, and every role's grants. One query per expiry. */
+  async policy(): Promise<AccessPolicy> {
+    const cached = this.policies.get('policy');
+    if (cached) return cached;
+    if (!this.db) return EMPTY_POLICY;
+    let rows: any[];
+    try {
+      this.queries += 1;
+      rows = await this.db.kysely
+        .selectFrom('sys_access_grant')
+        .select(['kind', 'table_name', 'action', 'from_state', 'to_state', 'role_name', 'role_key'])
+        .where('is_active', '=', true)
+        .execute();
+    } catch (error: any) {
+      // A database from before the lifecycle migration has no grants to read,
+      // which is an answered question: nothing is restricted.
+      if (undefinedRelation(error)) return EMPTY_POLICY;
+      throw error;
+    }
+    const policy: AccessPolicy = { restricted: new Map(), byRole: new Map() };
+    for (const row of rows) {
+      const key = grantKey(row.kind, row.table_name, row.action, row.from_state, row.to_state);
+      const roles = policy.restricted.get(key) ?? [];
+      if (!roles.includes(row.role_name)) roles.push(row.role_name);
+      policy.restricted.set(key, roles);
+      const forRole = policy.byRole.get(row.role_key) ?? new Set<string>();
+      forRole.add(key);
+      policy.byRole.set(row.role_key, forRole);
+    }
+    this.policies.set('policy', policy);
+    return policy;
+  }
+
+  /**
+   * A user's capabilities: `sysUserId` through the one view, plus any role a
+   * Better Auth session names directly (matched by key against the policy).
+   */
+  async forUser(user: { sysUserId?: string | null; id?: string | null; roles?: unknown; role?: unknown }): Promise<Capabilities> {
+    const extra = new Set<string>();
+    for (const value of [...(Array.isArray(user.roles) ? user.roles : []), user.role]) {
+      if (typeof value === 'string' && value) extra.add(value);
+    }
+    const cacheKey = `${user.sysUserId ?? `auth:${user.id ?? ''}`}|${[...extra].sort().join(',')}`;
+    const cached = this.users.get(cacheKey);
+    if (cached) return cached;
+
+    const roles = new Map<string, string>();
+    const grants = new Set<string>();
+    let isMaster = false;
+
+    if (user.sysUserId && this.db) {
+      let rows: any[];
+      try {
+        this.queries += 1;
+        rows = await this.db.kysely
+          .selectFrom('sys_user_capability')
+          .select(['role_name', 'role_key', 'is_master_role', 'kind', 'table_name', 'action', 'from_state', 'to_state'])
+          .where('sys_user_id', '=', user.sysUserId)
+          .execute();
+      } catch (error: any) {
+        if (!undefinedRelation(error)) throw error;
+        // Before the lifecycle migration: the roles alone, as the session guard read them.
+        this.queries += 1;
+        rows = await this.db.kysely
+          .selectFrom('sys_user_roles as ur')
+          .innerJoin('sys_role as r', 'r.sys_role_id', 'ur.sys_role_id')
+          .select(['r.name as role_name', 'r.is_master_role'])
+          .where('ur.sys_user_id', '=', user.sysUserId)
+          .where('ur.is_active', '=', true)
+          .execute();
+      }
+      for (const row of rows) {
+        roles.set(roleKey(row.role_name), row.role_name);
+        if (row.is_master_role) isMaster = true;
+        if (row.kind) {
+          grants.add(grantKey(row.kind, row.table_name, row.action, row.from_state, row.to_state));
+        }
+      }
+    }
+
+    const missing = [...extra].filter((role) => !roles.has(roleKey(role)));
+    if (missing.length > 0) {
+      const policy = await this.policy();
+      for (const role of missing) {
+        roles.set(roleKey(role), role);
+        for (const key of policy.byRole.get(roleKey(role)) ?? []) grants.add(key);
+      }
+    }
+
+    const capabilities: Capabilities = { roles: [...roles.values()], isMaster, grants };
+    this.users.set(cacheKey, capabilities);
+    return capabilities;
+  }
+
+  /** May these capabilities do this? Open unless some grant names it; Reopen is closed unless one does. */
+  async decide(
+    capabilities: Capabilities,
+    kind: GrantKind,
+    table: string,
+    action: string,
+    from = '',
+    to = '',
+  ): Promise<Decision> {
+    const key = grantKey(kind, table, action, from, to);
+    const policy = await this.policy();
+    const roles = policy.restricted.get(key) ?? [];
+    const restricted = roles.length > 0;
+    if (capabilities.isMaster) return { allowed: true, restricted, roles };
+    if (kind === 'reopen' && !restricted) return { allowed: false, restricted: true, roles: [] };
+    return { allowed: !restricted || capabilities.grants.has(key), restricted, roles };
+  }
+
+  /** The front end's copy: what the user holds and what is restricted at all. */
+  async view(capabilities: Capabilities): Promise<CapabilitiesView> {
+    const policy = await this.policy();
+    return {
+      roles: capabilities.roles,
+      isMaster: capabilities.isMaster,
+      grants: [...capabilities.grants].sort(),
+      restricted: [...policy.restricted.keys()].sort(),
+    };
+  }
+}

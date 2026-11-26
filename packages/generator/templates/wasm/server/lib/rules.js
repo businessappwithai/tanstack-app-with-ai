@@ -248,6 +248,196 @@ function evaluateGraph(graph, record, columns) {
   return { results, trace };
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Graphs authored in the graph editor: nodes that carry `content`              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * True for a graph whose nodes *compute* — an expression, function or switch
+ * with real content, or a chain of more than one decision table.
+ *
+ * Everything else is a compiled `%%action` table or a drawn flowchart and keeps
+ * its existing path. Without this split the editor's graphs were read as prose:
+ * a function node was handed to `interpretAction` by its *name*, and decided
+ * whatever its label sounded like.
+ */
+function isComputedGraph(graph) {
+  const nodes = graph.nodes || [];
+  const computes = nodes.some(
+    (node) =>
+      (node.type === "expressionNode" ||
+        node.type === "functionNode" ||
+        node.type === "switchNode") &&
+      node.content !== undefined
+  );
+  const tables = nodes.filter((node) => node.type === "decisionTableNode");
+  // A column with a `field` is read against that field ("> 40" under `discount`);
+  // the older table path evaluates every cell as a whole-record expression, which
+  // is the convention only `%%action` tables use.
+  const fieldBased = tables.some((node) =>
+    (node.content?.inputs || []).some((input) => String(input.field || "").trim() !== "")
+  );
+  return computes || tables.length > 1 || fieldBased;
+}
+
+/**
+ * One decision-table cell as an expression over the record.
+ *
+ * zen reads a cell against its column's field ("> 40" under `discount`), and a
+ * column with no field holds a whole-record check — the convention the table
+ * editor already uses. `null` means the cell is blank and matches anything.
+ */
+function cellExpression(field, cell) {
+  const text = String(cell ?? "").trim();
+  if (!text) return null;
+  if (!field) return text;
+  // "Is empty" and "is not empty" mean null, absent or blank — a cleared text field is "".
+  if (text === "null") return `${field} == null or ${field} == ""`;
+  // The compiler writes the widened forms (`null, ""`, `!= null and != ""`); a hand-written
+  // table may still say the bare words. All of them mean the same thing here.
+  if (text === "!= null" || text === '!= null and != ""') {
+    return `${field} != null and ${field} != ""`;
+  }
+  if (/^(==|!=|<=|>=|<|>)/.test(text)) return `${field} ${text}`;
+  const LITERAL = `(?:"[^"]*"|'[^']*'|-?\\d+(?:\\.\\d+)?|true|false|null)`;
+  if (new RegExp(`^${LITERAL}(?:\\s*,\\s*${LITERAL})+$`).test(text)) {
+    return text
+      .match(new RegExp(LITERAL, "g"))
+      .map((part) => `${field} == ${part}`)
+      .join(" or ");
+  }
+  if (new RegExp(`^${LITERAL}$`).test(text)) return `${field} == ${text}`;
+  return text;
+}
+
+function evaluateContentTable(node, context, trace) {
+  const content = node.content || {};
+  const matches = [];
+  for (const row of content.rules || []) {
+    let matched = true;
+    for (const input of content.inputs || []) {
+      const expression = cellExpression(input.field, row[input.id]);
+      if (expression === null) continue;
+      try {
+        if (!test(expression, context)) matched = false;
+      } catch (error) {
+        trace.push({ node: node.name, assumed: true, reason: error.message });
+        matched = false;
+      }
+      if (!matched) break;
+    }
+    if (!matched) continue;
+    const value = {};
+    for (const output of content.outputs || []) {
+      const cell = row[output.id];
+      if (cell === undefined || String(cell).trim() === "") continue;
+      try {
+        value[output.field] = evaluate(String(cell), context);
+      } catch {
+        value[output.field] = unquote(cell);
+      }
+    }
+    matches.push(value);
+    if (content.hitPolicy !== "collect") break;
+  }
+  return matches;
+}
+
+/**
+ * Run a function node's `export const handler = async (input) => ({ ... })`.
+ *
+ * zen runs this in a sandbox without imports, network or process access; the
+ * compiler refuses source that names any of them, and the handler here is given
+ * only a copy of the record. It is the administrator's own code in the
+ * administrator's own tab — not a boundary, which is why the compiler's check is
+ * the one that matters.
+ */
+async function runFunctionNode(node, context) {
+  const raw = typeof node.content === "string" ? node.content : node.content?.source || "";
+  const source = raw.replace(/\bexport\s+(?=const|function|async)/g, "");
+  // sandboxed handler, see above.
+  const factory = new Function("input", `${source}\n;return handler(input);`);
+  const out = await factory(JSON.parse(JSON.stringify(context)));
+  return out && typeof out === "object" ? out : {};
+}
+
+/**
+ * Walk a graph whose nodes compute, carrying one growing context.
+ *
+ * Mirrors zen: every node reads the context and adds to it; a switch sends the
+ * context down the edges whose `sourceHandle` is the statement that fit. The
+ * rule's answer is what the nodes *added* — the action row the application
+ * acts on — so `trace` records each node's contribution for the dry run.
+ */
+async function evaluateComputedGraph(graph, record) {
+  const nodes = new Map((graph.nodes || []).map((node) => [node.id, node]));
+  const outgoing = new Map();
+  for (const edge of graph.edges || []) {
+    if (!outgoing.has(edge.sourceId)) outgoing.set(edge.sourceId, []);
+    outgoing.get(edge.sourceId).push(edge);
+  }
+  const start = (graph.nodes || []).find((node) => node.type === "inputNode");
+  if (!start) return { results: [], trace: [] };
+
+  const context = { ...record };
+  const produced = {};
+  const trace = [];
+  const add = (values) => {
+    Object.assign(context, values);
+    Object.assign(produced, values);
+  };
+
+  const queue = [start.id];
+  const seen = new Set();
+  while (queue.length && seen.size < 200) {
+    const id = queue.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = nodes.get(id);
+    if (!node) continue;
+    let followed = outgoing.get(id) || [];
+
+    try {
+      if (node.type === "expressionNode") {
+        const values = {};
+        for (const row of node.content?.expressions || []) {
+          if (!row.key) continue;
+          values[row.key] = evaluate(row.value, { ...context, ...values });
+        }
+        add(values);
+        trace.push({ node: node.name, added: values });
+      } else if (node.type === "functionNode") {
+        const values = await runFunctionNode(node, context);
+        add(values);
+        trace.push({ node: node.name, added: values });
+      } else if (node.type === "decisionTableNode") {
+        const matches = evaluateContentTable(node, context, trace);
+        for (const match of matches) add(match);
+        trace.push({ node: node.name, matched: matches.length });
+      } else if (node.type === "switchNode") {
+        const fits = [];
+        for (const statement of node.content?.statements || []) {
+          const condition = String(statement.condition ?? "").trim();
+          if (statement.isDefault || !condition || test(condition, context)) fits.push(statement.id);
+          if (fits.length && node.content?.hitPolicy !== "collect") break;
+        }
+        followed = followed.filter((edge) => fits.includes(edge.sourceHandle));
+        trace.push({ node: node.name, branches: fits });
+      }
+    } catch (error) {
+      trace.push({ node: node.name, assumed: true, reason: error.message });
+      return {
+        results: [{ action: "error", message: `Rule node "${node.name}": ${error.message}` }],
+        trace,
+      };
+    }
+
+    for (const edge of followed) queue.push(edge.targetId);
+  }
+
+  return { results: Object.keys(produced).length ? [produced] : [], trace };
+}
+
 /**
  * Evaluate every rule bound to an entity operation.
  *
@@ -273,9 +463,10 @@ export async function evaluateRules(rules, record, options = {}) {
     }
 
     const table = (graph.nodes || []).find((node) => node.type === "decisionTableNode");
-    const outcome = table
-      ? { results: evaluateDecisionTable(table, record), trace: [] }
-      : evaluateGraph(graph, record, columns);
+    let outcome;
+    if (isComputedGraph(graph)) outcome = await evaluateComputedGraph(graph, record);
+    else if (table) outcome = { results: evaluateDecisionTable(table, record), trace: [] };
+    else outcome = evaluateGraph(graph, record, columns);
 
     traces.push({ rule: rule.name, trace: outcome.trace });
 
@@ -292,7 +483,12 @@ export async function evaluateRules(rules, record, options = {}) {
        * so the write was stored and the caller was told nothing. `reject` stays
        * because the node-graph path and the JDM parse failure above emit it.
        */
-      if (action === "reject" || action === "error" || action === "prevent") {
+      if (
+        action === "reject" ||
+        action === "error" ||
+        action === "prevent" ||
+        action === "validation-error"
+      ) {
         violations.push({ ruleId: result.ruleId || rule.name, ...result });
       } else if (action === "set" && result.field) {
         mutations[result.field] = result.value;

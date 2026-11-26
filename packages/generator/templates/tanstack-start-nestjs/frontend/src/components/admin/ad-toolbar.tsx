@@ -45,6 +45,8 @@ interface ADToolbarProps {
   canCreate?: boolean;
   isEditing?: boolean;
   isDetailView?: boolean;
+  /** False for a record at the end of its flow: Final is locked until reopened. */
+  canEdit?: boolean;
   isAdvancedSearchOpen?: boolean;
   hasPrintReport?: boolean;
 }
@@ -57,6 +59,7 @@ export function ADToolbar({
   onUndo,
   onRefresh,
   onEdit,
+  canEdit = true,
   onCancelEdit,
   onAdvancedSearchToggle,
   onPrint,
@@ -84,7 +87,7 @@ export function ADToolbar({
               className="h-9 gap-2 px-3 text-sm font-medium"
             >
               <SlidersHorizontal className="h-4 w-4" />
-              <span className="hidden sm:inline">Search</span>
+              <span className="sr-only sm:not-sr-only">Search</span>
               {advancedFilterCount > 0 && (
                 <Badge variant="default" className="h-4 px-1 text-[10px] min-w-[16px]">
                   {advancedFilterCount}
@@ -105,7 +108,7 @@ export function ADToolbar({
                 className="h-9 gap-2 px-3 text-sm font-medium hover:bg-primary/10 hover:text-primary hover:border-primary/30"
               >
                 <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">New</span>
+                <span className="sr-only sm:not-sr-only">New</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>New Record</TooltipContent>
@@ -122,7 +125,7 @@ export function ADToolbar({
                 className="h-9 gap-2 px-3 text-sm font-medium"
               >
                 <Copy className="h-4 w-4" />
-                <span className="hidden sm:inline">Copy</span>
+                <span className="sr-only sm:not-sr-only">Copy</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>Copy Record</TooltipContent>
@@ -138,13 +141,16 @@ export function ADToolbar({
               <Button
                 size="sm"
                 onClick={onEdit}
-                className="h-9 gap-2 px-4 text-sm font-semibold bg-teal-600 hover:bg-teal-700 text-white shadow-sm"
+                disabled={!canEdit}
+                className="h-9 gap-2 px-4 text-sm font-semibold bg-teal-700 hover:bg-teal-800 text-white shadow-sm"
               >
                 <Pencil className="h-4 w-4" />
                 Edit
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Edit Record</TooltipContent>
+            <TooltipContent>
+              {canEdit ? "Edit Record" : "Final — this record is locked. Reopen it to change it."}
+            </TooltipContent>
           </Tooltip>
         )}
 
@@ -226,7 +232,7 @@ export function ADToolbar({
                     className="h-9 gap-2 px-3 text-sm font-medium"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    <span className="hidden sm:inline">Undo</span>
+                    <span className="sr-only sm:not-sr-only">Undo</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Undo Changes</TooltipContent>
@@ -264,7 +270,7 @@ export function ADToolbar({
                   className="h-9 gap-2 px-3 text-sm font-medium text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-800 hover:bg-violet-50 dark:hover:bg-violet-950/40 hover:border-violet-400"
                 >
                   <Printer className="h-4 w-4" />
-                  <span className="hidden sm:inline">Print</span>
+                  <span className="sr-only sm:not-sr-only">Print</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Print Report</TooltipContent>
@@ -276,6 +282,7 @@ export function ADToolbar({
                 variant="ghost"
                 size="sm"
                 onClick={onRefresh}
+                aria-label="Refresh"
                 className="h-9 w-9 p-0 hover:bg-primary/10 hover:text-primary"
               >
                 <RefreshCw className="h-4 w-4" />

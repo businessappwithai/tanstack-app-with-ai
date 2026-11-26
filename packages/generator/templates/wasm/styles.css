@@ -422,6 +422,13 @@ a { color: var(--primary); }
   padding: 16px 20px; border-bottom: 1px solid var(--border);
 }
 .record__title { margin: 0; font-size: 17px; }
+.record__state {
+  display: inline-flex; align-items: center; padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
 .record__close {
   margin-left: auto; border: 0; background: transparent; color: var(--text-faint);
   font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
@@ -438,12 +445,23 @@ a { color: var(--primary); }
 .group__name { font-size: 14px; font-weight: 650; color: var(--primary); }
 .group__desc { margin: 1px 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text-faint); }
 .group__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+/* `%%section`: exactly two columns, and a field alone on its row spans both. One
+   column on a narrow screen, where two would leave neither readable. */
+.group__fields--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.group__fields--2 > .field--wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .group__fields--2 { grid-template-columns: minmax(0, 1fr); } }
+details.group > summary.group__name { cursor: pointer; }
 
 .field { display: grid; gap: 6px; align-content: start; }
 .field--wide { grid-column: 1 / -1; }
 .field__head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .field__label { font-size: 13px; font-weight: 600; }
 .field__required { color: var(--destructive); }
+/* Field logic: `.field` is a grid, which beats the UA's [hidden] rule, so
+   display logic needs saying explicitly; a field locked by read-only logic
+   is told apart from one that is always read-only. */
+.field[hidden] { display: none; }
+.field--logic-locked .field__input { background: var(--surface-2); }
 .chip {
   display: inline-flex; align-items: center; gap: 3px;
   font-size: 10.5px; font-family: var(--mono); padding: 1px 7px; border-radius: 4px;
@@ -493,6 +511,49 @@ a { color: var(--primary); }
 .dict__row:hover { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
 .dict__detail { margin-bottom: var(--gap, 16px); }
 .dict__help { max-width: 34ch; color: var(--text-faint); font-size: 12px; }
+
+/* A value in a table that is also the control that changes it — the field
+   visibility toggles. A <button> so it is reachable by keyboard and announced
+   as one; styled as text because a row of twelve buttons reads as a toolbar
+   rather than as data. */
+.linklike {
+  font: inherit; color: var(--primary); background: none; border: 0; padding: 0;
+  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.linklike:hover:not(:disabled) { color: var(--text); }
+.linklike:disabled { opacity: 0.5; cursor: progress; text-decoration: none; }
+
+/* ---------------------------------------------------------------------------
+   The admin editors — one form shape for rules, processes and reports.
+
+   Deliberately not a modal. This application runs inside an iframe on the page
+   that generated it, where a dialog is not guaranteed to appear; the same
+   reason the dashboard's purge control is two-step. The form takes the place of
+   what the reader was looking at instead.
+   --------------------------------------------------------------------------- */
+.editor-host:empty { display: none; }
+.editor {
+  display: grid; gap: 12px; margin: 14px 0 18px; padding: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+}
+.editor .field__input--code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.5; resize: vertical;
+}
+.editor__actions { display: flex; gap: 8px; margin-top: 4px; }
+.editor__error {
+  margin: 0; padding: 9px 11px; border-radius: var(--radius-sm);
+  background: var(--destructive-soft, rgba(220, 38, 38, 0.1));
+  border-left: 3px solid var(--destructive);
+  font-size: 13px; white-space: pre-wrap;
+}
+.field__hint { margin: 0; font-size: 12px; color: var(--text-faint); }
+
+/* A delete that arms on the first click. `is-armed` is what says so — the label
+   changes too, but colour alone would not reach somebody who cannot see it. */
+.btn.is-armed { background: var(--destructive); border-color: var(--destructive); color: #fff; }
+
+.rule__actions, .report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .muted { color: var(--text-faint); }
 
 .record__actions { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 20px; border-top: 1px solid var(--border); flex-wrap: wrap; }
@@ -504,6 +565,12 @@ a { color: var(--primary); }
 }
 .violations__title { margin: 0 0 5px; font-size: 13.5px; color: var(--destructive); font-family: var(--sans); font-weight: 650; }
 .violations__list { margin: 0; padding-left: 18px; font-size: 13px; }
+.conflict { width: 100%; margin: 8px 0; border-collapse: collapse; font-size: 13px; }
+.conflict th, .conflict td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.conflict th { font-weight: 600; }
+.conflict__clash td { background: color-mix(in srgb, var(--destructive) 8%, transparent); }
+.conflict small { color: var(--destructive); }
+.conflict__actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 
 /* ------------------------------------------------------------- buttons --- */
 
@@ -557,7 +624,11 @@ a { color: var(--primary); }
 .side__title { margin: 0 0 6px; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); font-weight: 700; }
 .side__meta { margin: 0 0 11px; font-size: 13px; }
 .side__transitions { display: grid; gap: 7px; }
+.side__actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.side__actions .side__meta { flex-basis: 100%; margin: 0; }
 .side__empty { margin: 0; font-size: 12.5px; color: var(--text-faint); }
+.side__notice { margin: 0 0 11px; padding: 8px 10px; border: 1px solid #f0c36d; border-radius: 6px; background: #fff7e0; color: #5c4200; font-size: 12.5px; }
+.side__notice p { margin: 4px 0 0; }
 .side__list { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12.5px; }
 .side__list dt { color: var(--text-faint); }
 .side__list dd { margin: 0; font-family: var(--mono); font-size: 11.5px; }
@@ -736,67 +807,475 @@ a { color: var(--primary); }
 /* --------------------------------------------------- reporting ---------- */
 
 /*
- * The reporting application, told apart from the one it reports on.
+ * The way into the reporting application, on the application's own screens.
  *
- * The same design system — two applications generated from one model should not
- * look like two products — with one deliberate difference: a slate accent
- * instead of the teal. A reader who is signed into both at once in one tab has
- * to be able to tell, at a glance, which one they are looking at, and the
- * masthead is the only thing always on screen.
+ * The reporting application itself is drawn in the Enterprise Reporting
+ * platform's own design — see the `.er` block at the end of this file. What is
+ * here is the slate accent the application uses for the door to it: the sign-in
+ * screen's link and the dashboard's card.
  */
 :root {
   --reporting: #3f4a5a;
   --reporting-soft: #eef1f5;
 }
 
-.login--report .login__aside { background: var(--reporting-soft); }
-.login__mark--report { background: var(--reporting); }
-.login--report .btn--primary { background: var(--reporting); border-color: var(--reporting); }
-.login--report .btn--primary:hover { background: #313a47; border-color: #313a47; }
-.login--report .login__hint { background: var(--reporting-soft); }
 .login__aside-note {
   margin: 18px 0 20px; font-size: 12.5px; line-height: 1.55; color: var(--text-soft);
 }
 
-.masthead--report { border-bottom: 2px solid var(--reporting); }
-.masthead__badge {
-  padding: 4px 9px; border-radius: 999px; background: var(--reporting); color: #fff;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+/* The second application, named on the first screen. `.btn` is an <a> here, so
+   it needs the decoration and line-height a <button> got for free. */
+.login__other {
+  margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border);
 }
-.avatar--report { background: var(--reporting); }
-.shell--report .actionbar .btn.is-active {
+.login__other h2 { margin: 0 0 4px; font-size: 18px; }
+.login__other .login__aside-note { margin: 10px 0 16px; }
+.btn--report {
   background: var(--reporting); border-color: var(--reporting); color: #fff;
+  text-decoration: none; line-height: 1.2;
 }
-.crumbs__note { color: var(--text-faint); font-size: 12px; }
-
-/* The dashboard's tiles: one chart each, in a grid that collapses on a phone. */
-.report-grid {
-  display: grid; gap: 14px; margin: 14px 0 26px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-}
-.report-tile {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 14px 16px; min-width: 0;
-}
-.report-tile h3 { margin: 0 0 8px; font-size: 14px; }
-.report-tile .report-chart { color: var(--reporting); width: 100%; height: auto; }
-
-.report-tables {
-  display: grid; gap: 4px; margin: 10px 0 24px; padding: 0; list-style: none;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-}
-.report-tables li { font-size: 12.5px; }
-
-/* A saved query, shown where a reader asks where a number came from. */
-.report-sql { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 13px; background: var(--surface); }
-.report-sql > summary { cursor: pointer; font-size: 13px; font-weight: 500; }
-.report-sql pre {
-  margin: 10px 0 0; padding: 11px 12px; overflow-x: auto;
-  background: var(--surface-2); border-radius: var(--radius-sm);
-  font-family: var(--mono); font-size: 12px; line-height: 1.5;
-}
-.shell--report .report-chart { color: var(--reporting); }
+.btn--report:hover:not(:disabled) { background: #313a47; border-color: #313a47; }
 
 /* The entry point on the application's own dashboard. */
 .category--reporting .category__count { color: var(--reporting); font-weight: 600; text-transform: none; }
 .card--reporting { border-left: 3px solid var(--reporting); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Enterprise Reporting — the browser preview, in the platform's own design.
+ *
+ * Everything below is scoped to `.er` and prefixed `er-`, so none of it reaches
+ * the application above. The tokens are the Enterprise Reporting platform's —
+ * `src/styles/globals.css` in businessappwithai/enterprise_reporting_tanstack,
+ * the Tremor palette on Tailwind's blue and gray scales — value for value, light
+ * and dark. The sizes are its Tailwind classes turned into pixels: the 256px
+ * sidebar (`w-64`, `w-16` collapsed), the 56px header (`h-14`), 24px page
+ * padding (`p-6`), `rounded-tremor-default` 8px cards with the `tremor-card`
+ * shadow, `text-tremor-default` 14px body text.
+ *
+ * When the platform changes a token, change it here. The palette is the part a
+ * reader notices first, and a preview whose blue is not the platform's blue is
+ * one that looks like a different product.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.er {
+  --t-brand-faint: #eff6ff;
+  --t-brand-muted: #bfdbfe;
+  --t-brand-subtle: #60a5fa;
+  --t-brand: #3b82f6;
+  --t-brand-emphasis: #1d4ed8;
+  --t-brand-inverted: #ffffff;
+  --t-bg-muted: #f9fafb;
+  --t-bg-subtle: #f3f4f6;
+  --t-bg: #ffffff;
+  --t-bg-emphasis: #374151;
+  --t-border: #e5e7eb;
+  --t-ring: #e5e7eb;
+  --t-content-subtle: #9ca3af;
+  --t-content: #6b7280;
+  --t-content-emphasis: #374151;
+  --t-content-strong: #111827;
+  --t-shadow-input: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --t-shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --t-shadow-dropdown: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --t-radius-small: 6px;
+  --t-radius: 8px;
+
+  min-height: 100vh;
+  background: var(--t-bg-muted);
+  color: var(--t-content-strong);
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+[data-theme="dark"] .er {
+  --t-brand-faint: #0b1229;
+  --t-brand-muted: #172554;
+  --t-brand-subtle: #1e40af;
+  --t-brand: #3b82f6;
+  --t-brand-emphasis: #60a5fa;
+  --t-brand-inverted: #172554;
+  --t-bg-muted: #131a2b;
+  --t-bg-subtle: #1f2937;
+  --t-bg: #111827;
+  --t-bg-emphasis: #d1d5db;
+  --t-border: #1f2937;
+  --t-ring: #1f2937;
+  --t-content-subtle: #4b5563;
+  --t-content: #6b7280;
+  --t-content-emphasis: #e5e7eb;
+  --t-content-strong: #f9fafb;
+}
+.er *, .er *::before, .er *::after { box-sizing: border-box; }
+/* The application styles its headings in a display face; the platform's are
+   the body sans at a heavier weight, so they are reset here rather than
+   inherited from the page around them. */
+.er :is(h1, h2, h3, h4, p) { font-family: inherit; letter-spacing: normal; }
+.er a { color: inherit; text-decoration: none; }
+.er code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--t-bg-subtle);
+}
+
+/* Icons — lucide at h-4 w-4 unless sized. */
+.er-iconwrap { display: inline-flex; flex-shrink: 0; width: 16px; height: 16px; }
+.er-iconwrap svg { width: 100%; height: 100%; }
+.er-icon--xs { width: 12px; height: 12px; }
+.er-icon--sm { width: 14px; height: 14px; }
+.er-icon--md, .er-icon--lg { width: 20px; height: 20px; }
+.er-icon--xl { width: 40px; height: 40px; }
+.er-brand { color: var(--t-brand); }
+.er-subtle { color: var(--t-content-subtle); }
+
+/* ── Layout: app-shell.tsx ─────────────────────────────────────────────────── */
+.er-sidebar-desktop { display: none; }
+.er-content { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; transition: margin-left 300ms; }
+@media (min-width: 1024px) {
+  .er-sidebar-desktop { display: block; }
+  .er-content { margin-left: 256px; }
+  .er-content.is-collapsed { margin-left: 64px; }
+  .er-mobile-only { display: none !important; }
+}
+.er-mobile-overlay {
+  position: fixed; inset: 0; z-index: 40; background: rgb(17 24 39 / 0.5);
+  opacity: 0; pointer-events: none; transition: opacity 300ms;
+}
+.er-mobile-overlay.is-open { opacity: 1; pointer-events: auto; }
+.er-sidebar-mobile {
+  position: fixed; left: 0; top: 0; z-index: 50; height: 100vh; width: 256px;
+  transform: translateX(-100%); transition: transform 300ms;
+}
+.er-sidebar-mobile.is-open { transform: translateX(0); }
+.er-sidebar-mobile .er-sidebar { position: relative; }
+@media (min-width: 1024px) { .er-mobile-overlay, .er-sidebar-mobile { display: none; } }
+.er-main { flex: 1; overflow: auto; padding: 16px; }
+@media (min-width: 768px) { .er-main { padding: 24px; } }
+
+/* ── sidebar.tsx ───────────────────────────────────────────────────────────── */
+.er-sidebar {
+  position: fixed; left: 0; top: 0; z-index: 40; height: 100vh; width: 256px;
+  border-right: 1px solid var(--t-border); background: var(--t-bg);
+  transition: width 300ms;
+}
+.er-sidebar.is-collapsed { width: 64px; }
+.er-sidebar__brand {
+  display: flex; align-items: center; height: 56px; padding: 0 16px;
+  border-bottom: 1px solid var(--t-border);
+}
+.er-sidebar.is-collapsed .er-sidebar__brand { justify-content: center; }
+.er-sidebar__logo { display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--t-content-strong); }
+.er-sidebar__scroll { height: calc(100vh - 56px); overflow-y: auto; padding: 16px 0; }
+.er-nav__group { padding: 4px 12px; }
+.er-nav__heading {
+  margin: 0 0 8px; padding: 0 8px; font-size: 12px; line-height: 16px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.025em; color: var(--t-content-subtle);
+}
+.er-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.er-nav__item {
+  display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px;
+  border-radius: var(--t-radius-small); font-weight: 500; color: var(--t-content);
+  white-space: nowrap; overflow: hidden;
+}
+.er-nav__item:hover { background: var(--t-bg-subtle); color: var(--t-content-emphasis); }
+.er-nav__item.is-active, .er-nav__item.is-active:hover { background: var(--t-brand-faint); color: var(--t-brand); }
+.er-sidebar.is-collapsed .er-nav__item { justify-content: center; padding: 0 8px; }
+.er-nav__label { overflow: hidden; text-overflow: ellipsis; }
+.er-separator { height: 1px; margin: 8px 0; background: var(--t-border); }
+.er-sidebar__collapse {
+  position: absolute; right: -12px; top: 64px; display: inline-flex; align-items: center;
+  justify-content: center; width: 24px; height: 24px; padding: 0; cursor: pointer;
+  border: 1px solid var(--t-border); border-radius: 9999px; background: var(--t-bg);
+  color: var(--t-content); box-shadow: var(--t-shadow-input);
+}
+.er-sidebar__collapse:hover { background: var(--t-bg-muted); }
+
+/* ── header.tsx ────────────────────────────────────────────────────────────── */
+.er-header {
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center;
+  justify-content: space-between; height: 56px; padding: 0 24px;
+  border-bottom: 1px solid var(--t-border); background: var(--t-bg);
+}
+.er-header__left, .er-header__right { display: flex; align-items: center; gap: 8px; }
+.er-themeselect { width: 192px; }
+@media (max-width: 639px) { .er-themeselect { width: 132px; } }
+.er-menuwrap { position: relative; }
+.er-avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  margin: 2px; padding: 0; border: 0; cursor: pointer; border-radius: var(--t-radius-small);
+  background: var(--t-bg-subtle); color: var(--t-content-emphasis); font-size: 12px; font-weight: 500;
+}
+.er-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; width: 224px; padding: 4px;
+  border: 1px solid var(--t-border); border-radius: var(--t-radius); background: var(--t-bg);
+  box-shadow: var(--t-shadow-dropdown);
+}
+.er-menu--wide { width: 320px; padding: 0; }
+.er-menu__label { padding: 6px 8px; }
+.er-menu__label--split { padding: 16px; border-bottom: 1px solid var(--t-border); font-weight: 600; }
+.er-menu__name { margin: 0 0 4px; font-weight: 500; color: var(--t-content-strong); }
+.er-menu__email { margin: 0; font-size: 12px; line-height: 16px; color: var(--t-content); }
+.er-menu__note { padding: 4px 8px; font-size: 12px; line-height: 16px; color: var(--t-content); }
+.er-menu__note:empty { display: none; }
+.er-menu__separator { height: 1px; margin: 4px -4px; background: var(--t-border); }
+.er-menu__empty { padding: 32px 0; text-align: center; color: var(--t-content); }
+.er-menu__item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0;
+  border-radius: var(--t-radius-small); background: transparent; color: var(--t-content-emphasis);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.er-menu__item:hover { background: var(--t-bg-subtle); }
+.er-menu__item--danger { color: #ef4444; }
+
+/* The one strip the platform does not have: what this is. */
+.er-previewstrip {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 24px;
+  border-bottom: 1px solid var(--t-border); background: var(--t-brand-faint);
+  color: var(--t-content-emphasis); font-size: 12px; line-height: 18px;
+}
+.er-previewstrip .er-iconwrap { margin-top: 2px; color: var(--t-brand); }
+.er-previewstrip a { color: var(--t-brand); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── page-header.tsx, breadcrumb.tsx ───────────────────────────────────────── */
+.er-stack { display: flex; flex-direction: column; gap: 24px; }
+.er-pageheader { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.er-pageheader__lead { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.er-pageheader__text { min-width: 0; }
+.er-pageheader__titlerow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.er-pageheader__title { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; color: var(--t-content-strong); }
+.er-pageheader__description { margin: 4px 0 0; color: var(--t-content); }
+.er-pageheader__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.er-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; color: var(--t-content); margin-bottom: -12px; }
+.er-breadcrumb a:hover { color: var(--t-content-strong); }
+.er-breadcrumb .is-current { color: var(--t-content-strong); font-weight: 500; }
+.er-sectionhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.er-sectiontitle { margin: 0; font-size: 18px; line-height: 28px; font-weight: 500; color: var(--t-content-strong); }
+.er-label { font-size: 12px; line-height: 16px; color: var(--t-content); }
+.er-text { margin: 0; color: var(--t-content); }
+.er-strong { font-weight: 500; color: var(--t-content-strong); }
+.er-mt { margin-top: 12px; }
+.er-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 42ch; }
+.er-selfstart { align-self: flex-start; }
+
+/* ── Grids ─────────────────────────────────────────────────────────────────── */
+.er-grid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
+.er-grid--3 { gap: 16px; }
+@media (min-width: 640px) { .er-grid--4, .er-grid--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) {
+  .er-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .er-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .er-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+
+/* ── card.tsx, kpi-card.tsx ────────────────────────────────────────────────── */
+.er-card {
+  position: relative; display: block; width: 100%; min-width: 0; border-radius: var(--t-radius);
+  background: var(--t-bg); box-shadow: 0 0 0 1px var(--t-ring), var(--t-shadow-card);
+  color: var(--t-content-strong);
+}
+a.er-card { transition: box-shadow 150ms; }
+a.er-card:hover { box-shadow: 0 0 0 1px var(--t-ring), var(--t-shadow-dropdown); }
+.er-card__header { display: flex; flex-direction: column; gap: 4px; padding: 24px; }
+.er-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.er-card__title { margin: 0; font-size: 18px; line-height: 28px; font-weight: 500; color: var(--t-content-strong); }
+.er-card__title--sm { font-size: 14px; line-height: 20px; }
+.er-card__description { margin: 4px 0 0; color: var(--t-content); }
+.er-card__content { padding: 0 24px 24px; }
+.er-card__footer { display: flex; align-items: center; padding: 0 24px 24px; }
+.er-card__flush { overflow: hidden; border-radius: var(--t-radius); }
+.er-kpi { padding: 24px; }
+.er-kpi__label { display: flex; align-items: center; gap: 8px; color: var(--t-content); }
+.er-kpi__metric { margin: 8px 0 0; font-size: 30px; line-height: 36px; font-weight: 600; color: var(--t-content-strong); }
+.er-module { padding: 24px; }
+.er-module__head { display: flex; align-items: center; gap: 8px; }
+
+/* The "Content by type" bar list. */
+.er-barlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.er-barlist li { position: relative; display: flex; justify-content: space-between; align-items: center; height: 32px; padding: 0 8px; }
+.er-barlist__bar { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--t-brand-faint); }
+[data-theme="dark"] .er-barlist__bar { background: var(--t-brand-muted); }
+.er-barlist__name, .er-barlist__value { position: relative; display: flex; align-items: center; gap: 8px; }
+.er-barlist__name { color: var(--t-content-strong); }
+.er-barlist__value { font-weight: 500; color: var(--t-content-strong); }
+.er-taglist { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── table.tsx ─────────────────────────────────────────────────────────────── */
+.er-table-wrap { width: 100%; overflow: auto; }
+.er-table { width: 100%; border-collapse: collapse; font-size: 14px; color: var(--t-content); }
+.er-table th {
+  padding: 14px 16px; text-align: left; white-space: nowrap; font-weight: 600;
+  color: var(--t-content-strong); border-bottom: 1px solid var(--t-border);
+}
+.er-table td { padding: 16px; text-align: left; vertical-align: middle; border-top: 1px solid var(--t-border); }
+.er-table tbody tr:first-child td { border-top: 0; }
+.er-table tbody tr { transition: background-color 100ms; }
+.er-table tbody tr:hover { background: var(--t-bg-muted); }
+.er-table tr.is-link { cursor: pointer; }
+
+/* ── button.tsx ────────────────────────────────────────────────────────────── */
+.er-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0;
+  border: 1px solid transparent; font: inherit; font-weight: 500; white-space: nowrap;
+  cursor: pointer; transition: background-color 100ms, border-color 100ms, color 100ms;
+}
+.er-btn:disabled { opacity: 0.5; pointer-events: none; }
+.er-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--t-brand-muted); }
+.er-btn--default {
+  border-radius: var(--t-radius); box-shadow: var(--t-shadow-input); background: var(--t-brand);
+  border-color: var(--t-brand); color: var(--t-brand-inverted);
+}
+.er-btn--default:hover { background: var(--t-brand-emphasis); border-color: var(--t-brand-emphasis); }
+.er-btn--outline {
+  border-radius: var(--t-radius); box-shadow: var(--t-shadow-input); background: var(--t-bg);
+  border-color: var(--t-border); color: var(--t-content-emphasis);
+}
+.er-btn--outline:hover { background: var(--t-bg-muted); }
+.er-btn--secondary {
+  border-radius: var(--t-radius); box-shadow: var(--t-shadow-input); background: var(--t-bg-subtle);
+  border-color: var(--t-border); color: var(--t-content-emphasis);
+}
+.er-btn--ghost { border-radius: var(--t-radius); background: transparent; color: var(--t-content-emphasis); }
+.er-btn--ghost:hover { background: var(--t-bg-subtle); }
+.er-btn--link { background: transparent; color: var(--t-brand); }
+.er-btn--size-default { padding: 8px 16px; font-size: 14px; line-height: 20px; }
+.er-btn--size-sm { padding: 6px 12px; font-size: 12px; line-height: 16px; }
+.er-btn--size-icon { width: 36px; height: 36px; padding: 0; border-radius: var(--t-radius-small); }
+.er-btn--block { width: 100%; }
+
+/* ── badge.tsx ─────────────────────────────────────────────────────────────── */
+.er-badge {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: max-content;
+  flex-shrink: 0; padding: 2px 8px; border-radius: var(--t-radius-small); white-space: nowrap;
+  font-size: 12px; line-height: 16px; font-weight: 500; box-shadow: inset 0 0 0 1px var(--t-border);
+}
+.er-badge--default { background: var(--t-brand-faint); color: var(--t-brand-emphasis); box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.2); }
+.er-badge--secondary { background: var(--t-bg-subtle); color: var(--t-content-emphasis); }
+.er-badge--outline { background: transparent; color: var(--t-content-emphasis); }
+.er-badge--neutral { background: rgb(107 114 128 / 0.1); color: var(--t-content-emphasis); box-shadow: inset 0 0 0 1px rgb(107 114 128 / 0.2); }
+.er-badge--warning { background: rgb(245 158 11 / 0.1); color: #b45309; box-shadow: inset 0 0 0 1px rgb(245 158 11 / 0.2); }
+.er-badge--destructive { background: rgb(239 68 68 / 0.1); color: #b91c1c; box-shadow: inset 0 0 0 1px rgb(239 68 68 / 0.2); }
+.er-badge--icon { text-transform: capitalize; }
+
+/* ── input.tsx, label.tsx, select.tsx ──────────────────────────────────────── */
+.er-input, .er-select {
+  display: flex; width: 100%; padding: 8px 12px; border: 1px solid var(--t-border);
+  border-radius: var(--t-radius); background: var(--t-bg); color: var(--t-content-emphasis);
+  box-shadow: var(--t-shadow-input); font: inherit; font-size: 14px; line-height: 20px; outline: none;
+  transition: border-color 100ms, box-shadow 100ms;
+}
+.er-select { height: 38px; padding: 0 12px; cursor: pointer; }
+.er-input::placeholder { color: var(--t-content); }
+.er-input:focus, .er-select:focus { border-color: var(--t-brand-subtle); box-shadow: 0 0 0 2px var(--t-brand-muted); }
+.er-label-strong { font-weight: 500; line-height: 1; color: var(--t-content-strong); }
+.er-field { display: flex; flex-direction: column; gap: 8px; }
+.er-toolbar { display: flex; align-items: center; gap: 16px; }
+.er-searchwrap { position: relative; flex: 1; max-width: 448px; }
+.er-searchicon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--t-content); }
+.er-input--search { padding-left: 40px; }
+
+/* ── alert.tsx ─────────────────────────────────────────────────────────────── */
+.er-alert {
+  display: flex; gap: 12px; padding: 12px 16px; border: 1px solid var(--t-border);
+  border-radius: var(--t-radius); background: var(--t-bg); color: var(--t-content-emphasis);
+}
+.er-alert > .er-iconwrap { margin-top: 2px; color: var(--t-brand); }
+.er-alert--destructive { border-color: rgb(239 68 68 / 0.5); color: #b91c1c; }
+[data-theme="dark"] .er-alert--destructive { color: #f87171; }
+.er-alert--destructive > .er-iconwrap { color: currentColor; }
+.er-alert__title { margin: 0; font-weight: 500; }
+.er-alert__body { margin-top: 2px; font-size: 14px; }
+
+/* Loading and empty states. */
+.er-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 32px; color: var(--t-content); }
+.er-spinner {
+  width: 20px; height: 20px; border-radius: 9999px; border: 2px solid var(--t-border);
+  border-top-color: var(--t-brand); animation: er-spin 800ms linear infinite;
+}
+.er-spinner--inline { width: 14px; height: 14px; border-color: rgb(255 255 255 / 0.4); border-top-color: #fff; }
+@keyframes er-spin { to { transform: rotate(360deg); } }
+.er-empty { padding: 48px 24px; text-align: center; }
+.er-empty__title { margin: 0; font-weight: 500; color: var(--t-content-strong); }
+.er-empty__detail { margin: 4px 0 0; color: var(--t-content); }
+.er-unavailable { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 24px; max-width: 68ch; }
+.er-code {
+  margin: 0; padding: 16px; overflow-x: auto; border-radius: var(--t-radius); background: var(--t-bg-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 18px;
+  color: var(--t-content-strong); white-space: pre;
+}
+.er-code code { padding: 0; background: none; }
+
+/* ── Charts (Recharts, as SVG) and the dashboard grid ──────────────────────── */
+.er-chart { display: block; width: 100%; height: auto; }
+.er-chart__grid { stroke: var(--t-border); stroke-dasharray: 3 3; }
+.er-chart__tick, .er-chart__legend { fill: var(--t-content); font-size: 12px; font-family: inherit; }
+.er-chart__legend { fill: var(--t-content-emphasis); }
+.er-chart__bar { fill: var(--t-brand); }
+.er-chart__line { fill: none; stroke: var(--t-brand); stroke-width: 2; }
+.er-chart__area { fill: var(--t-brand); fill-opacity: 0.15; }
+
+/* react-grid-layout: twelve columns, 100px rows, 16px gutters. */
+.er-dashgrid { display: grid; gap: 16px; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 100px; }
+.er-tile { display: flex; flex-direction: column; overflow: hidden; }
+.er-tile__head { padding: 16px 16px 8px; }
+.er-tile__body { flex: 1; min-height: 0; overflow: auto; padding: 0 16px 16px; }
+.er-tile__body:has(> .er-chart) { display: flex; align-items: center; }
+.er-tile__body > .er-chart { height: 100%; max-height: 100%; }
+.er-tile__body .er-table td, .er-tile__body .er-table th { padding: 8px 10px; }
+@media (max-width: 1023px) {
+  .er-dashgrid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+  .er-tile { grid-column: auto !important; grid-row: auto !important; min-height: 280px; }
+}
+
+/* ── login.tsx ─────────────────────────────────────────────────────────────── */
+.er-login {
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: linear-gradient(to bottom right, var(--t-bg-muted), var(--t-bg-subtle));
+}
+.er-login__column { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; max-width: 448px; padding: 32px 0; }
+.er-login__header { align-items: center; text-align: center; }
+.er-login__mark {
+  display: inline-flex; margin-bottom: 16px; padding: 12px; border-radius: 9999px;
+  background: var(--t-brand); color: var(--t-brand-inverted);
+}
+.er-login__title { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; color: var(--t-content-strong); }
+.er-login__fields { display: flex; flex-direction: column; gap: 16px; }
+.er-login__accounts { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.er-login__note { display: flex; gap: 8px; margin: 0; font-size: 12px; line-height: 18px; color: var(--t-content); text-align: left; }
+.er-login__note .er-iconwrap { margin-top: 2px; }
+.er-accounts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.er-accounts__row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%;
+  padding: 8px 10px; border: 1px solid var(--t-border); border-radius: var(--t-radius-small);
+  background: var(--t-bg); color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.er-accounts__row:hover { background: var(--t-bg-muted); border-color: var(--t-brand-muted); }
+.er-accounts__row .er-label { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+.er-accounts__email { font-size: 12px; line-height: 16px; color: var(--t-content); overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Administration: dialog.tsx, row actions, the table-grant grid ─────────── */
+.er-dialog-overlay {
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgb(0 0 0 / 0.5);
+}
+.er-dialog { width: 100%; max-width: 512px; max-height: calc(100vh - 32px); overflow: auto; box-shadow: var(--t-shadow-dropdown); }
+.er-dialog__body { display: flex; flex-direction: column; gap: 16px; }
+.er-dialog__footer { justify-content: flex-end; gap: 8px; }
+.er-rowactions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.er-btn--danger { color: #ef4444; }
+.er-btn--danger.is-armed { background: #ef4444; color: #fff; }
+.er-titled { display: inline-flex; align-items: center; gap: 8px; }
+.er-inline { display: flex; align-items: center; gap: 8px; }
+.er-select--inline { width: auto; min-width: 180px; }
+.er-block { display: block; }
+.er-grantgroup { margin: 0 0 16px; padding: 0; border: 0; }
+.er-grantgroup legend { padding: 0; margin-bottom: 8px; }
+.er-grantgrid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+.er-grant {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--t-border); border-radius: var(--t-radius-small); background: var(--t-bg);
+}
+.er-grant:hover { background: var(--t-bg-muted); }
+.er-grant:has(input:checked) { border-color: var(--t-brand-subtle); background: var(--t-brand-faint); }
+.er-grant input { margin-top: 3px; accent-color: var(--t-brand); }
+/* In the slide-over the collapse button is the close button, and it sits inside
+   the panel: hung off the edge as on the desktop, it peeked into the page
+   while the panel was closed. */
+.er-sidebar-mobile .er-sidebar__collapse { right: 12px; top: 16px; }

@@ -268,9 +268,9 @@ export function generateHookCode(
     hookName: hook.name,
     code,
     // Bracket access on purpose: `currentImports` is private on the visitor and
-    // this is the one place that needs to read it out. Biome's useLiteralKeys
-    // "fix" rewrote it to dot access, which does not compile.
-    // biome-ignore lint/complexity/useLiteralKeys: deliberate private-member escape hatch
+    // this is the one place that needs to read it out. Dot access does not
+    // compile, so do not "simplify" it to one.
+    // deliberate private-member escape hatch
     imports: Array.from(visitor["currentImports"]),
     fileName: `${hook.type}.${hook.name}.ts`,
   };

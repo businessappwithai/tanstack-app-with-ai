@@ -66,7 +66,8 @@ export const Route = createFileRoute("/api/projects/$id/automations/$automationI
             return json({ error: "No automation with that id in this project." }, 404);
           }
 
-          const updated = await workflowDb.update(params.automationId, {
+          const { changeWorkflow } = await import("@/lib/server/project-repository");
+          const updated = await changeWorkflow(params.id, access.user.id, params.automationId, {
             ...(body.name !== undefined ? { name: body.name } : {}),
             ...(body.entity !== undefined ? { service_name: body.entity } : {}),
             ...(body.mermaid !== undefined ? { mermaid_code: body.mermaid } : {}),
@@ -92,7 +93,8 @@ export const Route = createFileRoute("/api/projects/$id/automations/$automationI
             return json({ error: "No automation with that id in this project." }, 404);
           }
 
-          await workflowDb.delete(params.automationId);
+          const { changeWorkflow } = await import("@/lib/server/project-repository");
+          await changeWorkflow(params.id, access.user.id, params.automationId, null);
           return json({ deleted: true });
         } catch (error) {
           console.error("Failed to delete automation:", error);

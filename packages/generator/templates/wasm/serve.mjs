@@ -12,17 +12,34 @@
  *
  * This serves files. The application server is `host/node-host.mjs`, or the
  * browser itself.
+ *
+ * `vendor/pglite/` is served from the installed `@electric-sql/pglite` when the
+ * application was not generated with its own copy — an application downloaded
+ * from the in-browser generator, say, which cannot carry 17MB of WebAssembly in
+ * a shell script. `npm install` puts it there. Postgres is never fetched from a
+ * CDN.
  */
 
 import { createServer } from "node:http";
 import { existsSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const portIndex = process.argv.indexOf("--port");
 const PORT = Number(portIndex >= 0 ? process.argv[portIndex + 1] : process.env.PORT || 4000);
+
+/** The installed PGlite's `dist/`, or null when it is not installed. */
+function installedPglite() {
+  try {
+    return dirname(createRequire(join(ROOT, "package.json")).resolve("@electric-sql/pglite"));
+  } catch {
+    return null;
+  }
+}
+const PGLITE_DIST = installedPglite();
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -52,6 +69,11 @@ createServer(async (request, response) => {
       return;
     }
     if (existsSync(target) && statSync(target).isDirectory()) target = join(target, "index.html");
+    if (!existsSync(target) && PGLITE_DIST && relative.startsWith("vendor/pglite/")) {
+      const installed = normalize(join(PGLITE_DIST, relative.slice("vendor/pglite/".length)));
+      // Inside the package's dist/, the same as the ROOT check above.
+      if (installed.startsWith(PGLITE_DIST + sep)) target = installed;
+    }
     if (!existsSync(target)) {
       response.writeHead(404).end("Not found");
       return;

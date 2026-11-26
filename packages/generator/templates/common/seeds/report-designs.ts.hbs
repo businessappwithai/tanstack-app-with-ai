@@ -191,10 +191,41 @@ const entityReports: Array<{ tableName: string; displayName: string; columns: st
   {{/each}}
 ];
 
+/**
+ * The fields a document prints, as the window shows them: the form's own
+ * fields, in its order, under its labels. The dictionary is seeded before this
+ * (02_sys_dictionary), so a print layout matches the screen the record is
+ * printed from instead of a label guessed from the column name. The column
+ * list from the model is only the fallback for a table no window shows.
+ */
+async function windowFields(
+  db: Kysely<any>,
+  tableName: string,
+  columns: string[],
+): Promise<FieldRow[]> {
+  const rows = (await db
+    .selectFrom('sys_field as f')
+    .innerJoin('sys_tab as t', 't.sys_tab_id', 'f.sys_tab_id')
+    .innerJoin('sys_table as tb', 'tb.sys_table_id', 't.sys_table_id')
+    .innerJoin('sys_column as c', 'c.sys_column_id', 'f.sys_column_id')
+    .select(['f.name as label', 'c.column_name as field', 't.tab_level as level', 'f.seq_no as seq'])
+    .where('tb.table_name', '=', tableName)
+    .where('f.is_active', '=', true)
+    .where('f.is_displayed', '=', true)
+    .orderBy('t.tab_level')
+    .orderBy('f.seq_no')
+    .execute()
+    .catch(() => [])) as Array<{ label: string; field: string; level: number }>;
+  const firstLevel = rows[0]?.level;
+  const own = rows.filter((row) => row.level === firstLevel);
+  if (own.length > 0) return own.map(({ label, field }) => ({ label, field }));
+  return columns.map((col) => ({ label: toLabel(col), field: col }));
+}
+
 export async function seed(db: Kysely<any>): Promise<void> {
   for (const entity of entityReports) {
     if (entity.columns.length === 0) continue;
-    const fields: FieldRow[] = entity.columns.map((col) => ({ label: toLabel(col), field: col }));
+    const fields = await windowFields(db, entity.tableName, entity.columns);
     const layout = buildLayout(entity.displayName, fields);
     await db
       .insertInto('sys_report_designs')

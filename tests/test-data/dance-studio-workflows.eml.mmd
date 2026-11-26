@@ -9,7 +9,7 @@
 %% row-targeting mode, and a bounded %%loop.
 %%
 %% Written for /qa. Kept out of language/examples/ so the curated worked example
-%% stays exactly as llmtext/llmdetailed.txt S10 describes it.
+%% stays exactly as llms.txt §1 describes it.
 %% ============================================================================
 
 %% ============================================================================
@@ -20,9 +20,9 @@
 %% a credit comes back, and the saga that promotes a waitlisted member when a
 %% place is released.
 %%
-%% Written as the worked example for the interactive authoring protocol in
-%% llmtext/llmdetailed.txt §10, so it holds that section's standard: help text
-%% on every entity and every column, one %%rbac read rule per entity, and every
+%% Written as the worked example for the working-session protocol in
+%% llms.txt §1, so it holds that section's standard: help text on every
+%% entity and every column, one %%rbac read rule per entity, and every
 %% state backed by a declared %%enum. 0 errors, 0 warnings, clean under
 %% --strict. Every diagram is valid, renderable Mermaid.
 %% ============================================================================
@@ -50,6 +50,9 @@ erDiagram
         string   status
         date     joined_on
         boolean  marketing_opt_in
+        datetime lapsed_at OPTIONAL
+        datetime suspended_at OPTIONAL
+        datetime active_at OPTIONAL
     }
 
     Instructor {
@@ -88,6 +91,9 @@ erDiagram
         integer  capacity
         string   status
         text     cancellation_reason OPTIONAL
+        datetime running_at OPTIONAL
+        datetime cancelled_at OPTIONAL
+        datetime completed_at OPTIONAL
     }
 
     Booking {
@@ -100,6 +106,9 @@ erDiagram
         datetime cancelled_at OPTIONAL
         boolean  fee_waived
         text     waiver_reason OPTIONAL
+        datetime attended_at OPTIONAL
+        datetime forfeited_at OPTIONAL
+        datetime no_show_at OPTIONAL
     }
 
     WaitlistEntry {
@@ -109,6 +118,7 @@ erDiagram
         integer  queue_position
         string   status
         datetime joined_at
+        datetime expired_at OPTIONAL
     }
 
     ClassPack {
@@ -119,6 +129,7 @@ erDiagram
         date     purchased_on
         date     expires_on
         string   status
+        datetime expired_at OPTIONAL
     }
 
     Payment {
@@ -205,6 +216,23 @@ erDiagram
     %%field Payment.received_at help: When the money actually arrived, not when it was keyed in. Bank transfers are commonly recorded late and the reconciliation depends on this distinction.
     %%field Payment.reference help: The card authorisation code or bank reference used to match the payment against the statement. Optional for cash, where there is nothing to match.
 
+    %% Form layout: headed sections of two-column rows (`|` between rows,
+    %% `,` within one; a row of one spans the full width).
+    %%section entity: Member; name: Member; help: Who the member is and how the studio reaches them about bookings and waitlist offers.; rows: full_name | email, phone
+    %%section entity: Member; name: Membership; help: When they joined and whether they agreed to hear about new classes.; rows: joined_on, marketing_opt_in
+    %%section entity: Instructor; name: Instructor; help: Who teaches, how members reach them, and whether they can still be scheduled.; rows: full_name, is_active | email | bio
+    %%section entity: Room; name: Room; help: The studio room, the code on its door, and how many dancers it safely holds.; rows: name, code | capacity, is_active
+    %%section entity: ClassOffering; name: Class; help: What the class is, the level it is pitched at, and what one attendance costs in credits.; rows: name, code | level, is_active | duration_minutes, credit_cost
+    %%section entity: ClassSession; name: Session; help: Which class is taught, where, by whom, and whether it is going ahead.; rows: class_offering_id | room_id, instructor_id
+    %%section entity: ClassSession; name: Timing and size; help: When the session runs and how many can book it — never more than the room holds.; rows: starts_at, ends_at | capacity
+    %%section entity: ClassSession; name: Cancellation; help: Why the studio called the session off; every booking on it is refunded when this is set.; rows: cancellation_reason; collapsed: true
+    %%section entity: Booking; name: Booking; help: Who booked which session, the pack paying for it, and where the booking stands.; rows: member_id, class_session_id | class_pack_id | booked_at, cancelled_at
+    %%section entity: Booking; name: Fee waiver; help: Whether a late-cancellation fee was waived, and the reason the front desk gave.; rows: fee_waived | waiver_reason
+    %%section entity: WaitlistEntry; name: Waitlist place; help: Who is waiting for a full session, their place in the queue, and whether a seat has been offered.; rows: member_id, class_session_id | queue_position | joined_at
+    %%section entity: ClassPack; name: Pack; help: The bundle of credits a member bought and how many are left to spend.; rows: member_id | credits_purchased, credits_remaining
+    %%section entity: ClassPack; name: Validity; help: When the pack was bought and the day unused credits lapse.; rows: purchased_on, expires_on
+    %%section entity: Payment; name: Payment; help: The money received for a pack — how much, how it was paid, and the reference the bank shows.; rows: class_pack_id, amount | method, received_at | reference
+
     %%field Member.status enum: MemberStatus
     %%field ClassOffering.level enum: ClassLevel
     %%field ClassSession.status enum: SessionStatus
@@ -230,11 +258,8 @@ erDiagram
     %%rbac role:manager on ClassOffering.update
     %%rbac role:member|receptionist|instructor|manager on ClassSession.read
     %%rbac role:receptionist|manager on ClassSession.update
-    %%rbac role:manager on ClassSession.cancel
     %%rbac role:member|receptionist|instructor|manager on Booking.read
     %%rbac role:member|receptionist|manager on Booking.create
-    %%rbac role:instructor|receptionist|manager on Booking.attend
-    %%rbac role:manager on Booking.waive
     %%rbac role:member|receptionist|manager on WaitlistEntry.read
     %%rbac role:member|receptionist|manager on ClassPack.read
     %%rbac role:receptionist|manager on ClassPack.create
@@ -242,14 +267,6 @@ erDiagram
     %%rbac role:receptionist|manager on Payment.create
 
     %% -- 11 access — who may cross the edges the new state machines draw ------
-    %%rbac role:receptionist|manager on Member.lapse
-    %%rbac role:receptionist|manager on Member.renew
-    %%rbac role:manager on Member.suspend
-    %%rbac role:manager on Member.reinstate
-    %%rbac role:receptionist|manager on ClassPack.expire
-    %%rbac role:receptionist|manager on ClassPack.spend_last_credit
-    %%rbac role:receptionist|manager on WaitlistEntry.promote
-    %%rbac role:manager on WaitlistEntry.expire
 
 %% ---- Business rules — booking eligibility and the cancellation cutoff -------
 %%meta name: Booking Eligibility
@@ -360,6 +377,7 @@ flowchart TD
     D --> E
 
     %%action requireSuspensionContact validation-error when: status == "suspended" and phone == null message: A suspended member needs a phone number on file. The suspension notice is a call, not an email.
+    %%action requireSuspensionContactOnMove validation-error when: suspended_at != null and phone == null message: A suspended member needs a phone number on file. The suspension notice is a call, not an email.
     %%action clearMarketingOnSuspend transform when: status == "suspended" field: marketing_opt_in value: false
 
 %% ---- 02 rules — refuse-then-stamp on beforeCreate --------------------------
@@ -390,6 +408,7 @@ flowchart TD
     D --> E
 
     %%action requireCancellationReason validation-error when: status == "cancelled" and cancellation_reason == null message: A cancelled session needs a reason. Every booked member is sent it verbatim.
+    %%action requireCancellationReasonOnMove validation-error when: cancelled_at != null and cancellation_reason == null message: A cancelled session needs a reason. Every booked member is sent it verbatim.
     %%action returnCreditsOnCancel trigger-workflow when: status == "cancelled" workflow: SessionCancellationRefund
 
 %% ---- 04 rules — several conditions over one entity in one table ------------
@@ -437,7 +456,9 @@ flowchart TD
     C --> E
 
     %%action blockAttendedDelete validation-error when: status == "attended" message: An attended booking cannot be deleted. The attendance sheet is what the insurer asks for, so cancel it instead.
+    %%action blockAttendedDeleteOnMove validation-error when: attended_at != null message: An attended booking cannot be deleted. The attendance sheet is what the insurer asks for, so cancel it instead.
     %%action blockNoShowDelete validation-error when: status == "no_show" message: A no-show cannot be deleted. It counts toward suspension, so removing it rewrites the member's history.
+    %%action blockNoShowDeleteOnMove validation-error when: no_show_at != null message: A no-show cannot be deleted. It counts toward suspension, so removing it rewrites the member's history.
 
 %% ---- 07 rules — an unconditional transform ---------------------------------
 %%meta name: Instructor Onboarding Defaults
@@ -550,6 +571,16 @@ flowchart TD
     %%step D UpdateEntity field: capacity value: 0
     %%step F UpdateEntity entity: Booking targetField: class_session_id field: status value: cancelled
 
+%% ---- 18b workflow — a saga bound to a move (hook and status together) -----
+%%meta name: Session Start Notice
+%%meta kind: workflow
+%%workflow SessionStartNotice entity: ClassSession kind: saga trigger: automatic operation: UPDATE status: running
+flowchart TD
+    A([Session started]) --> B(Name the closure note)
+    B --> C([Noted])
+
+    %%step B Formula target: closureNote operation: set value: Started on the studio's say-so.
+
 %% ---- 19 workflow — every Formula arithmetic operation ----------------------
 %%meta name: Pack Credit Drawdown
 %%meta kind: workflow
@@ -649,3 +680,27 @@ flowchart TD
     %%step B Formula target: nextCredits source: credits_remaining operation: subtract operand: 1 in: L1
     %%step C UpdateEntity field: credits_remaining source: nextCredits in: L1
     %%step D UpdateEntity field: status value: exhausted
+
+%% ---- When each status was reached: stamped by the application ----
+%% A record moves by an action button, along an edge its state diagram draws,
+%% and the application writes the <state>_at time when it does.
+%%field ClassSession.running_at help: When this class session moved to running. Stamped by the application when the move is made; nobody types it.
+%%field ClassSession.cancelled_at help: When this class session moved to cancelled. Stamped by the application when the move is made; nobody types it.
+%%field ClassSession.completed_at help: When this class session moved to completed. Stamped by the application when the move is made; nobody types it.
+%%section entity: ClassSession; name: Progress; help: When this class session reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: running_at, cancelled_at | completed_at
+
+%%field Booking.attended_at help: When this booking moved to attended. Stamped by the application when the move is made; nobody types it.
+%%field Booking.forfeited_at help: When this booking moved to forfeited. Stamped by the application when the move is made; nobody types it.
+%%field Booking.no_show_at help: When this booking moved to no show. Stamped by the application when the move is made; nobody types it.
+%%section entity: Booking; name: Progress; help: When this booking reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: attended_at, forfeited_at | no_show_at
+
+%%field Member.lapsed_at help: When this member moved to lapsed. Stamped by the application when the move is made; nobody types it.
+%%field Member.suspended_at help: When this member moved to suspended. Stamped by the application when the move is made; nobody types it.
+%%field Member.active_at help: When this member moved to active. Stamped by the application when the move is made; nobody types it.
+%%section entity: Member; name: Progress; help: When this member reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: lapsed_at, suspended_at | active_at
+
+%%field ClassPack.expired_at help: When this class pack moved to expired. Stamped by the application when the move is made; nobody types it.
+%%section entity: ClassPack; name: Progress; help: When this class pack reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: expired_at
+
+%%field WaitlistEntry.expired_at help: When this waitlist entry moved to expired. Stamped by the application when the move is made; nobody types it.
+%%section entity: WaitlistEntry; name: Progress; help: When this waitlist entry reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: expired_at

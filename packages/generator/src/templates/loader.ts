@@ -27,6 +27,10 @@ import {
 } from "@appwithai/core/utils";
 import Handlebars from "handlebars";
 
+/** Column names that are signed by nature — see the isSignedColumn helper. */
+export const SIGNED_COLUMN =
+  /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
+
 function resolveOsUser(): string {
   if (process.env.PGUSER) return process.env.PGUSER;
   if (process.env.USER) return process.env.USER;
@@ -131,6 +135,14 @@ export class TemplateLoader {
     Handlebars.registerHelper("and", (...args) => args.slice(0, -1).every(Boolean));
     Handlebars.registerHelper("or", (...args) => args.slice(0, -1).some(Boolean));
     Handlebars.registerHelper("not", (value) => !value);
+
+    // A decimal column the generated validation rule must not call "negative" by
+    // default: coordinates, differences and balances are signed by nature. Without
+    // this a Project Site at latitude -33.9 (half the world) was refused with
+    // "Latitude must not be negative" and its create answered 400.
+    Handlebars.registerHelper("isSignedColumn", (name: unknown) =>
+      typeof name === "string" && SIGNED_COLUMN.test(name)
+    );
 
     // ========================================================================
     // Iteration Helpers

@@ -122,10 +122,10 @@ function AdminDashboardPage() {
       to: "/admin/fields" as const,
     },
     {
-      title: "Business Rules",
-      description: "Configure validation rules, callouts, and business logic",
+      title: "Rules & workflows",
+      description: "Write the rules that judge a write, and the lifecycles, processes and status machines around it",
       icon: Settings,
-      to: "/admin/rules" as const,
+      to: "/admin/automations" as const,
     },
     {
       title: "Audit Log",

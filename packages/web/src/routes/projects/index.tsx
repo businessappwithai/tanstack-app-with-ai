@@ -157,7 +157,7 @@ function ProjectsPage() {
 
     setCurrentProject(imported.id);
     setShowImportModal(false);
-    navigate({ to: "/projects/$id/design", params: { id: imported.id } });
+    navigate({ to: "/projects/$id/design", params: { id: imported.id }, search: { view: "mermaid" } });
   };
 
   const handleDeleteProject = async (id: string) => {
@@ -230,7 +230,7 @@ function ProjectsPage() {
                 type="button"
                 onClick={() => setShowNewProjectModal(true)}
                 disabled={isLoading || isCreatingProject}
-                className="hidden sm:flex bg-primary hover:bg-primary/90 text-white px-6 py-2.5 rounded-xl text-sm font-semibold items-center gap-2 shadow-lg shadow-primary/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="hidden sm:flex bg-primary hover:bg-primary/90 text-slate-900 px-6 py-2.5 rounded-xl text-sm font-semibold items-center gap-2 shadow-lg shadow-primary/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: "#FF8400" }}
               >
                 {isLoading || isCreatingProject ? (
@@ -258,9 +258,9 @@ function ProjectsPage() {
                 aria-label="Create new project"
               >
                 {isLoading || isCreatingProject ? (
-                  <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  <Loader2 className="w-4 h-4 text-slate-900 animate-spin" />
                 ) : (
-                  <Plus className="w-4 h-4 text-white" />
+                  <Plus className="w-4 h-4 text-slate-900" />
                 )}
               </button>
               {/* User menu */}
@@ -347,10 +347,12 @@ function ProjectsPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-muted border border-border rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
                 placeholder="Search projects..."
+                aria-label="Search projects"
                 type="text"
               />
             </div>
             <select
+              aria-label="Filter by status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="px-4 py-2.5 bg-background border border-border rounded-xl text-sm text-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary"
@@ -361,6 +363,7 @@ function ProjectsPage() {
               <option>Complete</option>
             </select>
             <select
+              aria-label="Filter by type"
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
               className="px-4 py-2.5 bg-background border border-border rounded-xl text-sm text-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary"
@@ -399,7 +402,7 @@ function ProjectsPage() {
               type="button"
               onClick={() => setShowNewProjectModal(true)}
               disabled={isCreatingProject}
-              className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-8 py-3 rounded-xl text-base font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-slate-900 px-8 py-3 rounded-xl text-base font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: "#FF8400" }}
             >
               {isCreatingProject ? (
@@ -457,8 +460,7 @@ function ProjectsPage() {
                 // role="button" on a container of interactive elements is invalid nesting.
                 // Clicking the body is a mouse convenience: the Continue/Edit button inside
                 // navigates to the same route and is reachable by Tab (verified in browser).
-                // biome-ignore lint/a11y/noStaticElementInteractions: keyboard path is the Continue button.
-                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the Continue button.
+                // keyboard path is the Continue button.
                 <div
                   key={project.id}
                   className="bg-card border border-border rounded-xl p-5 relative group hover:border-primary/50 transition-all cursor-pointer"
@@ -560,7 +562,7 @@ function ProjectsPage() {
                           e.stopPropagation();
                           navigate({ to: "/projects/$id/enhance", params: { id: project.id } });
                         }}
-                        className="flex-1 px-3 py-2 text-sm font-semibold rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
+                        className="flex-1 px-3 py-2 text-sm font-semibold rounded-lg bg-primary hover:bg-primary/90 text-slate-900 transition-colors"
                         style={{ backgroundColor: "#FF8400" }}
                       >
                         Enhance
@@ -572,7 +574,7 @@ function ProjectsPage() {
                           e.stopPropagation();
                           handleEditProject(project.id);
                         }}
-                        className="flex-1 px-3 py-2 text-sm font-semibold rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
+                        className="flex-1 px-3 py-2 text-sm font-semibold rounded-lg bg-primary hover:bg-primary/90 text-slate-900 transition-colors"
                         style={{ backgroundColor: "#FF8400" }}
                       >
                         {project.deploymentStatus === "completed" ? "Edit" : "Continue"}
@@ -598,6 +600,7 @@ function ProjectsPage() {
                           e.stopPropagation();
                           setShowMenu(showMenu === project.id ? null : project.id);
                         }}
+                        aria-label={`Delete ${project.name}`}
                         className="p-2 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -664,7 +667,7 @@ function ProjectsPage() {
               <button
                 type="button"
                 onClick={() => handleDeleteProject(showDeleteConfirm)}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2.5 rounded-xl text-sm font-bold transition-colors"
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded-xl text-sm font-bold transition-colors"
               >
                 Delete
               </button>

@@ -1,0 +1,1244 @@
+# AppWithAI — EML syntax (chunk `eml-syntax.txt` of https://www.appwithai.org/llms.txt)
+
+> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1, §7.2 · enhancement-examples.txt §9
+
+## 0. What EML is
+
+An EML document is **valid Mermaid**. It renders as diagrams in any Mermaid
+viewer, on GitHub, in an editor preview — and the same bytes compile into a
+complete application. Everything the language adds rides in Mermaid comments
+(`%%`), which renderers ignore and the compiler reads.
+
+That is the whole idea. One file, readable as a picture and executable as a
+specification. Three kinds of diagram carry three layers of the application:
+
+| You draw | It defines |
+|---|---|
+| `erDiagram` | Every entity, attribute, key and relationship |
+| `flowchart` marked `kind: rules` | The decisions the business makes, and the actions they take |
+| `stateDiagram-v2` | The lifecycle a record moves through, and who may move it |
+
+A model that uses only `erDiagram` is a valid model. Rules and workflows are
+additions to it, not prerequisites.
+
+**File extensions**: `.mmd`, and the qualified variants `.eml.mmd`, `.erd.mmd`,
+`.flow.mmd`, `.rules.mmd` — all read identically. Encoding is UTF-8. Deliver as
+`<business-name>.mmd` (§1.2); the variants exist for files kept in a repository
+beside other Mermaid, not for handing to a user. `.md` is not an EML file, and a
+model saved as one is a model nothing on the receiving end will run.
+
+## 2. Document structure
+
+A document is UTF-8 text holding one or more **sections**. A section opens at a
+Mermaid keyword and runs to the next one.
+
+| Opening keyword | Section |
+|---|---|
+| `erDiagram` | ERD |
+| `flowchart` / `graph` | business rules **or** workflow |
+| `stateDiagram-v2` | workflow (state-machine form) |
+
+A `flowchart` is read as **rules** when preceded by `%%meta kind: rules`, or when
+it contains only decision/expression/function/io shapes and no `%%hook`
+directives. Otherwise it is a **workflow**. Say which you mean — mark every rules
+section `%%meta kind: rules` rather than relying on inference.
+
+Directives are Mermaid comments and may sit inside or beside their section:
+
+```
+%%meta name: Acme Dance Studio
+%%meta kind: erd
+%%meta version: 1.0.0
+```
+
+`%%meta name:` is required — its absence is `EML001`, one of the five codes the
+fixer repairs. Give the document a real business name rather than letting the
+fixer guess one from the first entity.
+
+A minimal, complete, checker-clean document:
+
+```mermaid
+%%meta name: Minimal Example
+%%meta kind: erd
+erDiagram
+    Customer {
+        string id PK
+        string email UK
+        string name
+    }
+
+%%entity Customer help: A person or organisation that buys from us. Created when a lead converts, and never deleted while an unpaid invoice stands against it.
+%%entity Customer icon: UserRound
+%%field Customer.email help: The address invoices and order confirmations are sent to, and the customer's identity here. Unique, because two records on one address split a customer's history in two.
+%%field Customer.name help: The trading name to address on correspondence and to print on an invoice. Not necessarily the registered legal entity.
+%%section entity: Customer; name: Customer; help: Who is buying, under the name and address every invoice carries.; rows: name, email
+```
+
+## 3. The ERD section
+
+### 3.1 Entities and attributes
+
+```mermaid
+%%meta name: Studio Booking
+%%meta kind: erd
+
+%%enum ClassStatus: scheduled, running, completed, cancelled
+
+erDiagram
+    Instructor {
+        string id PK
+        string full_name
+        string email UK
+        boolean is_active
+    }
+    Room {
+        string id PK
+        string name
+        integer capacity
+    }
+    DanceClass {
+        string id PK
+        string instructor_id FK
+        string room_id FK
+        string title
+        string status
+        datetime starts_at
+        integer capacity
+        decimal price OPTIONAL
+    }
+    Instructor ||--o{ DanceClass : "teaches"
+    Room ||--o{ DanceClass : "hosts"
+
+%%field DanceClass.status enum: ClassStatus
+%%index DanceClass(instructor_id, starts_at)
+
+%%entity Instructor help: Somebody who teaches at the studio. Instructors are booked against classes, so deactivating one has to leave their past classes attributed rather than delete them.
+%%entity Instructor icon: GraduationCap
+%%field Instructor.full_name help: The name that appears on the timetable, which is how members choose a class. Use the name the studio advertises, not the one on the contract.
+%%field Instructor.email help: Where the schedule and cancellation notices are sent, and how the instructor signs in. Unique, because it identifies the person.
+%%field Instructor.is_active help: Whether the instructor is currently teaching. Cleared instead of deleting, so the timetable history and the members' attendance records stay intact.
+
+%%entity Room help: A physical studio a class can be held in. Rooms are the constraint the timetable is built against: two classes cannot share one, and capacity is what caps a class's bookings.
+%%entity Room icon: DoorOpen
+%%field Room.name help: What the room is called on the timetable and on the door. Members navigate by it, so keep it the name actually painted on the wall.
+%%field Room.capacity help: The most people the room legally holds, including the instructor. It is the ceiling on a class's own capacity, and it is a fire regulation rather than a preference.
+
+%%entity DanceClass help: One session at one time in one room with one instructor. The class is what a member books onto and what the studio is paid for, and its status is the single answer to whether it is going ahead.
+%%entity DanceClass icon: Music
+%%field DanceClass.instructor_id help: Who is teaching this session. Changing it is a substitution, and members who booked for a named instructor generally want to be told.
+%%field DanceClass.room_id help: Where the session is held. It caps the class's capacity and is what a member is looking for when they arrive.
+%%field DanceClass.title help: What the class is called on the timetable — the style and level a member is choosing between. "Beginners' salsa", not "Class 14".
+%%field DanceClass.status help: scheduled — open for bookings; running — under way; completed — taught, and countable in attendance; cancelled — called off, and every booking on it has to be refunded or moved.
+%%field DanceClass.starts_at help: When the session begins, in the studio's own time zone. It is what the timetable is ordered by and what a reminder is sent against.
+%%field DanceClass.capacity help: The most bookings this session will take, at or below the room's own limit. Set lower than the room where the style needs floor space.
+%%field DanceClass.price help: What a member pays for this session if they are not using a class pack. Empty where the class is included in a membership.
+%%section entity: Instructor; name: Instructor; help: Who teaches, how the studio reaches them, and whether they can be timetabled.; rows: full_name, email | is_active
+%%section entity: Room; name: Room; help: The studio room and how many dancers it safely holds.; rows: name, capacity
+%%section entity: DanceClass; name: Class; help: What is taught, by whom, where, and whether it is going ahead.; rows: title, status | instructor_id, room_id
+%%section entity: DanceClass; name: Session; help: When it runs, how many it takes, and what a drop-in pays.; rows: starts_at, capacity | price
+```
+
+One entity block per entity. One attribute per line: `<type> <name> [MODIFIERS]`.
+Entity names are `PascalCase` or `SNAKE_CASE`; attribute names are `snake_case`.
+
+`id PK` is added automatically when an entity declares no primary key, but
+declaring one yourself is better — `EML117` warns when you do not, and the repair
+prepends `string id PK`, which may not be the column you wanted.
+
+**Seven column names are the generator's — do not declare them.** Every
+generated table carries them already, in both stacks:
+
+```
+id  version  created_at  updated_at  created_by  updated_by  deleted_at  deleted_by
+```
+
+Writing `datetime created_at` in an entity block says something the generator
+already guarantees. `EML103` reports the line, `checkAndFix` deletes it (§8.3),
+and the generator keeps its own definition regardless. Until it learned to, the duplicate reached
+PostgreSQL as a `CREATE TABLE` naming one column twice — which is rejected
+outright, so the *application failed to open*, with a message
+(`column "created_at" specified more than once`) that named no model line at
+all. Model what your business knows; the record-keeping columns are already
+there.
+
+The `_id` spelling is a different column and a legitimate one:
+`created_by` is the generator's audit stamp — a bare UUID with no lookup —
+while `created_by_id FK` is a reference you modelled, and it resolves to your
+model's person entity with a lookup on it (§3.5). If you want the author of a record to
+be selectable and shown by name, declare `created_by_id FK`, not `created_by`.
+
+### 3.2 Types
+
+Eight canonical types. Everything else normalises into one of them; an unknown
+type falls back to `string` and raises `EML115`.
+
+| Canonical | Written as any of |
+|---|---|
+| `string` | `string` `varchar` `char` `uuid` `guid` `id` `email` `url` `phone` `password` `color` |
+| `text` | `text` `longtext` |
+| `integer` | `integer` `int` `bigint` `smallint` |
+| `decimal` | `decimal` `float` `double` `number` `money` `amount` |
+| `boolean` | `boolean` `bool` |
+| `date` | `date` |
+| `datetime` | `datetime` `timestamp` `time` |
+| `json` | `json` `jsonb` `object` `array` |
+
+The alias you choose is not cosmetic even though it normalises: `email`, `phone`,
+`url`, `password` and `color` all become `string` in SQL, and the word you wrote
+is kept — it is what the Application Dictionary records as the column's reference
+type, and therefore what decides the control the user gets (§3.7). Write
+`email email`, `phone mobile`, `url website`, `password secret` and
+`color brand_colour`; a column declared `string` gets a plain text box even when
+its name says otherwise. Prefer the specific alias over the canonical name
+wherever one fits.
+
+### 3.3 Modifiers
+
+| Modifier | Meaning |
+|---|---|
+| `PK` | Primary key. Implies unique. |
+| `FK` | Foreign key. Marks the column as a reference. |
+| `UK` / `UNIQUE` | Unique. |
+| `OPTIONAL` / `NULL` | Nullable. |
+
+**Defaults**: every column is *required* unless marked `OPTIONAL` or `NULL` (or
+it is the `PK`), and *not unique* unless marked `UK`, `UNIQUE` or `PK`.
+
+Anything that is not one of these six words is **dropped silently** by the parser
+— `string email UNQIUE` yields a column that is simply not unique and renders
+identically in the diagram. `EML118` warns about it. Read that warning.
+
+### 3.4 Relationships and cardinality
+
+Mermaid's ER grammar lets you pair any left marker with any right marker. **EML
+reads these eight spellings, and only these eight:**
+
+| Operator | Kind | Example |
+|---|---|---|
+| `\|\|--\|\|` | one to one | `User \|\|--\|\| Profile : has` |
+| `\|o--o\|` | one to one | `Employee \|o--o\| ParkingSpot : assigned` |
+| `\|\|--o{` | one to many | `Company \|\|--o{ Contact : employs` |
+| `\|\|--\|{` | one to many | `Order \|\|--\|{ OrderItem : contains` |
+| `}o--\|\|` | many to one | `Deal }o--\|\| DealStage : in_stage` |
+| `}\|--\|\|` | many to one | `OrderItem }\|--\|\| Order : belongs_to` |
+| `}o--o{` | many to many | `Student }o--o{ Course : enrolls` |
+| `}\|--\|{` | many to many | `Author }\|--\|{ Book : writes` |
+
+**A relationship spelled any other way is dropped in silence.** `Appointment
+||--o| Consultation : "becomes"` is valid Mermaid and renders exactly as drawn,
+but no relationship reaches the model — and nothing points at the line. What you
+get instead is `EML502` on a foreign key whose parent "has no relationship", or
+`EML503` on an entity that now looks isolated. When a diagnostic denies a
+relationship you know you drew, check its operator against the eight above before
+anything else. Optional-on-the-many-side is `||--o{`; optional one-to-one is
+`|o--o|`; there is no eight-operator spelling for "exactly zero or one child", so
+model it as one-to-many and let the rule enforce the rest.
+
+The label after the colon is the verb of the relationship and appears in the
+generated interface. Write a real one — `"places"`, `"employs"`, `"hosts"` — not
+`"has"` repeated.
+
+### 3.5 Foreign keys
+
+A foreign key resolves **by name**: a column ending `_id` points at the entity
+whose snake_case name it carries. `customer_id` finds `Customer`;
+`sla_policy_id` finds `SlaPolicy`.
+
+- A foreign key that does not end `_id` cannot be resolved: `EML114`, and the
+  fixer appends the suffix.
+- **The prefix has to match the entity's name as the parser derives it.**
+  `purchase_order_line_id` finds `PurchaseOrderLine`. It does not find `POLine`,
+  because `po_line` reads back as `PoLine` — an entity whose name runs two
+  capitals together cannot be reached by a foreign key. Name such an entity
+  `PurchaseOrderLine` rather than trying to spell the column around it.
+- **Columns naming a person resolve to the model's person entity, but only by an
+  exact list.** Anything ending `_by` or `_by_id` — `created_by_id`,
+  `approved_by_id`, `received_by_id` — plus these names: `assigned_to`,
+  `author_id`, `lab_manager_id`, `manager_id`, `owner_id`, `pi_id`,
+  `remediation_owner`, `remediation_owner_id`, `user_id`. Nothing else.
+  `approver_id` derives `Approver` and `assigned_to_id` derives `AssignedTo` —
+  entities nobody declared. Name person columns `<verb>_by_id`
+  (`approved_by_id`) or use `owner_id`.
+- **A name that resolves to nothing falls back to a relationship you drew.** If
+  the entity declares a parent that no other foreign key on it accounts for, the
+  column is bound to that parent — so `ImagingReport.radiologist_id` finds
+  `Doctor` when the model says `Doctor ||--o{ ImagingReport`, rather than
+  hunting for a `Radiologist` nobody wrote. The generator resolves it this way,
+  and the checker agrees rather than reporting a column that in fact works.
+  `EML502` remains for the case with nothing to fall back on: a foreign key
+  whose name matches no entity *and* whose entity declares no spare parent.
+  Relying on the fallback is still worse than naming the column well — it is
+  unambiguous only while the entity has exactly one unclaimed parent.
+- **Which entity that is, is read off your model.** `User` if you declared one,
+  otherwise `Staff`, otherwise `Employee` — the first of the three that exists.
+  So `pi_id` in a research model with a `User` entity resolves to `User`, and
+  `reported_by_id` in a hospital model that has `Staff` and no `User` resolves to
+  `Staff` rather than raising `EML502` for a `User` entity you never wrote. A
+  model with none of the three still resolves to `User`, which is the diagnostic
+  you want: declare a person entity, or the reference has nothing to point at.
+- **Two names on that list are traps**: `assigned_to` and `remediation_owner` are
+  recognised, but they do not end `_id`, so they raise `EML114` — and the repair
+  renames them to `assigned_to_id` and `remediation_owner_id`, which are *not* on
+  the list, so `EML502` appears where a warning was cleared. It is the one repair
+  that can leave a new diagnostic behind. Do not use those two names; write
+  `owner_id`.
+- Declare the matching relationship line as well as the column. A `FK` with no
+  relationship raises `EML502`, and the generated interface loses the navigation
+  the relationship would have given it.
+
+### 3.5.1 Parent and child — line items
+
+Some entities have no life away from their owner: an invoice line, an order
+line, a prescription item. **The ERD cannot express this**, which is the whole
+reason the directive exists — `InvoiceLine.invoice_id` and `Invoice.patient_id`
+are both a foreign key with a relationship behind it, and nothing in Mermaid
+says that a line means nothing without its invoice while a patient means a great
+deal without one.
+
+```
+%%entity InvoiceLine parent: Invoice
+```
+
+**Decide it with these questions, in this order:**
+
+1. Would a list of these records, *away from their owner*, be useful to anyone?
+   A screen of every invoice line ever written is not a screen anyone opens. If
+   no — it is a child.
+2. Does the row's identity depend on the owner? "Line 1 of invoice 7", not
+   "line 1". If yes — it is a child.
+3. Would deleting the owner make the row meaningless? If yes — it is a child.
+
+A **reference** is the opposite on all three: `Invoice.patient_id` points at a
+Patient who exists, and matters, on their own. Most foreign keys are references.
+Line items are the minority, and they are usually obvious once the questions are
+asked — the noun is a *line*, an *item*, a *detail*, an *entry*.
+
+**What it does to the application:**
+
+| | Parent | Child |
+|---|---|---|
+| `sys_window` | its own | **none** |
+| Dashboard | a card | **no card — not navigable** |
+| `sys_tab` | `tab_level: 0` | `tab_level: 1`, in the *parent's* window |
+| Reached by | opening the window | opening a parent record |
+
+The tab links on the child's own foreign key back to the parent — the one
+already in the ERD, marked `sys_column.is_parent` and stored as
+`sys_tab.link_column_id`. **Do not declare a second column for it**, and do not
+drop the relationship line: the directive names the parent, the ERD still draws
+the edge.
+
+Five codes police it:
+
+| Code | Severity | Fires when |
+|---|---|---|
+| `EML147` | error | the parent is not declared, or an entity names itself |
+| `EML148` | error | the child has no foreign key back — nothing for the tab to link on |
+| `EML149` | info | an entity is *shaped* like a line item and declares no `parent:` |
+| `EML150` | warning | a declared child is still named in a `%%category` |
+| `EML155` | info | a line item whose parent is itself a line item |
+
+`EML147` and `EML148` are errors because a line item with nothing to link on
+loses its own window and gains no tab, which is an entity that has quietly left
+the application.
+
+`EML149` is an **info and never an error**, because the three questions above are
+about the business and not about the document: only you know whether a list of
+these records away from their owner is a screen anyone opens. The checker can
+only say that the shape is there, and it names both the candidate parent and the
+column a tab would link on. It fires on two shapes, each of which also requires
+that foreign key: an entity whose name **begins** with a declared entity's name
+(`InvoiceLine`/`Invoice`, `TeamMember`/`Team`,
+`FinancialPlanAssumption`/`FinancialPlan`), and an entity whose name **ends** in a
+line-item noun — `Line`, `LineItem`, `Item`, `Detail`, `Entry`, `Row` — whose
+foreign key resolves to a declared entity (`RecommendationItem` under
+`InvestmentRecommendation`).
+
+**Answer every `EML149` before you deliver.** Either declare the parent, or
+satisfy yourself that the entity is a thing in its own right and leave it — an
+`EML149` you have walked and rejected is not a fault, and the run still reports
+`OK`. What is not acceptable is not having looked: if nobody decides, the default
+is a dashboard card listing every line ever written and a parent record that does
+not show its own lines.
+
+`EML155` is an **info**, because what happens is well defined and may be what you
+want: there are two levels, a top-level entity and the line items inside its
+window, and no third. `DangerousGoods parent: CargoItem` beside `CargoItem
+parent: Shipment` is generated with `DangerousGoods` as a top-level entity — its
+foreign key stays, it gets a window and a dashboard card of its own, and the
+`CargoItem` page does not list it. If you wanted a tab, point `parent:` at the
+top-level entity and give it a foreign key to that entity. If you wanted the
+card, delete the directive and the note goes.
+
+`EML150` is a warning rather than an error because nothing breaks — but the two
+directives contradict each other. `parent:` takes the child's dashboard card
+away and the category asks for one, so the group counts an entity the reader can
+never open from it. Take the child out of the `entities:` list.
+
+**What the running application does with it.** Both stacks read the same three
+rows and nothing else. Opening a parent record shows one tab per line item below
+the form, each listing only the rows whose `is_parent` column holds that
+record's key, with a live count on the tab and a row click that opens the child.
+The dashboard and the navigation are built from the entities that have a window,
+so the child appears in neither. None of that is decided by a screen — it is
+`sys_tab.tab_level`, `sys_tab.link_column_id` and `sys_column.is_parent`, which
+is why the model's answer and the application's arrangement cannot drift apart.
+
+A child is still a real table with real rules, access control and a form. Only
+its *placement* changes. Leave it out of `%%category`: a category lists what
+appears on the dashboard, and a child does not.
+
+### 3.6 Enums, field metadata, indexes and grouping
+
+```
+%%enum LeadStatus: new, working, qualified, converted, disqualified
+%%field Lead.status enum: LeadStatus
+%%field Lead.score help: 0-100, set by the scoring rule. Anything over 70 routes to a salesperson.
+%%entity Lead help: Someone who has shown interest but is not yet an account.
+%%entity Lead icon: UserPlus
+%%index Lead(campaign_id, status)
+%%index Contact(email) unique
+%%category name: Sales; description: Leads and the deals they become; icon: TrendingUp; color: #0ea5e9; entities: Lead, Opportunity
+```
+
+- **`%%enum`** declares a closed vocabulary. Reference it from a column with
+  `%%field`, and from a state machine's states (§5.2).
+- **`%%field <E>.<attr> enum: <Name>`** binds a column to an enum. The enum must
+  exist — `EML501` otherwise.
+- **`%%field <E>.<attr> help: <sentence>`** is the help text for the column. It
+  becomes `sys_column.description`, which the generated form prints under the
+  control and the Application Dictionary shows beside the column. `enum:` and
+  `help:` are the two `%%field` keys that compile; the others (`ui`, `default`,
+  `min`, `max`, `format`) are accepted and validated only.
+- **`%%entity <Name> help: <sentence>`** — or `description:`, the same key — is
+  the sentence that explains the entity. It becomes `sys_table.description`.
+
+**Help is not optional. Write `%%entity <Name> help:` for every entity and
+`%%field <Entity>.<column> help:` for every column, without exception.**
+
+This is the most-skipped part of a model and the most expensive to skip. The
+generated application has no other source of explanation: no tooltips written by
+hand, no README beside the form, no designer to ask. What you write here is what
+a user reads behind a field's `?`, what the Application Dictionary shows beside the
+column, and the whole of the manual the generator ships. Leave it out and the
+application still runs — which is exactly why it gets left out — but every field
+on every form is a label with nothing behind it.
+
+- **Every entity**, including the self-evident ones. "Invoice" is not a
+  description of an invoice.
+- **Every column**, including `status`, the foreign keys and the enums. A
+  reference column should say what the reference is *for* — "the ward this bed
+  stands in" — not restate its type.
+- **Say what it is for, not what it is.** `%%field Lead.score help: 0-100, set by
+  the scoring rule. Anything over 70 routes to a salesperson.` tells a reader
+  something. `The score of the lead.` does not.
+- **Nobody adds it later.** The model is the only place it can be written, and
+  the moment it is being written is the only moment anyone knows the answer.
+
+**And it has to be domain knowledge, not the name in a sentence.** This is where
+the *business* lands in the model, and nothing else in the document carries it.
+The ERD says an entity has a `household_id`; only help says that a membership
+belongs to a family and that the family's screen is where it is read. Everything
+else — types, keys, cardinalities, states, roles — is structure, and structure
+is the half a reader can already see. Help is the half that has to be *known*:
+what the business calls this, why it keeps it, what depends on it, what goes
+wrong when it is wrong. Write it from the research and the brief, in the
+business's own vocabulary.
+
+**One test, applied to every line before you deliver: could this sentence have
+been written without knowing anything about this business?** If yes, it is not
+help.
+
+```
+Bad:   %%field HouseholdMember.household_id help: Household id for HouseholdMember.
+Good:  %%field HouseholdMember.household_id help: The family this membership is in. Listed inside the household's own screen — a membership away from its household is not something anybody looks up.
+
+Bad:   %%entity Address help: Address is a business record in the platform.
+Good:  %%entity Address help: A postal address belonging to a party, kept as its own record because a party has several — registered, correspondence, often an overseas one — and because a change of address is a KYC event that has to be evidenced rather than typed over the old one.
+```
+
+The first of each pair would pass any coverage check and leaves the reader
+exactly where they started.
+
+**Three codes report the three ways a model fails here, all warnings:**
+
+| Code | Fires when |
+|---|---|
+| `EML152` | an entity carries no `%%entity … help:` at all |
+| `EML153` | an entity has columns with no `%%field … help:` — reported once per entity, naming them |
+| `EML151` | help that restates its own subject instead of describing it |
+
+`EML151` catches three shapes: `Unique identifier for X`, the column name in
+prose (`Status for Client`), and a template sentence (`X is a business record in
+…`). It is deliberately narrow, so real help that happens to be short — *The day
+this offer expires.* — does not fire. It exists because coverage can be complete
+and the help still worthless: a published model once carried help on all 91 of
+its entities and all 551 of its columns, and 699 of those lines were of exactly
+these shapes.
+
+**The primary key needs no help, and `EML153` does not ask for any.** It is a
+generated uuid, read-only on every form, and the only sentence anybody could
+write about it restates its name — which is what `EML151` then reports. Leave it
+out.
+
+**What to say, per kind of column:**
+
+| Column | Say |
+|---|---|
+| A reference (`_id`) | what the reference is *for* — "the ward this bed stands in", never "the ward id" |
+| An enum-bound column | what each value means to the business, because the dictionary lists the values and nothing says what choosing one *does* |
+| A lifecycle column | what each state means and which recorded fact moves a record into it — the state is set by the workflows, never typed |
+| A money column | gross or net, which currency, and what it is compared against |
+| A date | which business event it records, and what is true before it is set |
+| A flag | what turning it on permits or prevents, and who may do so |
+
+A delivery missing help is incomplete even though the checker returns zero
+errors — §10's checklist asks for all three codes.
+- **`%%index <E>(<a>[, <b>]) [unique]`** becomes a real index. Add one for every
+  column combination the business searches or filters on, and no more — every
+  index is paid for on every write.
+- **`%%category`** groups entities on the generated dashboard. `name` is the only
+  required key; `entities` is a comma-separated list. Only `;` separates keys.
+  **There is no shorthand**: `%%category Sources: DataSource, SchemaEntity` reads
+  perfectly well and declares nothing, because the parser requires `name:` and
+  skips the line without it — the grouping is lost and every entity in it falls
+  into the default `General` category. Reported as `EML154`.
+
+**An `icon:` names a lucide icon, and a wrong name is silent.** `%%category
+icon:` reaches `sys_category.icon` and is drawn beside the category's heading on
+the dashboard; `%%entity icon:` reaches `sys_table.icon` and is drawn on the
+entity's own card. Three spellings all resolve — `LayoutGrid`, `layout_grid` and
+`layout-grid` are the same icon — so write whichever reads best. What does *not*
+resolve is a name lucide does not have: it is **not** a diagnostic, because the
+checker does not carry lucide's catalogue, and the application draws a
+placeholder in its place. `icon: flask` is the trap — lucide has no `flask`, it
+has `flask-conical` — and it sat uncaught in this project's own hospital example
+for months, drawing a placeholder where the Diagnostics heading's icon should
+have been. Check a name at https://lucide.dev/icons before writing it.
+
+## 4. Business rules
+
+### 4.1 Two forms, and the difference that matters
+
+This is the single most common source of "my rule decides but nothing happens".
+
+**Node-graph form** — the shape of each node carries its role. Good for scoring,
+grading and pricing. It **carries no outputs, so it cannot act**: it computes a
+decision and nothing downstream consumes it.
+
+```mermaid
+%%meta name: Lead Scoring
+%%meta kind: erd
+erDiagram
+    Lead {
+        string  id PK
+        string  company_name
+        email   email UK
+        integer employee_count
+        integer score OPTIONAL
+        string  rating OPTIONAL
+    }
+
+%%entity Lead help: A company that has shown interest but has not yet been qualified by a salesperson. A lead becomes an account only on conversion, so nothing is sold against one.
+%%entity Lead icon: UserPlus
+%%field Lead.company_name help: The organisation as it identified itself. It is what a salesperson searches by before creating a duplicate.
+%%field Lead.email help: The address the enquiry arrived from and where the first outreach goes. Unique, so two enquiries from one contact do not become two leads.
+%%field Lead.employee_count help: How big the company is, as stated or as researched. It is the only firmographic input to the scoring rule: a thousand or more adds 35 points, anything less adds 10.
+%%field Lead.score help: 0-100, written by the scoring rule at creation. Empty until then, and an override by hand is a deliberate exception to the rule rather than a correction of it.
+%%field Lead.rating help: hot at 70 points and above, warm below it. Set by the same rule, and it is what routes the lead to a salesperson rather than to a nurture sequence.
+%%section entity: Lead; name: Lead; help: The company that showed interest and how to reach it.; rows: company_name, email | employee_count
+%%section entity: Lead; name: Scoring; help: How warm the lead is — the score the rule computes and the rating it sets from it.; rows: score, rating
+
+%%meta name: Lead Scoring
+%%meta kind: rules
+%%rule leadScoring on Lead event: beforeCreate priority: 10
+flowchart TD
+    A([Start: Lead captured]) --> B{employee_count >= 1000?}
+    B -->|Yes| C[Add 35 firmographic points]
+    B -->|No| D[Add 10 firmographic points]
+    C --> E((Compute lead score))
+    D --> E
+    E --> F{score >= 70?}
+    F -->|Yes| G[Set rating hot]
+    F -->|No| H[Set rating warm]
+    G --> Z([End: Lead scored])
+    H --> Z
+```
+
+**Decision-table form** — a section carrying `%%action` directives. One row per
+directive. This is **the only form whose rules can act**.
+
+Most real rules need both: draw the decision as a graph so a person can read it,
+and attach `%%action` directives for the effects it must have.
+
+### 4.2 `%%action` — how a rule acts
+
+```
+%%action <name> <actionType> when: <expression> <key>: <value> ...
+```
+
+`when:` is an expression over the record being written — `severity == "critical"`,
+`discount_percent > 15`, `status == "closed" and root_cause == null`. `true` fires
+on every write. It is the last key parsed before the action's own keys, so quote
+any value containing a `key:` sequence.
+
+| Action type | Required keys | Optional | Effect |
+|---|---|---|---|
+| `trigger-workflow` | `workflow` | `message` | Starts that workflow by name. This is what gates a `kind: saga` declared `trigger: rule`. |
+| `validation-error` | `message` | — | Rejects the write and returns the message to the caller. |
+| `transform` | `field`, `value` | `message` | Overwrites a column on the record being written. `value` is a literal, or plain arithmetic over the record's own columns (`quantity * unit_price`, `net_amount + tax_amount`; numbers, column names, `+ - * / %`, parentheses), computed when the rule runs and in the order the actions are written, so a later transform sees an earlier one's result. |
+
+```
+%%action escalateDiscount trigger-workflow when: discount_percent > 15 workflow: QuoteApprovalEscalation message: Discount above rep authority — holding the quote for approval
+%%action refuseDiscount validation-error when: discount_percent > 40 message: Discounts above 40 percent cannot be approved by anyone — reprice the quote
+%%action stampReviewer transform when: status == "approved" field: reviewed_by value: current_user
+```
+
+Several rows may match one write. Every output column is written in every row,
+blank where unused — the engine yields no result at all for a row with a missing
+cell, so an omitted column silently voids the rule.
+
+### 4.3 Node shapes in a rules flowchart
+
+| Shape | Written | Role |
+|---|---|---|
+| stadium | `A([Start])` | Input context, or the decision's output when it has only incoming edges |
+| diamond | `B{Amount > 1000?}` | Decision. Outgoing edge labels are the branch conditions. |
+| rectangle | `C[Apply 15% discount]` | Expression: assign, set an output field, apply a value |
+| circle | `D((Calculate total))` | Function or computation step |
+| rounded | `E(Calculate total)` | Same as circle |
+
+### 4.4 `%%rule` — declaring a rule's binding
+
+```
+%%rule <name> on <Entity> event: <hookType> priority: <n>
+```
+
+Binds the section to an entity and a lifecycle event (§5.1 lists the events).
+Lower `priority` runs first. **Status: validated, not compiled** (§7) — it is
+checked for correctness but does not itself change a generated application, so
+do not promise behaviour that depends on it alone.
+
+## 5. Workflows
+
+Three kinds, declared on the section:
+
+```
+%%workflow <Name> entity: <Entity> kind: <hook|state|saga>
+```
+
+### 5.1 `kind: hook` — handlers on lifecycle events
+
+Binds named handlers to the points around a write.
+
+```mermaid
+%%meta name: Account Governance
+%%meta kind: erd
+erDiagram
+    Account {
+        string id PK
+        string name
+        string account_number UK OPTIONAL
+    }
+
+%%entity Account help: A company the business actually sells to. Accounts are created on conversion from a lead and are never deleted while open business stands against them — the beforeDelete hook below is what enforces that.
+%%entity Account icon: Building2
+%%field Account.name help: The trading name to use on correspondence and invoices. Normalised on creation by the beforeCreate hook, so two spellings of one company do not become two accounts.
+%%field Account.account_number help: The finance system's own reference for this customer. Optional until finance issues one, unique once it exists, and checked by the customValidate hook rather than only by the database.
+%%section entity: Account; name: Account; help: The customer organisation and the number it is known by.; rows: name, account_number
+
+%%meta name: Account Governance
+%%meta kind: workflow
+%%workflow AccountGovernance entity: Account kind: hook
+flowchart TD
+    A[Client Request] --> B[Validate Request]
+    B --> C[beforeCreate: normalizeAccountName]
+    C --> D[customValidate: ensureAccountNumberUnique]
+    D --> E[Process Account]
+    E --> F[afterCreate: seedAccountTeam]
+    F --> G[beforeDelete: blockDeleteWithOpenBusiness]
+    G --> H[Response]
+
+    %%hook beforeCreate normalizeAccountName on Account[field: name]
+    %%hook customValidate ensureAccountNumberUnique on Account[field: account_number]
+    %%hook afterCreate seedAccountTeam on Account
+    %%hook beforeDelete blockDeleteWithOpenBusiness on Account
+```
+
+The thirteen hook types:
+
+| Type | When it runs |
+|---|---|
+| `beforeCreate` | Validate or transform before insert |
+| `afterCreate` | Side effects after insert |
+| `beforeUpdate` | Validate or transform before update |
+| `afterUpdate` | Side effects after update — audit, cache invalidation, notification |
+| `beforeDelete` | Guard before delete — block if referenced |
+| `afterDelete` | Cleanup after delete |
+| `beforeRead` | Guard or transform a single-record read |
+| `afterRead` | Post-process a record — redact fields |
+| `beforeList` | Adjust list parameters — filter, sort, paginate, scope |
+| `afterList` | Post-process a result set |
+| `beforeQuery` | Mutate a query before it runs — tenant scoping |
+| `afterQuery` | Post-process query results |
+| `customValidate` | Cross-field validation independent of a single verb |
+
+`on <Entity>[field: <column>]` names the column the handler guards. Say it where
+one applies — it is how a reader knows what the handler is for.
+
+### 5.2 `kind: state` — the lifecycle of a record
+
+**Every record has a lifecycle: Draft, its status flow, Final.** A save puts a
+record in **Draft** and runs its rules and workflows. Accepted, a record with a
+status flow moves to the flow's first status; a record with none moves to
+**Final**. Refused, it goes to **Error** with the reason, stays editable, and
+saving it again runs them again. From there a record with a flow moves only when
+someone presses one of its **action buttons** — a move along an edge the
+diagram draws. With several moves out of a status, the person chooses one.
+Every end state (`x --> [*]`) is **Final**: the record is locked, and **Reopen**
+takes it back to Draft. `final` and `error` are reserved as stored values
+(`EML509`); `draft` is the lifecycle's own, and a machine that starts in a
+`draft` state of its own keeps it.
+
+**The state field is never typed.** The column a `kind: state` machine drives —
+`status`, else `state`, else `stage` — is never changed by a person through a
+form or a direct API write: a save that carries a different value is refused
+(below), and the record's buttons are how it moves. The generated form shows the
+state **read-only in its top header**, beside the record's title and its action
+buttons, and the list grid **always** shows it as a column; it is never an input
+and never sits in a `%%section` row. A `<state>_at` column, where the model keeps
+one, is **stamped by the application** when the record reaches that state.
+
+**Each move is a role's.** `%%rbac role:<roles> on <Entity>.<event>` gives a move
+to those roles: the button is theirs and nobody else's. A move whose edge has no
+label is named `from->to`; `reopen` names Reopen. A move no `%%rbac` line names
+is open to anyone who may update the record (`EML511`, an info, lists them), and
+Reopen no line names is the administrator's alone. A user holding several roles
+may press every move any of them is given — a role only adds. A record therefore
+**moves between roles** as it moves through its flow: it waits for whoever holds
+a move out of its current status, and "Waiting for me" lists exactly those.
+
+```mermaid
+%%meta name: Booking Lifecycle
+%%meta kind: erd
+
+%%enum BookingStatus: draft, requested, confirmed, attended, cancelled, no_show
+
+erDiagram
+    Booking {
+        string   id PK
+        string   member_name
+        string   status
+        datetime requested_at OPTIONAL
+        datetime confirmed_at OPTIONAL
+        datetime attended_at OPTIONAL
+        datetime cancelled_at OPTIONAL
+        datetime no_show_at OPTIONAL
+        text     notes OPTIONAL
+    }
+
+%%field Booking.status enum: BookingStatus
+
+%%entity Booking help: One member's place on one session, from the moment they ask for it to the moment they turn up or do not. The booking is what the studio counts capacity against, so a cancelled one frees a place and a no-show does not.
+%%entity Booking icon: Ticket
+%%field Booking.member_name help: The member the place is held for, as reception would call them.
+%%field Booking.status help: Where the booking is: requested, confirmed, attended, cancelled or no_show. It moves only by the booking's action buttons; nobody types it.
+%%field Booking.requested_at help: When the booking reached requested. Stamped by the application when the move is made.
+%%field Booking.confirmed_at help: When reception confirmed the place. Stamped by the application when the move is made.
+%%field Booking.attended_at help: When the member was checked in. Stamped by the application when the move is made.
+%%field Booking.cancelled_at help: When the place was released. Stamped by the application when the move is made.
+%%field Booking.no_show_at help: When reception recorded that the member did not come. Stamped by the application when the move is made.
+%%field Booking.notes help: Anything reception should know about this booking — a late arrival, a changed class.
+%%section entity: Booking; name: Booking; help: Who the place is for, and when it reached each status — each time is stamped as the booking moves.; rows: member_name, requested_at | confirmed_at, attended_at | cancelled_at, no_show_at | notes
+
+%%rbac role:reception|manager on Booking.read
+%%rbac role:reception|manager on Booking.update
+
+%%meta name: Booking Lifecycle
+%%meta kind: workflow
+%%workflow BookingLifecycle entity: Booking kind: state
+stateDiagram-v2
+    [*] --> draft
+    draft --> requested : submit
+    requested --> confirmed : confirm
+    requested --> cancelled : reject
+    confirmed --> attended  : check_in
+    confirmed --> cancelled : cancel
+    confirmed --> no_show   : mark_absent
+    attended  --> [*]
+    cancelled --> [*]
+    no_show   --> [*]
+
+%%rbac role:reception|manager on Booking.submit
+%%rbac role:reception|manager on Booking.confirm
+%%rbac role:manager on Booking.reject
+%%rbac role:reception|manager on Booking.check_in
+%%rbac role:reception|manager on Booking.cancel
+%%rbac role:manager on Booking.mark_absent
+%%rbac role:manager on Booking.reopen
+```
+
+Rules the checker enforces:
+
+- **The entity needs a column called `status`, `state` or `stage`**, and the
+  machine tracks that one column. No other name is recognised: an entity whose
+  lifecycle column is `approval_status` or `fulfillment_status` gets `EML500`,
+  and the generated application has a machine with nothing to write to. Name the
+  column `status`; keep any second, descriptive enum column beside it.
+- **No rule or saga moves a record a button moves.** A `%%rule` whose only
+  actions start sagas that each write the state and clear `_at` columns is the
+  pattern models used before buttons existed; it would move the record a second
+  time behind the button's back. The checker reports it (`EML512`) and the fixer
+  removes the rule and its sagas, keeping the `_at` columns. A saga that writes a
+  value the machine does not draw is `EML508`; one that writes a drawn state moves
+  the record only along a drawn edge.
+- **Every `%%rbac` move names a move the machine draws** — an event, a
+  `from->to` edge, or `reopen`. Anything else is `EML214`, which lists the moves
+  on offer.
+- **The state field is never placed in a `%%section` row** — `EML178`, which
+  the fixer repairs by removing it. It is shown read-only in the form's header
+  and as a list column, and its absence from every row is not a gap: `EML170`
+  and `EML172` do not count it.
+- **One state machine per entity.** Two machines bound to the same entity are
+  two lifecycles competing for one column — the second belongs on the entity
+  that actually lives it: approval on the approval record, receiving on the
+  delivery, payment on the invoice. If both really describe the same row, merge
+  them into one lifecycle with more states.
+- **An initial transition is required** — `[*] --> firstState`. Missing is
+  `EML421`, auto-repaired.
+- **A terminal state is required** — `lastState --> [*]`. Missing is `EML422`,
+  auto-repaired. It is where the record becomes Final.
+- **Back the states with a `%%enum`** and bind it to the status column with
+  `%%field`. The enum is matched by **value overlap**, not by name — the checker
+  picks whichever declared enum shares the most values with the machine's states
+  — and then three codes police the agreement: `EML428` when no enum shares a
+  single value with it, `EML426` when a state is missing from the enum that
+  matched, and `EML427`, an info, when the enum carries a value no state uses. A
+  state no enum backs is a value the column can never legally hold; an enum value
+  no state reaches is usually a transition nobody drew. Clear all three: name the
+  enum `<Entity>Status`, list exactly the machine's states, and bind it.
+- **Give each machine a vocabulary of its own.** Because the match is by overlap,
+  two machines whose states are both `pending, approved, rejected` tie, and a tie
+  goes to whichever enum was declared first — so one machine silently borrows the
+  other's enum and reports `EML426` or `EML427` about states it never had. An
+  order that is `pending_approval` while its approval task is `pending` costs
+  nothing and removes the ambiguity.
+
+**What the generated application does with it.** In both stacks:
+
+| Request | Answer |
+|---|---|
+| `GET /api/bus/<entity>/<id>/actions` | The moves this person may press from where the record is |
+| `POST /api/bus/<entity>/<id>/transition` with `{ "event": … }` or `{ "to": … }` and `If-Match` | The record, moved; `428` without `If-Match`, `409` `VERSION_CONFLICT` when someone moved it first |
+| a move the diagram does not draw from here | `409`, `details.code: "INVALID_TRANSITION"` |
+| a move the caller's roles are not given | `403`, `details.code: "TRANSITION_FORBIDDEN"` |
+| a move a refusing rule forbids, judged on the record as the move leaves it | `422`, with the rule's message |
+| a save or delete of a Final record | `409`, `details.code: "RECORD_FINAL"` |
+| a save that changes the state field | `403`, `details.code: "STATE_FIELD_SYSTEM_MANAGED"` — for every role, the administrator included |
+
+A move runs in one transaction with the workflows bound to it, and the rules that
+start a process run again on the moved record — a rule keyed on
+`stage == "closed_won"` starts its process when the deal is won, and a Final
+record is locked, so it cannot start it twice. A failure leaves the record where
+it was, with the reason. `GET /api/bus/<entity>?awaiting=me` lists the records
+waiting for the caller.
+
+The word after the colon is the **transition event**. It names the move in the
+diagram, the viewers, the generated manual and `%%rbac`. The button is named
+after the status it moves to ("Closed won"), labelled or not.
+
+### 5.3 `kind: saga` — a multi-step process
+
+A saga writes across entities. Each `%%step` binds a flowchart node to an
+executable step, and **the flowchart's edges give the running order**.
+
+A saga (or a `kind: hook` workflow) may be bound to a move of the entity's status
+machine with `status: <state>` — `%%workflow Review entity: Contract kind: saga
+trigger: automatic operation: UPDATE status: to_be_reviewed`. A button press is
+two transactions: the first saves the form and leaves the status where it is, the
+second runs the workflows bound to the target state and moves the record only if
+every one succeeds; a failure rolls the second back, keeps the saved values and
+records the reason. `EML243` (the state must be drawn), `EML244` (an update must
+start it), `EML245` (some arrow must lead into it). An entity with no status
+machine has Draft and Final only and takes no `status:`.
+
+```mermaid
+%%meta name: Lead Conversion
+%%meta kind: erd
+
+%%enum LeadStatus: new, working, qualified, converted, disqualified
+
+erDiagram
+    Lead {
+        string  id PK
+        string  company_name
+        email   email UK
+        string  status
+        integer score OPTIONAL
+        string  owner_id FK
+    }
+    Account {
+        string id PK
+        string name
+        string tier OPTIONAL
+        string owner_id FK
+    }
+    Contact {
+        string id PK
+        string account_id FK
+        email  email UK
+    }
+    User {
+        string id PK
+        string full_name
+    }
+    Account ||--o{ Contact : "employs"
+    User    ||--o{ Lead : "owns"
+    User    ||--o{ Account : "owns"
+
+%%field Lead.status enum: LeadStatus
+
+%%entity Lead help: A company that has shown interest and is not yet a customer. Qualifying one is what starts the conversion saga below, which opens the account and its first contact.
+%%entity Lead icon: UserPlus
+%%field Lead.company_name help: The organisation as it identified itself. It becomes the account's name on conversion, so a sloppy one propagates.
+%%field Lead.email help: The address the enquiry arrived from. It becomes the primary contact's address on conversion, which is why it is unique here.
+%%field Lead.status help: new — not yet picked up; working — being pursued; qualified — accepted by sales, and the value that fires the conversion saga; converted — an account exists; disqualified — not a fit, and kept so the same enquiry is not worked twice.
+%%field Lead.score help: 0-100, from the scoring rule. Above 85 the conversion saga opens the account at the strategic tier rather than as an SMB.
+%%field Lead.owner_id help: The salesperson pursuing it. They inherit the account on conversion, which is why it is set before qualification rather than after.
+
+%%entity Account help: A company the business sells to, opened by the conversion saga when a lead is qualified. It is the record everything commercial hangs off, and it outlives the lead that produced it.
+%%entity Account icon: Building2
+%%field Account.name help: The trading name on correspondence and invoices, copied from the lead's company name at conversion and correctable afterwards.
+%%field Account.tier help: strategic or smb, decided by the conversion saga from the lead's score. It sets the service level the account is entitled to, so changing it by hand is a commercial decision.
+%%field Account.owner_id help: The salesperson responsible. Inherited from the lead, and reassigned when the territory changes.
+
+%%entity Contact help: A person at an account. The conversion saga creates the first one from the lead's own email address, and the rest are added as the relationship widens.
+%%entity Contact icon: Contact
+%%field Contact.account_id help: The company this person works for. It is what a deal or a case is filed under, so a contact on the wrong account misfiles everything about them.
+%%field Contact.email help: How this person is reached, and their identity here. Unique across contacts, because the same address at two accounts is one person who has moved.
+
+%%entity User help: Somebody at this business who owns leads and accounts. Users are the assignable side of the pipeline: an unowned lead is one nobody is working.
+%%entity User icon: UserCog
+%%field User.full_name help: The salesperson's name as it appears on a lead's owner field and in an account's history.
+%%section entity: Lead; name: Lead; help: The company that showed interest, who is working it, and how far it has got.; rows: company_name, email | status, score | owner_id
+%%section entity: Account; name: Account; help: The customer organisation, its tier, and who owns the relationship.; rows: name, tier | owner_id
+%%section entity: Contact; name: Contact; help: The person at the account and where to reach them.; rows: account_id, email
+%%section entity: User; name: User; help: The person who signs in and owns records.; rows: full_name
+
+%%meta name: Lead Qualification
+%%meta kind: rules
+%%rule leadQualification on Lead event: beforeUpdate priority: 15
+flowchart TD
+    Q([Start: Lead updated]) --> R{status == qualified?}
+    R -->|Yes| S[Convert the lead]
+    R -->|No| T[Leave it open]
+    S --> QZ([End: Qualification decided])
+    T --> QZ
+
+    %%action convertQualifiedLead trigger-workflow when: status == "qualified" workflow: LeadConversion message: Lead qualified — opening the account
+
+%%meta name: Lead Conversion
+%%meta kind: workflow
+%%workflow LeadConversion entity: Lead kind: saga trigger: rule
+flowchart TD
+    A([Lead qualified]) --> B{Size the account}
+    B --> C[Open the account]
+    C --> D[Create the primary contact]
+    D --> E[Mark the lead converted]
+    E --> Z([Converted])
+
+    %%step B Decision decisionTable: {"hitPolicy":"first","inputs":[{"id":"i1","name":"Score","field":"score"}],"outputs":[{"id":"o1","name":"Tier","field":"accountTier"}],"rules":[{"_id":"strategic","i1":">= 85","o1":"'strategic'"},{"_id":"rest","i1":"","o1":"'smb'"}]}
+    %%step C CreateEntity entity: Account as: newAccountId fields: {"name":"company_name","tier":"accountTier","owner_id":"owner_id"}
+    %%step D CreateEntity entity: Contact as: newContactId fields: {"account_id":"newAccountId","email":"email"}
+    %%step E UpdateEntity field: status value: converted
+```
+
+`trigger: rule` means the saga starts only when a rule's `trigger-workflow`
+action names it (§4.2). Without that, declare no trigger and it runs on the
+operation the workflow is bound to.
+
+**The seven step types:**
+
+| Step | Required | Optional | Purpose |
+|---|---|---|---|
+| `CreateEntity` | `entity`, `fields` | `as` | Insert a row; `as` publishes its id for later steps |
+| `UpdateEntity` | `field`, and one of `source` / `value`; **plus `targetSource` or `targetField` whenever `entity` is set** | `entity` | Write one column, on this record or a related one |
+| `DeleteEntity` | **`targetSource` or `targetField` whenever `entity` is set** | `entity`, `hard` | Remove the triggering record, or related rows. Soft by default — `hard: true` really deletes |
+| `Formula` | `target`, `operation`, and what that operation needs | — | Compute a value and publish it under `target` |
+| `Decision` | `decisionTable` **or** `rule` | `publish` | Evaluate a decision table inline, or a named rule |
+| `REST` | `url` | `method`, `bodyTemplate` | Call an external endpoint |
+| `Agent` | `agentId` | — | Hand the step to an AI agent |
+
+`Formula`'s operation decides the rest of its keys: `add`, `subtract`,
+`multiply` and `divide` need `source` and `operand`; `set` needs `value` — the
+only way to hand text to a later step; `copy` needs `source`. Omitting one is
+`EML262`.
+
+`Agent` is a **placeholder pending the agent runtime**: the executor logs the
+step and skips it. `agentId` is still required, and the step is still the right
+way to say "a model decides this" in the model — just do not promise a user that
+it runs today.
+
+**Steps share a context**: the triggering record's columns, plus every variable a
+previous step published. `CreateEntity` publishes the new row's id under `as`;
+`Formula` publishes under `target`. A later step reads one by naming it in
+`source` or `targetSource` — that is how a step reaches a row an earlier step
+created.
+
+Three mechanical rules that cause most saga failures:
+
+1. **`fields` carries JSON and must be the last key on the line.** A value runs
+   to the next `<key>:` token, so JSON in the middle swallows what follows.
+2. **Targeting another entity needs `targetSource` or `targetField`.** Naming
+   `entity` alone is `EML265` — refused rather than guessed, because "update the
+   ApprovalRequest" does not say *which* ApprovalRequest. Three ways out, and one
+   of them is almost always right:
+
+   - the row an earlier step created — `CreateEntity … as: approvalId` publishes
+     its id, and the later step reads it back with `targetSource: approvalId`;
+   - a row that points at the triggering record — `targetField: purchase_order_id`
+     matches that foreign key against the row the saga is running for;
+   - **the triggering record itself — then drop `entity` entirely.** A step that
+     names no entity writes the row the saga was started for, which is what
+     `%%step E UpdateEntity field: status value: matching` means in a saga bound
+     to `Invoice`. Adding `entity: Invoice` to that line does not clarify it; it
+     turns it into `EML265`.
+
+   ```
+   %%step B CreateEntity entity: ApprovalRequest as: approvalId fields: {"purchase_order_id":"id","status":"pending"}
+   %%step C UpdateEntity entity: ApprovalRequest targetSource: approvalId field: status value: approved
+   %%step D UpdateEntity field: status value: approved
+   ```
+
+   B creates the row, C writes to *that* row, D writes to the record the saga is
+   running for. Every `as:` you declare should be read back by a later step —
+   an unused one usually means a step that meant to say `targetSource`.
+3. **A URL may be written either way: `url: https://host/path` or
+   `url:https://host/path`.** A value ends at the next `<key>:` token, and
+   `https:` used to count as one — so the spaced form parsed as an empty `url`
+   plus an unknown property `https`, raising `EML262` and `EML268` together for
+   a line that looked perfectly correct. The parser now recognises a scheme and
+   reads through it, so both spellings yield the same `url`. Put `bodyTemplate`
+   last, because it carries JSON and JSON is full of colons.
+
+## 6. Access control — `%%rbac`
+
+```
+%%rbac role:admin on Order.delete             # a CRUD operation
+%%rbac role:sales|manager on Deal.update      # `|` is OR
+%%rbac role:admin on Customer.*               # all four operations
+%%rbac role:sales_manager on Deal.close_won   # a move of Deal's flow (§5.2)
+%%rbac role:sales_ops on Deal.reopen          # Reopen, from a Final state
+```
+
+**It restricts; it does not grant.** A target no directive names is open to any
+authenticated caller. One or more directives close that target to the union of
+the roles they name. Role names match case-insensitively, and a role flagged
+`is_admin` — the master role — bypasses.
+
+**A user with several roles has the union of what they grant.** A role only ever
+adds; there is no deny.
+
+**The master bypass is over access, not over how a state changes.** It answers
+"may this caller do this thing", so it opens any `%%rbac` target and presses any
+move. It does not let anybody type a state field: a record moves by its buttons
+(§5.2), and an administrator's write to the column is refused like everyone
+else's.
+
+The target is a CRUD operation — `create` `read` `update` `delete` `*` — or a
+**move** of the entity's flow (§5.2): its event (`Quote.approve`), `from->to` for
+an edge with no label, or `reopen`. A move a line names is the button only those
+roles see, and a role given a move may press it without being allowed to edit the
+record; a move no line names is open to whoever may update the record.
+
+Put `%%rbac` directives beside the ERD.
+
+### Group every entity under a functional role
+
+**This is the part most models skip, and it is the difference between an
+application and a schema with a menu.** A business has jobs in it — a
+salesperson, a dispatcher, a ward clerk, a claims assessor — and each works with
+a *part* of the model. Name those roles in §1.1, then give every entity a
+`read` restriction naming the roles that work with it:
+
+```
+%%rbac role:sales_rep|sales_manager|support_agent on Account.read
+%%rbac role:sales_rep|sales_manager on Opportunity.read
+%%rbac role:support_agent|support_manager on SupportCase.read
+%%rbac role:marketing_manager on Campaign.read
+```
+
+**`read` is the operation that decides ownership, and it is the only one that
+changes what a role sees.** An entity a role may not read does not appear in
+that role's navigation at all — no menu entry, no dashboard card, no lookup.
+The dashboard follows from the same rule: a category block appears only when the
+reader may read at least one entity in it, line items excluded because a child
+is reached through its parent, so a category whose every entity belongs to
+someone else does not appear. The Application Dictionary block beside the
+categories is the admin windows this reader is granted through `sys_access`, so
+an administrator and an ordinary user see different cards there too. Every
+card's icon comes from the dictionary: `sys_category.icon` for a heading,
+`sys_table.icon` for an entity, `sys_window.icon` for an admin card — and a
+window is never withheld for want of one.
+Every other operation only refuses the write: restricting `Order.delete` to
+administrators protects deletion and leaves the Order screen where it was, which
+is what its author meant. Do not reach for `.\*` to express ownership; it
+restricts creating, updating and deleting to the same list, and it merges with —
+rather than overrides — the narrower `update` rules you wrote elsewhere.
+
+Three consequences worth knowing before you write the lines:
+
+- **Every role named anywhere must be able to read what it acts on.** A rule
+  letting `sales_manager` update `Opportunity` — say, record the signed order
+  that moves it to `closed_won` — is useless if the `Opportunity.read` line does
+  not name `sales_manager`: the manager cannot open the record they would write.
+- **Overlap is normal and is one line.** `Account` belongs to sales, marketing
+  and support in most businesses; name all three on the one directive. Two
+  directives on the same target merge, so either spelling works.
+- **The generated application seeds one account per role.** Administrator, an
+  account holding no functional role at all, and one for each role your
+  directives name — so `%%rbac` is something the reader can *see* rather than
+  read about. The administrator bypasses every restriction, which is what makes
+  it the account to compare the others against.
+- **Deployed beside the reporting platform, the same lines shape a second set of
+  roles.** The application and Enterprise Reporting come up together on one
+  origin — `/app` and `/report` — and one reporting role is created per declared
+  role, permitted to read exactly the `bus_` tables that role's `read` rules
+  admit. It is a **mirror, not a shared system**: separate databases, separate
+  user tables, separate sessions, separate sign-ins, and a role name that means
+  different things on each side — what you may *do* to a record, against which
+  tables your queries may *read*. The two addresses differ on purpose
+  (`sales.manager@<app>.example.com` against
+  `sales.manager@<app>.reports.example.com`) so neither is mistaken for the
+  other, and the origin's front door at `/` lists both pairs side by side. Only
+  `read` rules narrow a reporting role; a restriction on create, update or
+  delete means nothing to somebody who cannot write through that product.
+
+An entity no `read` line names stays visible to everyone, and a model that
+declares no `read` restrictions anywhere behaves exactly as models did before
+this section existed. That is the fallback, not the target: if a role in your
+roster reads no entities, you have not finished §1.1.5.
+
+**Write `%%rbac`, never `%%guard`.** The role form was spelled `%%guard` until
+that keyword was needed for automation conditions (§7). A `%%guard role:… on …`
+line still parses, and does nothing: the restriction is not compiled and the
+operation stays open. `EML223` reports it.
+
+Validation here is strict, and nearly every code is an **error** rather than a
+warning: `EML210` syntax, `EML211` no role named, `EML213` undeclared entity,
+`EML214` a target that is neither an operation nor a move the entity's flow
+draws. A `%%rbac` rule
+that does not compile is not a rule that does nothing — it is an access
+restriction its author believes is in place and is not.
+
+## 7. Directive reference
+
+Sixteen directives. **`status` is the field that matters**: *compiled* means a
+reader consumes it and the generated application changes; *validated* means only
+the checker reads it.
+
+| Directive | Form | Status |
+|---|---|---|
+| `%%meta` | `%%meta <key>: <value>` | compiled |
+| `%%enum` | `%%enum <Name>: a, b, c` | compiled |
+| `%%field` | `%%field <E>.<attr> <k>: <v>` | compiled *(`enum:`, `help:`, and the field logic `display:`, `readonly:`, `mandatory:` — §3.7.9)* |
+| `%%index` | `%%index <E>(<a>[, <b>]) [unique]` | compiled |
+| `%%category` | `%%category name: X; icon: Y; entities: A, B` | compiled |
+| `%%section` | `%%section entity: <E>; name: <H>; help: <why>; rows: a, b \| c` | compiled *(the form layout, §3.7.6)* |
+| `%%workflow` | `%%workflow <Name> entity: <E> kind: <hook\|state\|saga>` | compiled |
+| `%%hook` | `%%hook <type> <handler> on <E>[field: <c>]` | compiled |
+| `%%step` | `%%step <nodeId> <stepType> <k>: <v> …` | compiled |
+| `%%action` | `%%action <name> <type> when: <expr> …` | compiled |
+| `%%rbac` | `%%rbac <roleExpr> on <E>.<op>` | compiled |
+| `%%guard` | `%%guard <field> <operator> <jsonValue>` | compiled *(see below)* |
+| `%%loop` | `%%loop <id> while: <f> <op> <v> max: <n>` | compiled |
+| `%%entity` | `%%entity <E> <k>: <v>` | compiled *(`help:` / `description:`, `icon:`, `parent:`; the rest **validated**)* |
+| `%%rule` | `%%rule <name> on <E> event: <hook> priority: <n>` | **validated** |
+| `%%trigger` | `%%trigger <source> -> <handler> on <E>` | **validated** |
+| `%%report` | `%%report <name> title: <T> [entity: <E>] [chart: bar\|line\|pie\|area x: <col> y: <col>] [help: <why>] sql: <query>` | compiled *(and again, separately, by the reporting platform)* |
+| `%%dashboard` | `%%dashboard <name> title: <T> role: <role> reports: <a>, <b>, … [help: <why>]` | compiled *(into the reporting pack: one dashboard per directive, beside the overview)* |
+
+**`%%guard` used to mean access control**, and a model written from an older
+example still spells it `%%guard role:manager on Order.delete`. That sense moved
+to `%%rbac`: a guard shaped like the old one is *skipped*, so the operation it
+appears to restrict is open to any authenticated caller. `EML223` reports it and
+prints the `%%rbac` line to write instead. A `%%guard` today is an automation
+condition — `%%guard status eq "open"`.
+
+**`%%report` is the one directive whose payload is SQL.** It declares a question
+the application's *users* ask, written as the query that answers it, and the
+query runs against the generated application's own database — so it names
+`bus_` tables, and it must filter `deleted_at IS NULL` or it quietly overstates
+every number it reports.
+
+The checker holds it to its shape and no further: a query must exist
+(`EML290`) and be named (`EML291`), the name and the title must each be unique, because the name is the
+key a report is stored under and the platform keeps one report per title (`EML292`), the query must begin `SELECT` or
+`WITH` rather than write (`EML293`), a `chart:` must name both `x:` and `y:`
+(`EML294`), an `entity:` must be one the model declares (`EML295`), and a chart
+type must be one of `bar`, `line`, `pie`, `area` (`EML296`). It cannot tell you
+a column name is wrong — it has no database.
+
+**`%%dashboard` groups a role's own reports.** It names the declared `%%rbac`
+role it is for and the `%%report` directives it shows, in order; the reporting
+pack carries it beside the derived overview (§7.1, §7.2.4). The checker holds it
+to its shape (`EML297`: a name, a role some `%%rbac` line declares, at least one
+report that exists, a name and a title each used once) and holds every declared role to the
+minimums of §7.2 — at least 50 charted `%%report` directives it can run
+(`EML298`) and at least 10 dashboards of at least 3 reports each (`EML299`).
+
+`sql:` is always **last** on the line and takes the rest of it, because a query
+contains spaces and colons and would otherwise be shredded by the key scan.
+
+**A report is compiled twice, by two readers, and neither replaces the other.**
+
+The generator puts each one into the application it writes. In the full NestJS
+stack that is a row in `sys_report`, served at `/sys/reports` and shown under
+**Admin → Analysis**; in the browser application it is an entry in `model.json`,
+served at `/api/reports` and shown under **Reports**. Both run the query on
+demand against the application's own database, so the answers change as the
+application is used. A model declaring no reports gets the screen anyway, saying
+so — an empty table would read as a failed query.
+
+Separately, the reporting platform that ships beside a *deployed* application
+reads the same directives, on top of a baseline it derives from structure alone
+— a register per entity, a breakdown per `%%enum`-bound column, a lifecycle per
+state machine. That baseline describes the shape of the data and nothing about
+the business running on it; a `%%report` is where the thing only a person knows
+gets written down, and it travels with the model instead of being rebuilt by
+hand after every regeneration. The real platform runs beside a *deployed*
+application — under the orchestrator's docker-compose, or as the `report`
+service of the downloadable zip's own compose file — and the browser
+application previews the same reports in the platform's own layout. §7.1 says
+what that application holds and where each piece of it comes from.
+
+A report may only read, and that is refused three times over: by the checker
+while it is being written, by the compiler before the query can reach a seed
+file, and by each runtime before it executes.
+
+**Join on the keys directly — `ON c.account_id = p.id`.** Both columns are
+`UUID` in both stacks. A `::text` cast was needed while the browser stack typed
+a foreign key as `VARCHAR`; it is not any more, and a cast left in is now what
+breaks the query.
+
+```
+%%report unassigned-jobs title: Jobs with no engineer help: The dispatcher's first question every morning. sql: SELECT reference, scheduled_for FROM bus_job WHERE engineer_id IS NULL AND status = 'scheduled' AND deleted_at IS NULL ORDER BY scheduled_for
+```
+
+**Do not tell a user a directive "will do X" without checking its status.**
+`%%entity Order audited: true` is validated but not compiled: it will not make
+the table audited today. `%%entity Order help: …` on the same entity *is*
+compiled, and reaches the screen.
+
+`%%meta` keys: `name` (required), `kind` (`erd` / `rules` / `workflow`),
+`version`, `entity`, `stack`.
+
+Two of them are misread often enough to be worth stating plainly:
+
+- **`version` is your model's version, not the language's.** `1.0.0` on a first
+  delivery. Writing the EML version here says the model has been revised
+  1.2.0 times.
+- **`stack` names the technology the application is generated onto**, and it has
+  exactly two legal values: `tanstack-start-nestjs` and `openui5-odatav4`.
+  Anything else is `EML003`. It is not a place for the language version or the
+  product name — and if you have no reason to choose, leave the key out.

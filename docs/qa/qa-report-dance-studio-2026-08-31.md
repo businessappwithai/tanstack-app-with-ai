@@ -306,7 +306,7 @@ puts that group second rather than last.
 
 ## Verification
 
-One clean CLI run, generation through tests, on bun 1.3.11 / linux-x64 /
+One clean CLI run, generation through tests, on linux-x64 /
 PostgreSQL 16.13:
 
 | Check | Result |

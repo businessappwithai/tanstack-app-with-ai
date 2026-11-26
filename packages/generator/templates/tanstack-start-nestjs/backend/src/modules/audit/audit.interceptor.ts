@@ -2,7 +2,6 @@ import {
   type CallHandler,
   type ExecutionContext,
   Injectable,
-  Logger,
   type NestInterceptor,
 } from "@nestjs/common";
 import { type Observable, throwError } from "rxjs";
@@ -117,7 +116,6 @@ function recordOnly(value: unknown): Record<string, unknown> | null {
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
-  private readonly logger = new Logger(AuditInterceptor.name);
 
   constructor(private readonly auditService: AuditService) {}
 

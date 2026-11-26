@@ -62,6 +62,9 @@ erDiagram
     %%field InvoiceLine.description help: What is being charged for, in the words the customer will read on the document. Specific enough that they can approve it without asking.
     %%field InvoiceLine.amount help: What this line adds to the invoice, before tax. The invoice total is what these come to, so a line changed after issue changes what is owed.
     %%category name: Billing; entities: Customer, Invoice
+    %%section entity: Customer; name: Customer; help: Who is billed, under the name the invoice is addressed to.; rows: name
+    %%section entity: Invoice; name: Invoice; help: Which demand this is and whom it is made of.; rows: reference, customer_id
+    %%section entity: InvoiceLine; name: Charge; help: What one line of the invoice charges for, and how much.; rows: invoice_id | description, amount
 `;
 
 function dictionaryFor(source: string) {
@@ -187,7 +190,7 @@ erDiagram
 
   it("arranges the same way when the child is declared before its parent", () => {
     const reordered = MODEL.replace(
-      /    Invoice \{[\s\S]*?\n    \}\n(    InvoiceLine \{[\s\S]*?\n    \}\n)/,
+      / {4}Invoice \{[\s\S]*?\n {4}\}\n( {4}InvoiceLine \{[\s\S]*?\n {4}\}\n)/,
       (_match, line: string) =>
         `${line}    Invoice {\n        string id PK\n        string reference\n        string customer_id FK\n    }\n`
     );

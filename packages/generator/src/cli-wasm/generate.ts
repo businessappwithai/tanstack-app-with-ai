@@ -14,9 +14,10 @@
  *   appwithai-wasm serve ./app                # run it, open a browser
  *   appwithai-wasm inspect model.eml.mmd      # what would be generated
  *
- * PGlite is ~17MB of WebAssembly. `--vendor-pglite` copies it into the output
- * so the application needs no network at all; without it the app loads PGlite
- * from a CDN on first run and caches it.
+ * PGlite is ~17MB of WebAssembly, and the standalone application carries its
+ * own copy in `vendor/pglite/` — never a CDN. `--pglite-url` points it at a
+ * copy you host instead. For the full stack, PGlite is an npm dependency of the
+ * backend, and `--vendor-pglite` copies it in as well.
  */
 
 import { spawn } from "node:child_process";
@@ -28,7 +29,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { getLogger } from "@appwithai/core/logging";
 import { Command } from "commander";
 import { DEFAULT_BACKEND_PORT, DEFAULT_FRONTEND_PORT } from "../generators/ports";
-import { DEFAULT_PGLITE_URL, generateWasmApp, type WasmGeneratedApp } from "../generators/wasm";
+import { generateWasmApp, type WasmGeneratedApp } from "../generators/wasm";
 import { applyWasmOverlay } from "../generators/wasm/overlay";
 import { generateApplication, readModelSources } from "../pipeline/generate-application";
 import { cliLogger } from "../pipeline/logger-port";
@@ -156,7 +157,10 @@ program
   .option("--admin-email <email>", "Seeded administrator's email", "admin@admin.com")
   .option("--admin-password <password>", "Seeded administrator's password", "admin")
   .option("--admin-name <name>", "Seeded administrator's display name", "admin")
-  .option("--vendor-pglite", "Copy PGlite into the output so the app needs no network")
+  .option(
+    "--vendor-pglite",
+    "Full stack: also copy PGlite into backend/vendor (the standalone app always carries it)"
+  )
   .option(
     "--standalone",
     "Emit the self-contained browser runtime instead of the full stack: no npm install, " +
@@ -165,8 +169,7 @@ program
   .option("--data-dir <dir>", "Where PostgreSQL (wasm) keeps its files", "./pgdata")
   .option(
     "--pglite-url <url>",
-    "Where the app loads PGlite from when not vendored",
-    DEFAULT_PGLITE_URL
+    "Standalone: load PGlite from a copy you host instead of carrying vendor/pglite"
   )
   .option(
     "--sample-records <n>",
@@ -350,13 +353,20 @@ program
     await writeFiles(outputDir, generated.files);
     say(`\n  Wrote ${generated.files.size} files to ${outputDir}`);
 
-    if (options.vendorPglite) {
+    // The application's database ships with it. There is no CDN to fall back
+    // to, so an application that could not be given PGlite is not finished.
+    if (options.pgliteUrl) {
+      say(`  PGlite           loaded from ${options.pgliteUrl}`);
+    } else {
       const copied = await vendorPglite(outputDir);
-      say(
-        copied
-          ? `  Vendored PGlite (${copied} files) — the application needs no network`
-          : "  ⚠ Could not find @electric-sql/pglite to vendor; the app will use the CDN"
-      );
+      if (!copied) {
+        console.error(
+          "✖ Could not find @electric-sql/pglite to copy into vendor/pglite. Install it " +
+            "(bun add @electric-sql/pglite), or pass --pglite-url with a copy you host."
+        );
+        process.exit(1);
+      }
+      say(`  Vendored PGlite (${copied} files) — the application needs no network`);
     }
 
     say(`

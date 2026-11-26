@@ -10,14 +10,19 @@
  * help text and chart axes; `/reports/:name/run` is what holds the SQL.
  */
 
-import { el, mount, spinner, empty, toast } from "../dom.js";
+import { el, mount, spinner, empty, toast, formatNumeric } from "../dom.js";
 import { api } from "../api.js";
 import { setHelp } from "../main.js";
+import { deleteButton, editorForm, openEditor } from "../editor.js";
 
-/** Render one SQL scalar as a cell. */
-function cell(value) {
+/**
+ * Render one SQL scalar as a cell. `numeric` says the column is a Postgres
+ * NUMERIC, which arrives as a string — money read `25955.7000` until this.
+ */
+function cell(value, numeric = false) {
   if (value === null || value === undefined) return "—";
   if (value instanceof Date) return value.toLocaleDateString();
+  if (numeric) return formatNumeric(value);
   if (typeof value === "number") return value.toLocaleString();
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
@@ -97,7 +102,7 @@ function chart(result) {
 }
 
 /** The answer to one question, rendered into `panel`. */
-async function runReport(panel, name) {
+async function runReport(panel, name, options = {}) {
   mount(panel, spinner("Running"));
 
   let result;
@@ -113,6 +118,7 @@ async function runReport(panel, name) {
   }
 
   const parts = [el("h2", result.report.title)];
+  if (options.user?.isAdmin && options.entities) parts.push(reportActions(panel, result.report, options));
   if (result.report.help) parts.push(el("p.muted", result.report.help));
 
   const drawn = chart(result);
@@ -140,7 +146,7 @@ async function runReport(panel, name) {
           el(
             "tbody",
             ...result.rows.map((row) =>
-              el("tr", ...result.columns.map((column) => el("td", cell(row[column]))))
+              el("tr", ...result.columns.map((column) => el("td", cell(row[column], (result.numeric ?? []).includes(column)))))
             )
           )
         )
@@ -153,7 +159,7 @@ async function runReport(panel, name) {
       "button.btn",
       {
         onclick: () => {
-          runReport(panel, name);
+          runReport(panel, name, options);
           toast("Re-running", "info");
         },
       },
@@ -164,22 +170,34 @@ async function runReport(panel, name) {
   mount(panel, ...parts);
 }
 
-export async function reportsView(root) {
+export async function reportsView(root, { user } = {}) {
   mount(root, spinner("Loading reports"));
   setHelp(
     "Each of these is a question the model's author wrote into the document with %%report, " +
       "together with the query that answers it. They run against this application's own " +
-      "database, so the answers change as you use it."
+      "database, so the answers change as you use it." +
+      (user?.isAdmin
+        ? " They are rows in sys_report, so you can add a question of your own, change one, or " +
+          "retire it — a report may only ever read, and the query is refused if it does anything else."
+        : "")
   );
 
-  const reports = await api.get("/reports");
+  const [reports, model] = await Promise.all([api.get("/reports"), api.get("/model")]);
+  const entities = (model.entities || []).map((entity) => entity.name).sort();
+  const reload = () => reportsView(root, { user });
 
   if (reports.length === 0) {
     return void mount(
       root,
-      empty(
-        "This model declares no reports",
-        "Add a %%report directive to the model — a title, the entity it is about, and the SQL that answers it — and regenerate."
+      el(
+        "div",
+        user?.isAdmin ? newReportButton(root, entities, reload) : null,
+        empty(
+          "This model declares no reports",
+          user?.isAdmin
+            ? "Add a %%report directive to the model and regenerate — or write one here."
+            : "Add a %%report directive to the model — a title, the entity it is about, and the SQL that answers it — and regenerate."
+        )
       )
     );
   }
@@ -215,7 +233,7 @@ export async function reportsView(root) {
                       active.classList.remove("is-active");
                     }
                     event.currentTarget.classList.add("is-active");
-                    runReport(panel, report.name);
+                    runReport(panel, report.name, { user, entities, reload });
                   },
                 },
                 report.title
@@ -227,5 +245,143 @@ export async function reportsView(root) {
     )
   );
 
-  mount(root, el("div.report-layout", list, panel));
+  mount(
+    root,
+    el(
+      "div",
+      user?.isAdmin ? newReportButton(root, entities, reload) : null,
+      el("div.report-layout", list, panel)
+    )
+  );
+}
+
+/**
+ * Write a question the model's author did not.
+ *
+ * The form opens in the results panel rather than above the list, because on a
+ * model with a hundred and eighty reports a form at the top is a form the
+ * reader scrolls away from.
+ */
+function newReportButton(root, entities, reload) {
+  return el(
+    "button.btn.btn--primary.btn--small",
+    {
+      onclick: () => {
+        const host = root.querySelector(".report-panel") ?? root;
+        openEditor(
+          host,
+          editorForm({
+            title: "New report",
+            lede:
+              "A report may only read. A statement that writes, or a second statement behind a semicolon, is refused here and again every time the report runs.",
+            fields: reportFields(entities),
+            values: { sql: "SELECT 1 AS example" },
+            saveLabel: "Create report",
+            onSave: async (values) => {
+              await api.post("/reports", values);
+              toast("Report created", "success");
+              await reload();
+            },
+            onCancel: () => reload(),
+          })
+        );
+      },
+    },
+    "New report"
+  );
+}
+
+/**
+ * The fields a report has.
+ *
+ * `chart` offers an empty option because most reports are tables — and because
+ * the route refuses a chart without both axes, so "bar" with nothing else
+ * filled in is a refusal rather than a default.
+ */
+function reportFields(entities) {
+  return [
+    {
+      name: "name",
+      label: "Name",
+      required: true,
+      hint: "The report's handle in a URL — letters, digits and hyphens.",
+    },
+    { name: "title", label: "Title", required: true, hint: "The question, as somebody would ask it." },
+    { name: "entity", label: "About", type: "select", options: ["", ...entities], hint: "Which entity this is a question about. Leave empty for a cross-cutting one." },
+    { name: "help", label: "Why it is asked", hint: "Who asks this and what they do with the answer." },
+    {
+      name: "chart",
+      label: "Chart",
+      type: "select",
+      options: [
+        { value: "", label: "None — show a table" },
+        "bar",
+        "line",
+        "pie",
+        "area",
+      ],
+    },
+    { name: "x", label: "Chart: x axis", hint: "A column the query returns." },
+    { name: "y", label: "Chart: y axis", hint: "A column the query returns." },
+    { name: "sortOrder", label: "Sort order", type: "number" },
+    { name: "isActive", label: "Active", type: "checkbox" },
+    {
+      name: "sql",
+      label: "Query",
+      type: "textarea",
+      rows: 12,
+      required: true,
+      hint: "A single SELECT or WITH statement.",
+    },
+  ];
+}
+
+/**
+ * Edit and delete, beside the answer rather than beside the title in the list.
+ *
+ * A reader decides a report is wrong by looking at what it returned, so the
+ * controls belong where they have just read it. Editing fetches the report
+ * again first: the list carries no `sql` — `GET /reports/:name` hands the
+ * statement to an administrator and the metadata to everyone else — so the form
+ * would otherwise open with an empty query and save it over a working one.
+ */
+function reportActions(panel, report, { user, entities, reload }) {
+  return el(
+    "div.report-actions",
+    el(
+      "button.btn.btn--small",
+      {
+        onclick: async () => {
+          let full;
+          try {
+            full = await api.get(`/reports/${encodeURIComponent(report.name)}`);
+          } catch (error) {
+            return void toast(error.message, "error");
+          }
+          openEditor(
+            panel,
+            editorForm({
+              title: `Edit ${report.name}`,
+              fields: reportFields(entities),
+              values: full,
+              onSave: async (values) => {
+                await api.patch(`/reports/${encodeURIComponent(report.name)}`, values);
+                toast("Report saved", "success");
+                await reload();
+              },
+              /* Cancel returns to the answer rather than to the list: the
+                 reader was reading it a moment ago. */
+              onCancel: () => runReport(panel, report.name, { user, entities, reload }),
+            })
+          );
+        },
+      },
+      "Edit"
+    ),
+    deleteButton("Delete", `Delete ${report.name}?`, async () => {
+      await api.delete(`/reports/${encodeURIComponent(report.name)}`);
+      toast(`${report.name} deleted`, "success");
+      await reload();
+    })
+  );
 }

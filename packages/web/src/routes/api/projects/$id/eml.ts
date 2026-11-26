@@ -68,7 +68,7 @@ export const Route = createFileRoute("/api/projects/$id/eml")({
           const access = await requireProjectAccess(request, params.id, "read_write");
           if (access.response) return access.response;
 
-          const { erdVersionDb, projectDb } = await import("@appwithai/core/services");
+          const { projectDb } = await import("@appwithai/core/services");
           const { mergeSections, extractRuleSections, extractWorkflowSections, parseModel } =
             await import("@appwithai/generator");
 
@@ -98,18 +98,27 @@ export const Route = createFileRoute("/api/projects/$id/eml")({
             ? (body.workflows as ReturnType<typeof extractWorkflowSections>)
             : extractWorkflowSections(existing);
 
+          const { sectionProblems } = await import("@appwithai/editors/lib/eml/section-problems");
+          const problems = sectionProblems(
+            Array.isArray(body.rules) ? rules : [],
+            Array.isArray(body.workflows) ? workflows : []
+          );
+          if (problems.length > 0) {
+            return json({ error: problems.map((p) => p.message).join(" "), problems }, 400);
+          }
+
           const eml = mergeSections(existing, { rules, workflows });
 
           // The model is versioned, so editing rules leaves the previous document
           // recoverable rather than overwriting it in place.
           const model = parseModel(eml);
-          await erdVersionDb.createVersion({
-            project_id: params.id,
-            mermaid_code: eml,
-            is_current: true,
-            description: "Rules and workflows updated from the design phase",
-            entity_count: model.entities.length,
-            relationship_count: model.relationships.length,
+          const { saveProject } = await import("@/lib/server/project-repository");
+          await saveProject(params.id, access.user.id, {
+            model: eml,
+            mode: "version",
+            description: `Rules and workflows updated (${model.entities.length} entities)`,
+            expectedCommit: project.gitCommit,
+            requestId: request.headers.get("Idempotency-Key") ?? undefined,
           });
 
           // Re-embed so the assistant answers from what was just saved rather

@@ -36,7 +36,7 @@ Available gstack skills:
 
 **Project**: APPWITHAI - AI-Powered Entity Relationship Design & Code Generation Platform
 **Version**: 5.1.0
-**Runtime**: Bun.js 1.3+
+**Runtime**: Bun.js 1.4.4+
 **Node**: v20+ compatible
 
 ---
@@ -80,7 +80,7 @@ APPWITHAI transforms natural language descriptions into production-ready full-st
 
 | Layer | Technology |
 |-------|------------|
-| Runtime | Bun.js 1.3+ |
+| Runtime | Bun.js 1.4.4+ |
 | AI Orchestration | Mastra.ai v1.10+, CopilotKit v1.53+ |
 | AI Model | Anthropic Claude (claude-sonnet-4-20250514) |
 | Frontend | TanStack Start 1+, Vite 5+, React 18+, Shadcn UI, TailwindCSS, Zustand |

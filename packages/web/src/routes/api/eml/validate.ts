@@ -7,9 +7,11 @@
  * not a model at all, rather than discovering it on the design page with an
  * empty canvas and no explanation.
  *
- * This reads the document; it does not run the full checker. The generator does
- * that at generate time, where a diagnostic can name a line and refuse to
- * proceed. Here the question is narrower: is this a model, and what is in it.
+ * It also runs the checker — `language/checker.ts`, the engine behind
+ * `bun language/checker.ts` and the published `checker.js` — without repairing
+ * anything, so the Design page's Validate reports the same errors, warnings and
+ * notes generation will. `ok` stays about whether the document is a model at all:
+ * generation repairs the auto-fixable errors itself, so they do not block an import.
  */
 
 import { createFileRoute } from "@tanstack/react-router";
@@ -30,6 +32,15 @@ export interface EmlSummary {
   workflows: { name: string; entity: string; kind: string }[];
   /** Reasons the document cannot be used as it stands. */
   problems: string[];
+  /** What the checker reports, worst first; absent when the checker itself failed. */
+  check?: {
+    errors: number;
+    warnings: number;
+    infos: number;
+    issues: { severity: string; code: string; message: string; line?: number; hint?: string }[];
+  };
+  /** Why `check` is absent. It never blocks an import: generation checks again. */
+  checkFailure?: string;
 }
 
 export const Route = createFileRoute("/api/eml/validate")({
@@ -54,9 +65,8 @@ export const Route = createFileRoute("/api/eml/validate")({
             } satisfies EmlSummary);
           }
 
-          const { parseModel, extractRuleSections, extractWorkflowSections } = await import(
-            "@appwithai/generator"
-          );
+          const { parseModel, extractRuleSections, extractWorkflowSections, reviewModel } =
+            await import("@appwithai/generator");
 
           const problems: string[] = [];
           let entities: string[] = [];
@@ -87,6 +97,24 @@ export const Route = createFileRoute("/api/eml/validate")({
             kind: workflow.kind,
           }));
 
+          let check: EmlSummary["check"];
+          let checkFailure: string | undefined;
+          try {
+            const review = reviewModel(eml, { autoFix: false });
+            check = {
+              ...review.counts,
+              issues: review.issues.map(({ severity, code, message, line, hint }) => ({
+                severity,
+                code,
+                message,
+                line,
+                hint,
+              })),
+            };
+          } catch (checkError) {
+            checkFailure = checkError instanceof Error ? checkError.message : "Unknown error";
+          }
+
           return json({
             ok: problems.length === 0,
             entities,
@@ -94,6 +122,8 @@ export const Route = createFileRoute("/api/eml/validate")({
             rules,
             workflows,
             problems,
+            check,
+            checkFailure,
           } satisfies EmlSummary);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown error";

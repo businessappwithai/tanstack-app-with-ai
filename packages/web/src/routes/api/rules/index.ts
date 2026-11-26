@@ -77,7 +77,9 @@ export const Route = createFileRoute("/api/rules/")({
           // Accepts both shapes: the decision table the rule table editor writes,
           // and the older decision graph. Validating only the graph shape is what
           // stopped the table editor being able to save at all.
-          const { validateStoredRuleContent } = await import("@/lib/automation/rule-content");
+          const { validateStoredRuleContent } = await import(
+            "@appwithai/editors/lib/automation/rule-content"
+          );
           const errors = validateStoredRuleContent(jdmContent);
 
           if (errors.length > 0) {

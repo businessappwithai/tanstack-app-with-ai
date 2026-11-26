@@ -1,7 +1,7 @@
 import { RecordLoadError } from "./record-load-error";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Home, Plus, Search, X } from "lucide-react";
+import { Home, Inbox, Plus, Search, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { DynamicForm } from "@/components/forms/dynamic-form";
@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FieldMetadata } from "@/hooks/use-entities";
 import { apiClient, type PaginatedResponse } from "@/lib/api-client";
+import { lifecycleOf } from "@/lib/lifecycle";
+import { pluralLabel } from "@/lib/plural-label";
+import { useLifecycles } from "@/lib/use-lifecycles";
 import { ADToolbar } from "./ad-toolbar";
 import {
   type ADLevel,
@@ -30,19 +33,6 @@ interface FilterRow {
   column: string;
   operator: string;
   value: string;
-}
-
-function pluralLabel(label: string): string {
-  if (label.endsWith("y") && !/[aeiou]y$/i.test(label)) return label.slice(0, -1) + "ies";
-  if (
-    label.endsWith("s") ||
-    label.endsWith("sh") ||
-    label.endsWith("ch") ||
-    label.endsWith("x") ||
-    label.endsWith("z")
-  )
-    return label + "es";
-  return label + "s";
 }
 
 const FILTER_OPERATORS = {
@@ -330,6 +320,11 @@ export function ADListShell({
   const [pendingRows, setPendingRows] = useState<FilterRow[]>([]);
   const [appliedRows, setAppliedRows] = useState<FilterRow[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+  // "Waiting for me": records in a status this person has a move out of,
+  // assigned to them or to no one. Offered only where there is a flow to wait in.
+  const [waitingForMe, setWaitingForMe] = useState(false);
+  useLifecycles();
+  const hasFlow = !!lifecycleOf(helpTableNameFromEndpoint(level.endpoint))?.hasMachine;
   const [createErrors, setCreateErrors] = useState<string[]>([]);
 
   // Fetch each parent record's display name for the breadcrumb.
@@ -369,6 +364,7 @@ export function ADListShell({
       fetchParams[`filter.${row.column}`] = `${row.operator}:${row.value}`;
     }
   }
+  if (hasFlow && waitingForMe) fetchParams.awaiting = "me";
 
   // Filters without the paging — what the CSV export sends, so the download is
   // the list on screen rather than the whole table.
@@ -421,6 +417,7 @@ export function ADListShell({
 
   return (
     <div className="flex flex-col h-full">
+      <h1 className="sr-only">{pluralLabel(level.label)}</h1>
       <ADToolbar
         onNew={
           viewOnly
@@ -504,6 +501,22 @@ export function ADListShell({
           tableName={helpTableNameFromEndpoint(level.endpoint)}
           entityLabel={level.label}
         />
+        {hasFlow && (
+          <Button
+            size="sm"
+            variant={waitingForMe ? "default" : "outline"}
+            className="ml-auto h-7 gap-1 text-xs"
+            aria-pressed={waitingForMe}
+            data-testid="waiting-for-me"
+            onClick={() => {
+              setWaitingForMe((on) => !on);
+              setPage(1);
+            }}
+          >
+            <Inbox className="h-3.5 w-3.5" />
+            Waiting for me
+          </Button>
+        )}
       </div>
 
       {/* Content */}

@@ -1,0 +1,21 @@
+/**
+ * Room for a workflow bound to a status.
+ *
+ * `operation` was varchar(20), enough for CREATE, UPDATE, DELETE and ALL. A workflow
+ * bound to the move into a status is stored as `ENTER:<STATE>` (and a move's own event
+ * as `TRANSITION:<EVENT>`), which the workflow runner selects on when a button moves a
+ * record; most state names do not fit in 20 characters.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { Kysely, sql } from 'kysely';
+
+export async function up(db: Kysely<any>): Promise<void> {
+  await sql`ALTER TABLE sys_workflow_definitions ALTER COLUMN operation TYPE varchar(100)`.execute(db);
+}
+
+export async function down(_db: Kysely<any>): Promise<void> {
+  // Narrowing the column again would truncate a binding; the wider one stays.
+}

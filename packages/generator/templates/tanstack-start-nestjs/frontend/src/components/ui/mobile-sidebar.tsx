@@ -22,14 +22,16 @@ export function MobileSidebar({ open, onOpenChange, children }: MobileSidebarPro
             "data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left",
             "duration-200 md:hidden"
           )}
-          aria-label="Navigation menu"
+          aria-describedby={undefined}
         >
+          {/* A dialog must be named; Radix reports one without a Title as an error. */}
+          <DialogPrimitive.Title className="sr-only">Navigation menu</DialogPrimitive.Title>
           <div className="flex flex-col h-full overflow-y-auto">{children}</div>
           <DialogPrimitive.Close asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-2 top-2 h-8 w-8"
+              className="absolute right-2 top-4 h-8 w-8"
               aria-label="Close navigation"
             >
               <X className="h-4 w-4" />

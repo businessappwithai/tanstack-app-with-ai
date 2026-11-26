@@ -93,6 +93,32 @@ export const modelEnums: ModelEnum[] = [
 {{/each}}
 ];
 
+/**
+ * A condition under which the model's own rules refuse a write — the `when:` of
+ * every `%%action validation-error`, whichever operation the rule is bound to.
+ *
+ * The factory invents values, and a model that says `status == "completed" and
+ * final_grade == null` is refused will refuse a quarter of the records it draws.
+ * Keeping a drawn record clear of these is the factory's job, not the model's.
+ */
+export interface Refusal {
+  tableName: string;
+  when: string;
+}
+
+export const refusals: Refusal[] = [
+{{#each refusals}}
+  { tableName: "{{tableName}}", when: {{{json when}}} },
+{{/each}}
+];
+
+/** A column a `transform` rule overwrites after a write — never a probe's home. */
+export const transforms: Array<{ tableName: string; column: string }> = [
+{{#each transforms}}
+  { tableName: "{{tableName}}", column: "{{column}}" },
+{{/each}}
+];
+
 export const stateMachines: StateMachine[] = [
 {{#each stateMachines}}
   {

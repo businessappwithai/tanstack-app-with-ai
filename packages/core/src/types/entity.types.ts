@@ -36,6 +36,16 @@ export interface EntityAttribute {
    * one is what turns a modelled enum into a select instead of a text box.
    */
   enumReferenceId?: number;
+  /**
+   * Compiere's field logic, from `%%field <E>.<c> display: | readonly: |
+   * mandatory: <logic>` — `@column@=value` conditions over the record being
+   * edited, joined by `&` and `|` (language/field-logic.ts is the one reading).
+   * Display logic lands on `sys_field.display_logic`; read-only and mandatory
+   * logic on both `sys_column` and `sys_field`.
+   */
+  displayLogic?: string;
+  readOnlyLogic?: string;
+  mandatoryLogic?: string;
 }
 
 /** A `%%enum Name: a, b, c` declaration, with the reference id it was given. */
@@ -94,6 +104,21 @@ export interface Entity {
   parentEntity?: string;
   /** The child's foreign key back to `parentEntity`, resolved at parse time. */
   parentLinkColumn?: string;
+  /**
+   * `%%section` — the form's layout: headed sections of rows of one or two
+   * columns, in declaration order. Absent when the model declares none, which
+   * leaves the form one flat list in column order.
+   */
+  formSections?: EntityFormSection[];
+}
+
+/** One `%%section` of an entity's form. Mirrors `FormSection` in language/sections.ts. */
+export interface EntityFormSection {
+  name: string;
+  help?: string;
+  collapsed: boolean;
+  /** Rows in order, each one or two attribute names. */
+  rows: string[][];
 }
 
 export interface Relationship {

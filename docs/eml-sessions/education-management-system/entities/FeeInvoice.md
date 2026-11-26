@@ -19,6 +19,8 @@
 | `amount_paid` | decimal | — | How much has been received against this invoice so far. Maintained by the payment hooks, never keyed by hand — a manual adjustment here is how an invoice comes to disagree with its own payments. |
 | `balance_due` | decimal | — | What is still owed: total less payments. The payment rule reads this to refuse an overpayment, and the finance dashboard sorts by it. |
 | `cancellation_reason` | text | OPTIONAL | Why the invoice was cancelled — bursary awarded, raised in error, place never taken. Required on cancellation, because a cancelled invoice is money the school chose not to collect and every one of them is looked at. |
+| `cancelled_at` | datetime | OPTIONAL | When the move to cancelled was recorded on this fee invoice. Recording it moves a fee invoice from draft or issued to cancelled: the workflows set the status, which nobody changes by hand. |
+| `overdue_at` | datetime | OPTIONAL | When the move to overdue was recorded on this fee invoice. Recording it moves a fee invoice from issued or part paid to overdue: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -30,6 +32,7 @@
 - `AcademicTerm ||--o{ FeeInvoice` — covers *(this side carries the foreign key)*
 - `FeeInvoice ||--o{ FeeInvoiceLine` — itemised as
 - `FeeInvoice ||--o{ Payment` — settled by
+- `FeeInvoice ||--o{ Refund` — credited back by
 
 **Indexes.** `FeeInvoice(status, due_on)` · `FeeInvoice(student_id, academic_term_id)`
 
@@ -50,7 +53,9 @@ part_paid --> paid      : settle
 part_paid --> overdue   : mark_overdue
 overdue   --> part_paid : record_part_payment
 overdue   --> paid      : settle
-paid      --> [*]
+paid      --> part_paid : reopen_after_refund
+paid      --> issued    : reissue_after_refund
+part_paid --> issued    : reissue_after_refund
 cancelled --> [*]
 ```
 
@@ -59,7 +64,15 @@ cancelled --> [*]
 ### `invoiceControl` on `beforeUpdate` — **`%%action` decision table — it can act**
 
 - `requireInvoiceCancellationReason validation-error when: status == "cancelled" and cancellation_reason == null message: A cancelled invoice is money the school chose not to collect — every one of them needs a reason.`
+- `requireInvoiceCancellationReasonOnMove validation-error when: cancelled_at != null and cancellation_reason == null message: A cancelled invoice is money the school chose not to collect — every one of them needs a reason.`
 - `requireIssueDate validation-error when: status == "issued" and issued_on == null message: An issued invoice needs its issue date — the due date and every reminder are measured from it.`
+
+### `feeInvoiceStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `moveDraftToCancelled trigger-workflow when: status == "draft" and cancelled_at != null workflow: FeeInvoiceCancelledMove`
+- `moveIssuedToOverdue trigger-workflow when: status == "issued" and overdue_at != null workflow: FeeInvoiceOverdueMove`
+- `moveIssuedToCancelled trigger-workflow when: status == "issued" and cancelled_at != null workflow: FeeInvoiceCancelledMove`
+- `movePartPaidToOverdue trigger-workflow when: status == "part_paid" and overdue_at != null workflow: FeeInvoiceOverdueMove`
 
 ## Hooks
 
@@ -67,7 +80,7 @@ None.
 
 ## Cross-entity effects
 
-Its totals are written by the `FeeInvoiceLine` and `Payment` hooks, never keyed; its status is moved by the two payment sagas. `mark_overdue` is a scheduled move rather than a rule — a rule cannot read the clock — and it is called out here so nobody expects the transition to fire itself.
+Its totals are written by the `FeeInvoiceLine`, `Payment` and `Refund` hooks, never keyed; its status is moved by the two payment sagas and the two refund sagas, and a paid invoice is no longer terminal — a paid refund can reopen it. `mark_overdue` is a scheduled move rather than a rule — a rule cannot read the clock — and it is called out here so nobody expects the transition to fire itself.
 
 Sagas that touch it:
 
@@ -76,9 +89,17 @@ Sagas that touch it:
   - `C UpdateEntity field: student_id source: newStudentId`
   - `D CreateEntity entity: FeeInvoice as: newInvoiceId fields: {"student_id":"newStudentId","academic_term_id":"academic_term_id","status":"draft","total_amount":0,"amount_paid":0,"balance_due":0}`
 - **InvoiceSettlement**
-  - `B UpdateEntity entity: FeeInvoice targetField: fee_invoice_id field: status value: paid`
+  - `B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: paid`
 - **PartPaymentPosting**
-  - `B UpdateEntity entity: FeeInvoice targetField: fee_invoice_id field: status value: part_paid`
+  - `B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: part_paid`
+- **RefundReopensInvoice**
+  - `B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: part_paid`
+- **RefundReissuesInvoice**
+  - `B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: issued`
+- **FeeInvoiceCancelledMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: cancelled`
+- **FeeInvoiceOverdueMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: overdue`
 
 ## Access
 
@@ -87,8 +108,6 @@ Sagas that touch it:
 | `read` | principal · finance_officer · registrar · guardian |
 | `create` | finance_officer |
 | `update` | finance_officer |
-| `issue` | finance_officer |
-| `cancel_issued` | principal · finance_officer |
 
 ## Open questions
 

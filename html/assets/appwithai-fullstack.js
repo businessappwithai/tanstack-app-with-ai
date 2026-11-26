@@ -32,7 +32,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -76,7 +76,17 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+var __esm = (fn, res, err) => () => {
+  if (fn)
+    try {
+      res = fn(fn = 0);
+    } catch (e) {
+      err = [e];
+    }
+  if (err)
+    throw err[0];
+  return res;
+};
 
 // packages/generator/src/browser/memory-fs.ts
 var exports_memory_fs = {};
@@ -480,7 +490,7 @@ var require_utils = __commonJS(function(exports) {
   }
   var toString = Object.prototype.toString;
   exports.toString = toString;
-  var isFunction = function isFunction2(value) {
+  var isFunction = function isFunction(value) {
     return typeof value === "function";
   };
   if (isFunction(/x/)) {
@@ -591,7 +601,7 @@ var require_block_helper_missing = __commonJS(function(exports, module) {
   var _utils = require_utils();
   exports.default = function(instance) {
     instance.registerHelper("blockHelperMissing", function(context, options) {
-      var { inverse, fn } = options;
+      var inverse = options.inverse, fn = options.fn;
       if (context === true) {
         return fn(this);
       } else if (context === false || context == null) {
@@ -878,12 +888,12 @@ var require_inline = __commonJS(function(exports, module) {
       var ret = fn;
       if (!props.partials) {
         props.partials = {};
-        ret = function(context, options2) {
+        ret = function(context, options) {
           var original = container.partials;
           container.partials = _utils.extend({}, original, props.partials);
-          var ret2 = fn(context, options2);
+          var ret = fn(context, options);
           container.partials = original;
-          return ret2;
+          return ret;
         };
       }
       props.partials[options.args[0]] = options.fn;
@@ -1042,7 +1052,7 @@ var require_base = __commonJS(function(exports) {
     8: ">= 4.3.0"
   };
   exports.REVISION_CHANGES = REVISION_CHANGES;
-  var objectType2 = "[object Object]";
+  var objectType = "[object Object]";
   function HandlebarsEnvironment(helpers, partials, decorators) {
     this.helpers = helpers || {};
     this.partials = partials || {};
@@ -1055,7 +1065,7 @@ var require_base = __commonJS(function(exports) {
     logger: _logger2["default"],
     log: _logger2["default"].log,
     registerHelper: function registerHelper(name, fn) {
-      if (_utils.toString.call(name) === objectType2) {
+      if (_utils.toString.call(name) === objectType) {
         if (fn) {
           throw new _exception2["default"]("Arg not supported with multiple helpers");
         }
@@ -1068,7 +1078,7 @@ var require_base = __commonJS(function(exports) {
       delete this.helpers[name];
     },
     registerPartial: function registerPartial(name, partial) {
-      if (_utils.toString.call(name) === objectType2) {
+      if (_utils.toString.call(name) === objectType) {
         _utils.extend(this.partials, name);
       } else {
         if (typeof partial === "undefined") {
@@ -1081,7 +1091,7 @@ var require_base = __commonJS(function(exports) {
       delete this.partials[name];
     },
     registerDecorator: function registerDecorator(name, fn) {
-      if (_utils.toString.call(name) === objectType2) {
+      if (_utils.toString.call(name) === objectType) {
         if (fn) {
           throw new _exception2["default"]("Arg not supported with multiple decorators");
         }
@@ -1124,7 +1134,7 @@ var require_wrapHelper = __commonJS(function(exports) {
     if (typeof helper !== "function") {
       return helper;
     }
-    var wrapper = function wrapper2() {
+    var wrapper = function wrapper() {
       var options = arguments[arguments.length - 1];
       arguments[arguments.length - 1] = transformOptionsFn(options);
       return helper.apply(this, arguments);
@@ -1260,9 +1270,9 @@ var require_runtime = __commonJS(function(exports) {
       escapeExpression: Utils.escapeExpression,
       invokePartial: invokePartialWrapper,
       fn: function fn(i) {
-        var ret2 = templateSpec[i];
-        ret2.decorator = templateSpec[i + "_d"];
-        return ret2;
+        var ret = templateSpec[i];
+        ret.decorator = templateSpec[i + "_d"];
+        return ret;
       },
       programs: [],
       program: function program(i, data, declaredBlockParams, blockParams, depths) {
@@ -1306,8 +1316,8 @@ var require_runtime = __commonJS(function(exports) {
           depths = [context];
         }
       }
-      function main(context2) {
-        return "" + templateSpec.main(container, context2, container.helpers, container.partials, data, blockParams, depths);
+      function main(context) {
+        return "" + templateSpec.main(container, context, container.helpers, container.partials, data, blockParams, depths);
       }
       main = executeDecorators(templateSpec.main, main, container, options.depths || [], data, blockParams);
       return main(context, options);
@@ -1388,11 +1398,11 @@ var require_runtime = __commonJS(function(exports) {
       (function() {
         options.data = _base.createFrame(options.data);
         var fn = options.fn;
-        partialBlock = options.data["partial-block"] = function partialBlockWrapper(context2) {
-          var options2 = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
-          options2.data = _base.createFrame(options2.data);
-          options2.data["partial-block"] = currentPartialBlock;
-          return fn(context2, options2);
+        partialBlock = options.data["partial-block"] = function partialBlockWrapper(context) {
+          var options = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
+          options.data = _base.createFrame(options.data);
+          options.data["partial-block"] = currentPartialBlock;
+          return fn(context, options);
         };
         if (fn.partials) {
           options.partials = Utils.extend({}, options.partials, fn.partials);
@@ -1913,7 +1923,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
       }
     };
     var lexer = function() {
-      var lexer2 = {
+      var lexer = {
         EOF: 1,
         parseError: function parseError(str, hash) {
           if (this.yy.parser) {
@@ -2080,8 +2090,8 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
           this.begin(condition);
         }
       };
-      lexer2.options = {};
-      lexer2.performAction = function anonymous(yy, yy_, $avoiding_name_collisions, YY_START) {
+      lexer.options = {};
+      lexer.performAction = function anonymous(yy, yy_, $avoiding_name_collisions, YY_START) {
         function strip(start, end) {
           return yy_.yytext = yy_.yytext.substring(start, yy_.yyleng - end + start);
         }
@@ -2254,9 +2264,9 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
             break;
         }
       };
-      lexer2.rules = [/^(?:[^\x00]*?(?=(\{\{)))/, /^(?:[^\x00]+)/, /^(?:[^\x00]{2,}?(?=(\{\{|\\\{\{|\\\\\{\{|$)))/, /^(?:\{\{\{\{(?=[^\/]))/, /^(?:\{\{\{\{\/[^\s!"#%-,\.\/;->@\[-\^`\{-~]+(?=[=}\s\/.])\}\}\}\})/, /^(?:[^\x00]+?(?=(\{\{\{\{)))/, /^(?:[\s\S]*?--(~)?\}\})/, /^(?:\()/, /^(?:\))/, /^(?:\{\{\{\{)/, /^(?:\}\}\}\})/, /^(?:\{\{(~)?>)/, /^(?:\{\{(~)?#>)/, /^(?:\{\{(~)?#\*?)/, /^(?:\{\{(~)?\/)/, /^(?:\{\{(~)?\^\s*(~)?\}\})/, /^(?:\{\{(~)?\s*else\s*(~)?\}\})/, /^(?:\{\{(~)?\^)/, /^(?:\{\{(~)?\s*else\b)/, /^(?:\{\{(~)?\{)/, /^(?:\{\{(~)?&)/, /^(?:\{\{(~)?!--)/, /^(?:\{\{(~)?![\s\S]*?\}\})/, /^(?:\{\{(~)?\*?)/, /^(?:=)/, /^(?:\.\.)/, /^(?:\.(?=([=~}\s\/.)|])))/, /^(?:[\/.])/, /^(?:\s+)/, /^(?:\}(~)?\}\})/, /^(?:(~)?\}\})/, /^(?:"(\\["]|[^"])*")/, /^(?:'(\\[']|[^'])*')/, /^(?:@)/, /^(?:true(?=([~}\s)])))/, /^(?:false(?=([~}\s)])))/, /^(?:undefined(?=([~}\s)])))/, /^(?:null(?=([~}\s)])))/, /^(?:-?[0-9]+(?:\.[0-9]+)?(?=([~}\s)])))/, /^(?:as\s+\|)/, /^(?:\|)/, /^(?:([^\s!"#%-,\.\/;->@\[-\^`\{-~]+(?=([=~}\s\/.)|]))))/, /^(?:\[(\\\]|[^\]])*\])/, /^(?:.)/, /^(?:$)/];
-      lexer2.conditions = { mu: { rules: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44], inclusive: false }, emu: { rules: [2], inclusive: false }, com: { rules: [6], inclusive: false }, raw: { rules: [3, 4, 5], inclusive: false }, INITIAL: { rules: [0, 1, 44], inclusive: true } };
-      return lexer2;
+      lexer.rules = [/^(?:[^\x00]*?(?=(\{\{)))/, /^(?:[^\x00]+)/, /^(?:[^\x00]{2,}?(?=(\{\{|\\\{\{|\\\\\{\{|$)))/, /^(?:\{\{\{\{(?=[^\/]))/, /^(?:\{\{\{\{\/[^\s!"#%-,\.\/;->@\[-\^`\{-~]+(?=[=}\s\/.])\}\}\}\})/, /^(?:[^\x00]+?(?=(\{\{\{\{)))/, /^(?:[\s\S]*?--(~)?\}\})/, /^(?:\()/, /^(?:\))/, /^(?:\{\{\{\{)/, /^(?:\}\}\}\})/, /^(?:\{\{(~)?>)/, /^(?:\{\{(~)?#>)/, /^(?:\{\{(~)?#\*?)/, /^(?:\{\{(~)?\/)/, /^(?:\{\{(~)?\^\s*(~)?\}\})/, /^(?:\{\{(~)?\s*else\s*(~)?\}\})/, /^(?:\{\{(~)?\^)/, /^(?:\{\{(~)?\s*else\b)/, /^(?:\{\{(~)?\{)/, /^(?:\{\{(~)?&)/, /^(?:\{\{(~)?!--)/, /^(?:\{\{(~)?![\s\S]*?\}\})/, /^(?:\{\{(~)?\*?)/, /^(?:=)/, /^(?:\.\.)/, /^(?:\.(?=([=~}\s\/.)|])))/, /^(?:[\/.])/, /^(?:\s+)/, /^(?:\}(~)?\}\})/, /^(?:(~)?\}\})/, /^(?:"(\\["]|[^"])*")/, /^(?:'(\\[']|[^'])*')/, /^(?:@)/, /^(?:true(?=([~}\s)])))/, /^(?:false(?=([~}\s)])))/, /^(?:undefined(?=([~}\s)])))/, /^(?:null(?=([~}\s)])))/, /^(?:-?[0-9]+(?:\.[0-9]+)?(?=([~}\s)])))/, /^(?:as\s+\|)/, /^(?:\|)/, /^(?:([^\s!"#%-,\.\/;->@\[-\^`\{-~]+(?=([=~}\s\/.)|]))))/, /^(?:\[(\\\]|[^\]])*\])/, /^(?:.)/, /^(?:$)/];
+      lexer.conditions = { mu: { rules: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44], inclusive: false }, emu: { rules: [2], inclusive: false }, com: { rules: [6], inclusive: false }, raw: { rules: [3, 4, 5], inclusive: false }, INITIAL: { rules: [0, 1, 44], inclusive: true } };
+      return lexer;
     }();
     parser.lexer = lexer;
     function Parser() {
@@ -2843,7 +2853,7 @@ var require_compiler = __commonJS(function(exports) {
       return true;
     },
     guid: 0,
-    compile: function compile2(program, options) {
+    compile: function compile(program, options) {
       this.sourceNode = [];
       this.opcodes = [];
       this.children = [];
@@ -3362,7 +3372,7 @@ var require_util = __commonJS(function(exports) {
     return url;
   }
   exports.urlGenerate = urlGenerate;
-  function normalize2(aPath) {
+  function normalize(aPath) {
     var path = aPath;
     var url = urlParse(aPath);
     if (url) {
@@ -3371,7 +3381,7 @@ var require_util = __commonJS(function(exports) {
       }
       path = url.path;
     }
-    var isAbsolute2 = exports.isAbsolute(path);
+    var isAbsolute = exports.isAbsolute(path);
     var parts = path.split(/\/+/);
     for (var part, up = 0, i = parts.length - 1;i >= 0; i--) {
       part = parts[i];
@@ -3391,7 +3401,7 @@ var require_util = __commonJS(function(exports) {
     }
     path = parts.join("/");
     if (path === "") {
-      path = isAbsolute2 ? "/" : ".";
+      path = isAbsolute ? "/" : ".";
     }
     if (url) {
       url.path = path;
@@ -3399,8 +3409,8 @@ var require_util = __commonJS(function(exports) {
     }
     return path;
   }
-  exports.normalize = normalize2;
-  function join2(aRoot, aPath) {
+  exports.normalize = normalize;
+  function join(aRoot, aPath) {
     if (aRoot === "") {
       aRoot = ".";
     }
@@ -3425,18 +3435,18 @@ var require_util = __commonJS(function(exports) {
       aRootUrl.host = aPath;
       return urlGenerate(aRootUrl);
     }
-    var joined = aPath.charAt(0) === "/" ? aPath : normalize2(aRoot.replace(/\/+$/, "") + "/" + aPath);
+    var joined = aPath.charAt(0) === "/" ? aPath : normalize(aRoot.replace(/\/+$/, "") + "/" + aPath);
     if (aRootUrl) {
       aRootUrl.path = joined;
       return urlGenerate(aRootUrl);
     }
     return joined;
   }
-  exports.join = join2;
+  exports.join = join;
   exports.isAbsolute = function(aPath) {
     return aPath.charAt(0) === "/" || urlRegexp.test(aPath);
   };
-  function relative2(aRoot, aPath) {
+  function relative(aRoot, aPath) {
     if (aRoot === "") {
       aRoot = ".";
     }
@@ -3455,7 +3465,7 @@ var require_util = __commonJS(function(exports) {
     }
     return Array(level + 1).join("../") + aPath.substr(aRoot.length + 1);
   }
-  exports.relative = relative2;
+  exports.relative = relative;
   var supportsNullProto = function() {
     var obj = Object.create(null);
     return !("__proto__" in obj);
@@ -3605,16 +3615,16 @@ var require_util = __commonJS(function(exports) {
           parsed.path = parsed.path.substring(0, index + 1);
         }
       }
-      sourceURL = join2(urlGenerate(parsed), sourceURL);
+      sourceURL = join(urlGenerate(parsed), sourceURL);
     }
-    return normalize2(sourceURL);
+    return normalize(sourceURL);
   }
   exports.computeSourceURL = computeSourceURL;
 });
 
 // node_modules/.bun/source-map@0.6.1/node_modules/source-map/lib/array-set.js
 var require_array_set = __commonJS(function(exports) {
-  var util3 = require_util();
+  var util = require_util();
   var has = Object.prototype.hasOwnProperty;
   var hasNativeMap = typeof Map !== "undefined";
   function ArraySet() {
@@ -3632,7 +3642,7 @@ var require_array_set = __commonJS(function(exports) {
     return hasNativeMap ? this._set.size : Object.getOwnPropertyNames(this._set).length;
   };
   ArraySet.prototype.add = function ArraySet_add(aStr, aAllowDuplicates) {
-    var sStr = hasNativeMap ? aStr : util3.toSetString(aStr);
+    var sStr = hasNativeMap ? aStr : util.toSetString(aStr);
     var isDuplicate = hasNativeMap ? this.has(aStr) : has.call(this._set, sStr);
     var idx = this._array.length;
     if (!isDuplicate || aAllowDuplicates) {
@@ -3650,7 +3660,7 @@ var require_array_set = __commonJS(function(exports) {
     if (hasNativeMap) {
       return this._set.has(aStr);
     } else {
-      var sStr = util3.toSetString(aStr);
+      var sStr = util.toSetString(aStr);
       return has.call(this._set, sStr);
     }
   };
@@ -3661,7 +3671,7 @@ var require_array_set = __commonJS(function(exports) {
         return idx;
       }
     } else {
-      var sStr = util3.toSetString(aStr);
+      var sStr = util.toSetString(aStr);
       if (has.call(this._set, sStr)) {
         return this._set[sStr];
       }
@@ -3682,13 +3692,13 @@ var require_array_set = __commonJS(function(exports) {
 
 // node_modules/.bun/source-map@0.6.1/node_modules/source-map/lib/mapping-list.js
 var require_mapping_list = __commonJS(function(exports) {
-  var util3 = require_util();
+  var util = require_util();
   function generatedPositionAfter(mappingA, mappingB) {
     var lineA = mappingA.generatedLine;
     var lineB = mappingB.generatedLine;
     var columnA = mappingA.generatedColumn;
     var columnB = mappingB.generatedColumn;
-    return lineB > lineA || lineB == lineA && columnB >= columnA || util3.compareByGeneratedPositionsInflated(mappingA, mappingB) <= 0;
+    return lineB > lineA || lineB == lineA && columnB >= columnA || util.compareByGeneratedPositionsInflated(mappingA, mappingB) <= 0;
   }
   function MappingList() {
     this._array = [];
@@ -3709,7 +3719,7 @@ var require_mapping_list = __commonJS(function(exports) {
   };
   MappingList.prototype.toArray = function MappingList_toArray() {
     if (!this._sorted) {
-      this._array.sort(util3.compareByGeneratedPositionsInflated);
+      this._array.sort(util.compareByGeneratedPositionsInflated);
       this._sorted = true;
     }
     return this._array;
@@ -3720,16 +3730,16 @@ var require_mapping_list = __commonJS(function(exports) {
 // node_modules/.bun/source-map@0.6.1/node_modules/source-map/lib/source-map-generator.js
 var require_source_map_generator = __commonJS(function(exports) {
   var base64VLQ = require_base64_vlq();
-  var util3 = require_util();
+  var util = require_util();
   var ArraySet = require_array_set().ArraySet;
   var MappingList = require_mapping_list().MappingList;
   function SourceMapGenerator(aArgs) {
     if (!aArgs) {
       aArgs = {};
     }
-    this._file = util3.getArg(aArgs, "file", null);
-    this._sourceRoot = util3.getArg(aArgs, "sourceRoot", null);
-    this._skipValidation = util3.getArg(aArgs, "skipValidation", false);
+    this._file = util.getArg(aArgs, "file", null);
+    this._sourceRoot = util.getArg(aArgs, "sourceRoot", null);
+    this._skipValidation = util.getArg(aArgs, "skipValidation", false);
     this._sources = new ArraySet;
     this._names = new ArraySet;
     this._mappings = new MappingList;
@@ -3752,7 +3762,7 @@ var require_source_map_generator = __commonJS(function(exports) {
       if (mapping.source != null) {
         newMapping.source = mapping.source;
         if (sourceRoot != null) {
-          newMapping.source = util3.relative(sourceRoot, newMapping.source);
+          newMapping.source = util.relative(sourceRoot, newMapping.source);
         }
         newMapping.original = {
           line: mapping.originalLine,
@@ -3767,7 +3777,7 @@ var require_source_map_generator = __commonJS(function(exports) {
     aSourceMapConsumer.sources.forEach(function(sourceFile) {
       var sourceRelative = sourceFile;
       if (sourceRoot !== null) {
-        sourceRelative = util3.relative(sourceRoot, sourceFile);
+        sourceRelative = util.relative(sourceRoot, sourceFile);
       }
       if (!generator._sources.has(sourceRelative)) {
         generator._sources.add(sourceRelative);
@@ -3780,10 +3790,10 @@ var require_source_map_generator = __commonJS(function(exports) {
     return generator;
   };
   SourceMapGenerator.prototype.addMapping = function SourceMapGenerator_addMapping(aArgs) {
-    var generated = util3.getArg(aArgs, "generated");
-    var original = util3.getArg(aArgs, "original", null);
-    var source = util3.getArg(aArgs, "source", null);
-    var name = util3.getArg(aArgs, "name", null);
+    var generated = util.getArg(aArgs, "generated");
+    var original = util.getArg(aArgs, "original", null);
+    var source = util.getArg(aArgs, "source", null);
+    var name = util.getArg(aArgs, "name", null);
     if (!this._skipValidation) {
       this._validateMapping(generated, original, source, name);
     }
@@ -3811,15 +3821,15 @@ var require_source_map_generator = __commonJS(function(exports) {
   SourceMapGenerator.prototype.setSourceContent = function SourceMapGenerator_setSourceContent(aSourceFile, aSourceContent) {
     var source = aSourceFile;
     if (this._sourceRoot != null) {
-      source = util3.relative(this._sourceRoot, source);
+      source = util.relative(this._sourceRoot, source);
     }
     if (aSourceContent != null) {
       if (!this._sourcesContents) {
         this._sourcesContents = Object.create(null);
       }
-      this._sourcesContents[util3.toSetString(source)] = aSourceContent;
+      this._sourcesContents[util.toSetString(source)] = aSourceContent;
     } else if (this._sourcesContents) {
-      delete this._sourcesContents[util3.toSetString(source)];
+      delete this._sourcesContents[util.toSetString(source)];
       if (Object.keys(this._sourcesContents).length === 0) {
         this._sourcesContents = null;
       }
@@ -3835,7 +3845,7 @@ var require_source_map_generator = __commonJS(function(exports) {
     }
     var sourceRoot = this._sourceRoot;
     if (sourceRoot != null) {
-      sourceFile = util3.relative(sourceRoot, sourceFile);
+      sourceFile = util.relative(sourceRoot, sourceFile);
     }
     var newSources = new ArraySet;
     var newNames = new ArraySet;
@@ -3848,10 +3858,10 @@ var require_source_map_generator = __commonJS(function(exports) {
         if (original.source != null) {
           mapping.source = original.source;
           if (aSourceMapPath != null) {
-            mapping.source = util3.join(aSourceMapPath, mapping.source);
+            mapping.source = util.join(aSourceMapPath, mapping.source);
           }
           if (sourceRoot != null) {
-            mapping.source = util3.relative(sourceRoot, mapping.source);
+            mapping.source = util.relative(sourceRoot, mapping.source);
           }
           mapping.originalLine = original.line;
           mapping.originalColumn = original.column;
@@ -3871,16 +3881,16 @@ var require_source_map_generator = __commonJS(function(exports) {
     }, this);
     this._sources = newSources;
     this._names = newNames;
-    aSourceMapConsumer.sources.forEach(function(sourceFile2) {
-      var content = aSourceMapConsumer.sourceContentFor(sourceFile2);
+    aSourceMapConsumer.sources.forEach(function(sourceFile) {
+      var content = aSourceMapConsumer.sourceContentFor(sourceFile);
       if (content != null) {
         if (aSourceMapPath != null) {
-          sourceFile2 = util3.join(aSourceMapPath, sourceFile2);
+          sourceFile = util.join(aSourceMapPath, sourceFile);
         }
         if (sourceRoot != null) {
-          sourceFile2 = util3.relative(sourceRoot, sourceFile2);
+          sourceFile = util.relative(sourceRoot, sourceFile);
         }
-        this.setSourceContent(sourceFile2, content);
+        this.setSourceContent(sourceFile, content);
       }
     }, this);
   };
@@ -3925,7 +3935,7 @@ var require_source_map_generator = __commonJS(function(exports) {
         }
       } else {
         if (i > 0) {
-          if (!util3.compareByGeneratedPositionsInflated(mapping, mappings[i - 1])) {
+          if (!util.compareByGeneratedPositionsInflated(mapping, mappings[i - 1])) {
             continue;
           }
           next += ",";
@@ -3957,9 +3967,9 @@ var require_source_map_generator = __commonJS(function(exports) {
         return null;
       }
       if (aSourceRoot != null) {
-        source = util3.relative(aSourceRoot, source);
+        source = util.relative(aSourceRoot, source);
       }
-      var key = util3.toSetString(source);
+      var key = util.toSetString(source);
       return Object.prototype.hasOwnProperty.call(this._sourcesContents, key) ? this._sourcesContents[key] : null;
     }, this);
   };
@@ -4069,7 +4079,7 @@ var require_quick_sort = __commonJS(function(exports) {
 
 // node_modules/.bun/source-map@0.6.1/node_modules/source-map/lib/source-map-consumer.js
 var require_source_map_consumer = __commonJS(function(exports) {
-  var util3 = require_util();
+  var util = require_util();
   var binarySearch = require_binary_search();
   var ArraySet = require_array_set().ArraySet;
   var base64VLQ = require_base64_vlq();
@@ -4077,7 +4087,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
   function SourceMapConsumer(aSourceMap, aSourceMapURL) {
     var sourceMap = aSourceMap;
     if (typeof aSourceMap === "string") {
-      sourceMap = util3.parseSourceMapInput(aSourceMap);
+      sourceMap = util.parseSourceMapInput(aSourceMap);
     }
     return sourceMap.sections != null ? new IndexedSourceMapConsumer(sourceMap, aSourceMapURL) : new BasicSourceMapConsumer(sourceMap, aSourceMapURL);
   }
@@ -4135,7 +4145,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
     var sourceRoot = this.sourceRoot;
     mappings.map(function(mapping) {
       var source = mapping.source === null ? null : this._sources.at(mapping.source);
-      source = util3.computeSourceURL(sourceRoot, source, this._sourceMapURL);
+      source = util.computeSourceURL(sourceRoot, source, this._sourceMapURL);
       return {
         source,
         generatedLine: mapping.generatedLine,
@@ -4147,27 +4157,27 @@ var require_source_map_consumer = __commonJS(function(exports) {
     }, this).forEach(aCallback, context);
   };
   SourceMapConsumer.prototype.allGeneratedPositionsFor = function SourceMapConsumer_allGeneratedPositionsFor(aArgs) {
-    var line = util3.getArg(aArgs, "line");
+    var line = util.getArg(aArgs, "line");
     var needle = {
-      source: util3.getArg(aArgs, "source"),
+      source: util.getArg(aArgs, "source"),
       originalLine: line,
-      originalColumn: util3.getArg(aArgs, "column", 0)
+      originalColumn: util.getArg(aArgs, "column", 0)
     };
     needle.source = this._findSourceIndex(needle.source);
     if (needle.source < 0) {
       return [];
     }
     var mappings = [];
-    var index = this._findMapping(needle, this._originalMappings, "originalLine", "originalColumn", util3.compareByOriginalPositions, binarySearch.LEAST_UPPER_BOUND);
+    var index = this._findMapping(needle, this._originalMappings, "originalLine", "originalColumn", util.compareByOriginalPositions, binarySearch.LEAST_UPPER_BOUND);
     if (index >= 0) {
       var mapping = this._originalMappings[index];
       if (aArgs.column === undefined) {
         var originalLine = mapping.originalLine;
         while (mapping && mapping.originalLine === originalLine) {
           mappings.push({
-            line: util3.getArg(mapping, "generatedLine", null),
-            column: util3.getArg(mapping, "generatedColumn", null),
-            lastColumn: util3.getArg(mapping, "lastGeneratedColumn", null)
+            line: util.getArg(mapping, "generatedLine", null),
+            column: util.getArg(mapping, "generatedColumn", null),
+            lastColumn: util.getArg(mapping, "lastGeneratedColumn", null)
           });
           mapping = this._originalMappings[++index];
         }
@@ -4175,9 +4185,9 @@ var require_source_map_consumer = __commonJS(function(exports) {
         var originalColumn = mapping.originalColumn;
         while (mapping && mapping.originalLine === line && mapping.originalColumn == originalColumn) {
           mappings.push({
-            line: util3.getArg(mapping, "generatedLine", null),
-            column: util3.getArg(mapping, "generatedColumn", null),
-            lastColumn: util3.getArg(mapping, "lastGeneratedColumn", null)
+            line: util.getArg(mapping, "generatedLine", null),
+            column: util.getArg(mapping, "generatedColumn", null),
+            lastColumn: util.getArg(mapping, "lastGeneratedColumn", null)
           });
           mapping = this._originalMappings[++index];
         }
@@ -4189,28 +4199,28 @@ var require_source_map_consumer = __commonJS(function(exports) {
   function BasicSourceMapConsumer(aSourceMap, aSourceMapURL) {
     var sourceMap = aSourceMap;
     if (typeof aSourceMap === "string") {
-      sourceMap = util3.parseSourceMapInput(aSourceMap);
+      sourceMap = util.parseSourceMapInput(aSourceMap);
     }
-    var version = util3.getArg(sourceMap, "version");
-    var sources = util3.getArg(sourceMap, "sources");
-    var names = util3.getArg(sourceMap, "names", []);
-    var sourceRoot = util3.getArg(sourceMap, "sourceRoot", null);
-    var sourcesContent = util3.getArg(sourceMap, "sourcesContent", null);
-    var mappings = util3.getArg(sourceMap, "mappings");
-    var file = util3.getArg(sourceMap, "file", null);
+    var version = util.getArg(sourceMap, "version");
+    var sources = util.getArg(sourceMap, "sources");
+    var names = util.getArg(sourceMap, "names", []);
+    var sourceRoot = util.getArg(sourceMap, "sourceRoot", null);
+    var sourcesContent = util.getArg(sourceMap, "sourcesContent", null);
+    var mappings = util.getArg(sourceMap, "mappings");
+    var file = util.getArg(sourceMap, "file", null);
     if (version != this._version) {
       throw new Error("Unsupported version: " + version);
     }
     if (sourceRoot) {
-      sourceRoot = util3.normalize(sourceRoot);
+      sourceRoot = util.normalize(sourceRoot);
     }
-    sources = sources.map(String).map(util3.normalize).map(function(source) {
-      return sourceRoot && util3.isAbsolute(sourceRoot) && util3.isAbsolute(source) ? util3.relative(sourceRoot, source) : source;
+    sources = sources.map(String).map(util.normalize).map(function(source) {
+      return sourceRoot && util.isAbsolute(sourceRoot) && util.isAbsolute(source) ? util.relative(sourceRoot, source) : source;
     });
     this._names = ArraySet.fromArray(names.map(String), true);
     this._sources = ArraySet.fromArray(sources, true);
     this._absoluteSources = this._sources.toArray().map(function(s) {
-      return util3.computeSourceURL(sourceRoot, s, aSourceMapURL);
+      return util.computeSourceURL(sourceRoot, s, aSourceMapURL);
     });
     this.sourceRoot = sourceRoot;
     this.sourcesContent = sourcesContent;
@@ -4223,7 +4233,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
   BasicSourceMapConsumer.prototype._findSourceIndex = function(aSource) {
     var relativeSource = aSource;
     if (this.sourceRoot != null) {
-      relativeSource = util3.relative(this.sourceRoot, relativeSource);
+      relativeSource = util.relative(this.sourceRoot, relativeSource);
     }
     if (this._sources.has(relativeSource)) {
       return this._sources.indexOf(relativeSource);
@@ -4245,7 +4255,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
     smc.file = aSourceMap._file;
     smc._sourceMapURL = aSourceMapURL;
     smc._absoluteSources = smc._sources.toArray().map(function(s) {
-      return util3.computeSourceURL(smc.sourceRoot, s, aSourceMapURL);
+      return util.computeSourceURL(smc.sourceRoot, s, aSourceMapURL);
     });
     var generatedMappings = aSourceMap._mappings.toArray().slice();
     var destGeneratedMappings = smc.__generatedMappings = [];
@@ -4266,7 +4276,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
       }
       destGeneratedMappings.push(destMapping);
     }
-    quickSort(smc.__originalMappings, util3.compareByOriginalPositions);
+    quickSort(smc.__originalMappings, util.compareByOriginalPositions);
     return smc;
   };
   BasicSourceMapConsumer.prototype._version = 3;
@@ -4353,9 +4363,9 @@ var require_source_map_consumer = __commonJS(function(exports) {
         }
       }
     }
-    quickSort(generatedMappings, util3.compareByGeneratedPositionsDeflated);
+    quickSort(generatedMappings, util.compareByGeneratedPositionsDeflated);
     this.__generatedMappings = generatedMappings;
-    quickSort(originalMappings, util3.compareByOriginalPositions);
+    quickSort(originalMappings, util.compareByOriginalPositions);
     this.__originalMappings = originalMappings;
   };
   BasicSourceMapConsumer.prototype._findMapping = function SourceMapConsumer_findMapping(aNeedle, aMappings, aLineName, aColumnName, aComparator, aBias) {
@@ -4382,26 +4392,26 @@ var require_source_map_consumer = __commonJS(function(exports) {
   };
   BasicSourceMapConsumer.prototype.originalPositionFor = function SourceMapConsumer_originalPositionFor(aArgs) {
     var needle = {
-      generatedLine: util3.getArg(aArgs, "line"),
-      generatedColumn: util3.getArg(aArgs, "column")
+      generatedLine: util.getArg(aArgs, "line"),
+      generatedColumn: util.getArg(aArgs, "column")
     };
-    var index = this._findMapping(needle, this._generatedMappings, "generatedLine", "generatedColumn", util3.compareByGeneratedPositionsDeflated, util3.getArg(aArgs, "bias", SourceMapConsumer.GREATEST_LOWER_BOUND));
+    var index = this._findMapping(needle, this._generatedMappings, "generatedLine", "generatedColumn", util.compareByGeneratedPositionsDeflated, util.getArg(aArgs, "bias", SourceMapConsumer.GREATEST_LOWER_BOUND));
     if (index >= 0) {
       var mapping = this._generatedMappings[index];
       if (mapping.generatedLine === needle.generatedLine) {
-        var source = util3.getArg(mapping, "source", null);
+        var source = util.getArg(mapping, "source", null);
         if (source !== null) {
           source = this._sources.at(source);
-          source = util3.computeSourceURL(this.sourceRoot, source, this._sourceMapURL);
+          source = util.computeSourceURL(this.sourceRoot, source, this._sourceMapURL);
         }
-        var name = util3.getArg(mapping, "name", null);
+        var name = util.getArg(mapping, "name", null);
         if (name !== null) {
           name = this._names.at(name);
         }
         return {
           source,
-          line: util3.getArg(mapping, "originalLine", null),
-          column: util3.getArg(mapping, "originalColumn", null),
+          line: util.getArg(mapping, "originalLine", null),
+          column: util.getArg(mapping, "originalColumn", null),
           name
         };
       }
@@ -4431,10 +4441,10 @@ var require_source_map_consumer = __commonJS(function(exports) {
     }
     var relativeSource = aSource;
     if (this.sourceRoot != null) {
-      relativeSource = util3.relative(this.sourceRoot, relativeSource);
+      relativeSource = util.relative(this.sourceRoot, relativeSource);
     }
     var url;
-    if (this.sourceRoot != null && (url = util3.urlParse(this.sourceRoot))) {
+    if (this.sourceRoot != null && (url = util.urlParse(this.sourceRoot))) {
       var fileUriAbsPath = relativeSource.replace(/^file:\/\//, "");
       if (url.scheme == "file" && this._sources.has(fileUriAbsPath)) {
         return this.sourcesContent[this._sources.indexOf(fileUriAbsPath)];
@@ -4450,7 +4460,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
     }
   };
   BasicSourceMapConsumer.prototype.generatedPositionFor = function SourceMapConsumer_generatedPositionFor(aArgs) {
-    var source = util3.getArg(aArgs, "source");
+    var source = util.getArg(aArgs, "source");
     source = this._findSourceIndex(source);
     if (source < 0) {
       return {
@@ -4461,17 +4471,17 @@ var require_source_map_consumer = __commonJS(function(exports) {
     }
     var needle = {
       source,
-      originalLine: util3.getArg(aArgs, "line"),
-      originalColumn: util3.getArg(aArgs, "column")
+      originalLine: util.getArg(aArgs, "line"),
+      originalColumn: util.getArg(aArgs, "column")
     };
-    var index = this._findMapping(needle, this._originalMappings, "originalLine", "originalColumn", util3.compareByOriginalPositions, util3.getArg(aArgs, "bias", SourceMapConsumer.GREATEST_LOWER_BOUND));
+    var index = this._findMapping(needle, this._originalMappings, "originalLine", "originalColumn", util.compareByOriginalPositions, util.getArg(aArgs, "bias", SourceMapConsumer.GREATEST_LOWER_BOUND));
     if (index >= 0) {
       var mapping = this._originalMappings[index];
       if (mapping.source === needle.source) {
         return {
-          line: util3.getArg(mapping, "generatedLine", null),
-          column: util3.getArg(mapping, "generatedColumn", null),
-          lastColumn: util3.getArg(mapping, "lastGeneratedColumn", null)
+          line: util.getArg(mapping, "generatedLine", null),
+          column: util.getArg(mapping, "generatedColumn", null),
+          lastColumn: util.getArg(mapping, "lastGeneratedColumn", null)
         };
       }
     }
@@ -4485,10 +4495,10 @@ var require_source_map_consumer = __commonJS(function(exports) {
   function IndexedSourceMapConsumer(aSourceMap, aSourceMapURL) {
     var sourceMap = aSourceMap;
     if (typeof aSourceMap === "string") {
-      sourceMap = util3.parseSourceMapInput(aSourceMap);
+      sourceMap = util.parseSourceMapInput(aSourceMap);
     }
-    var version = util3.getArg(sourceMap, "version");
-    var sections = util3.getArg(sourceMap, "sections");
+    var version = util.getArg(sourceMap, "version");
+    var sections = util.getArg(sourceMap, "sections");
     if (version != this._version) {
       throw new Error("Unsupported version: " + version);
     }
@@ -4502,9 +4512,9 @@ var require_source_map_consumer = __commonJS(function(exports) {
       if (s.url) {
         throw new Error("Support for url field in sections not implemented.");
       }
-      var offset = util3.getArg(s, "offset");
-      var offsetLine = util3.getArg(offset, "line");
-      var offsetColumn = util3.getArg(offset, "column");
+      var offset = util.getArg(s, "offset");
+      var offsetLine = util.getArg(offset, "line");
+      var offsetColumn = util.getArg(offset, "column");
       if (offsetLine < lastOffset.line || offsetLine === lastOffset.line && offsetColumn < lastOffset.column) {
         throw new Error("Section offsets must be ordered and non-overlapping.");
       }
@@ -4514,7 +4524,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
           generatedLine: offsetLine + 1,
           generatedColumn: offsetColumn + 1
         },
-        consumer: new SourceMapConsumer(util3.getArg(s, "map"), aSourceMapURL)
+        consumer: new SourceMapConsumer(util.getArg(s, "map"), aSourceMapURL)
       };
     });
   }
@@ -4534,15 +4544,15 @@ var require_source_map_consumer = __commonJS(function(exports) {
   });
   IndexedSourceMapConsumer.prototype.originalPositionFor = function IndexedSourceMapConsumer_originalPositionFor(aArgs) {
     var needle = {
-      generatedLine: util3.getArg(aArgs, "line"),
-      generatedColumn: util3.getArg(aArgs, "column")
+      generatedLine: util.getArg(aArgs, "line"),
+      generatedColumn: util.getArg(aArgs, "column")
     };
-    var sectionIndex = binarySearch.search(needle, this._sections, function(needle2, section2) {
-      var cmp = needle2.generatedLine - section2.generatedOffset.generatedLine;
+    var sectionIndex = binarySearch.search(needle, this._sections, function(needle, section) {
+      var cmp = needle.generatedLine - section.generatedOffset.generatedLine;
       if (cmp) {
         return cmp;
       }
-      return needle2.generatedColumn - section2.generatedOffset.generatedColumn;
+      return needle.generatedColumn - section.generatedOffset.generatedColumn;
     });
     var section = this._sections[sectionIndex];
     if (!section) {
@@ -4581,7 +4591,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
   IndexedSourceMapConsumer.prototype.generatedPositionFor = function IndexedSourceMapConsumer_generatedPositionFor(aArgs) {
     for (var i = 0;i < this._sections.length; i++) {
       var section = this._sections[i];
-      if (section.consumer._findSourceIndex(util3.getArg(aArgs, "source")) === -1) {
+      if (section.consumer._findSourceIndex(util.getArg(aArgs, "source")) === -1) {
         continue;
       }
       var generatedPosition = section.consumer.generatedPositionFor(aArgs);
@@ -4607,7 +4617,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
       for (var j = 0;j < sectionMappings.length; j++) {
         var mapping = sectionMappings[j];
         var source = section.consumer._sources.at(mapping.source);
-        source = util3.computeSourceURL(section.consumer.sourceRoot, source, this._sourceMapURL);
+        source = util.computeSourceURL(section.consumer.sourceRoot, source, this._sourceMapURL);
         this._sources.add(source);
         source = this._sources.indexOf(source);
         var name = null;
@@ -4630,8 +4640,8 @@ var require_source_map_consumer = __commonJS(function(exports) {
         }
       }
     }
-    quickSort(this.__generatedMappings, util3.compareByGeneratedPositionsDeflated);
-    quickSort(this.__originalMappings, util3.compareByOriginalPositions);
+    quickSort(this.__generatedMappings, util.compareByGeneratedPositionsDeflated);
+    quickSort(this.__originalMappings, util.compareByOriginalPositions);
   };
   exports.IndexedSourceMapConsumer = IndexedSourceMapConsumer;
 });
@@ -4639,7 +4649,7 @@ var require_source_map_consumer = __commonJS(function(exports) {
 // node_modules/.bun/source-map@0.6.1/node_modules/source-map/lib/source-node.js
 var require_source_node = __commonJS(function(exports) {
   var SourceMapGenerator = require_source_map_generator().SourceMapGenerator;
-  var util3 = require_util();
+  var util = require_util();
   var REGEX_NEWLINE = /(\r?\n)/;
   var NEWLINE_CODE = 10;
   var isSourceNode = "$$$isSourceNode$$$";
@@ -4706,7 +4716,7 @@ var require_source_node = __commonJS(function(exports) {
       var content = aSourceMapConsumer.sourceContentFor(sourceFile);
       if (content != null) {
         if (aRelativePath != null) {
-          sourceFile = util3.join(aRelativePath, sourceFile);
+          sourceFile = util.join(aRelativePath, sourceFile);
         }
         node.setSourceContent(sourceFile, content);
       }
@@ -4716,7 +4726,7 @@ var require_source_node = __commonJS(function(exports) {
       if (mapping === null || mapping.source === undefined) {
         node.add(code);
       } else {
-        var source = aRelativePath ? util3.join(aRelativePath, mapping.source) : mapping.source;
+        var source = aRelativePath ? util.join(aRelativePath, mapping.source) : mapping.source;
         node.add(new SourceNode(mapping.originalLine, mapping.originalColumn, source, code, mapping.name));
       }
     }
@@ -4792,7 +4802,7 @@ var require_source_node = __commonJS(function(exports) {
     return this;
   };
   SourceNode.prototype.setSourceContent = function SourceNode_setSourceContent(aSourceFile, aSourceContent) {
-    this.sourceContents[util3.toSetString(aSourceFile)] = aSourceContent;
+    this.sourceContents[util.toSetString(aSourceFile)] = aSourceContent;
   };
   SourceNode.prototype.walkSourceContents = function SourceNode_walkSourceContents(aFn) {
     for (var i = 0, len = this.children.length;i < len; i++) {
@@ -4802,7 +4812,7 @@ var require_source_node = __commonJS(function(exports) {
     }
     var sources = Object.keys(this.sourceContents);
     for (var i = 0, len = sources.length;i < len; i++) {
-      aFn(util3.fromSetString(sources[i]), this.sourceContents[sources[i]]);
+      aFn(util.fromSetString(sources[i]), this.sourceContents[sources[i]]);
     }
   };
   SourceNode.prototype.toString = function SourceNode_toString() {
@@ -5358,9 +5368,9 @@ var require_javascript_compiler = __commonJS(function(exports, module) {
         return;
       }
       var len = parts.length;
-      var _loop = function(i2) {
+      var _loop = function(i) {
         _this2.replaceStack(function(current) {
-          var lookup = _this2.nameLookup(current, parts[i2], type);
+          var lookup = _this2.nameLookup(current, parts[i], type);
           if (!falsy) {
             return [" != null ? ", lookup, " : ", current];
           } else {
@@ -5706,7 +5716,7 @@ var require_javascript_compiler = __commonJS(function(exports, module) {
       };
     },
     setupParams: function setupParams(helper, paramSize, params) {
-      var options = {}, contexts = [], types2 = [], ids = [], objectArgs = !params, param = undefined;
+      var options = {}, contexts = [], types = [], ids = [], objectArgs = !params, param = undefined;
       if (objectArgs) {
         params = [];
       }
@@ -5732,7 +5742,7 @@ var require_javascript_compiler = __commonJS(function(exports, module) {
           ids[i] = this.popStack();
         }
         if (this.stringParams) {
-          types2[i] = this.popStack();
+          types[i] = this.popStack();
           contexts[i] = this.popStack();
         }
       }
@@ -5743,7 +5753,7 @@ var require_javascript_compiler = __commonJS(function(exports, module) {
         options.ids = this.source.generateArray(ids);
       }
       if (this.stringParams) {
-        options.types = this.source.generateArray(types2);
+        options.types = this.source.generateArray(types);
         options.contexts = this.source.generateArray(contexts);
       }
       if (this.options.data) {
@@ -5843,18 +5853,14 @@ var require_handlebars = __commonJS(function(exports, module) {
 });
 
 // packages/generator/src/browser/model-check-error.ts
-var exports_model_check_error = {};
-__export(exports_model_check_error, {
-  ModelCheckError: () => ModelCheckError
-});
 var ModelCheckError;
 var init_model_check_error = __esm(() => {
   ModelCheckError = class ModelCheckError extends Error {
     issues;
     review;
     constructor(review) {
-      const errors2 = review.counts.errors;
-      super(`This model has ${errors2} error${errors2 === 1 ? "" : "s"}.`);
+      const errors = review.counts.errors;
+      super(`This model has ${errors} error${errors === 1 ? "" : "s"}.`);
       this.name = "ModelCheckError";
       this.issues = review.issues;
       this.review = review;
@@ -6045,7 +6051,7 @@ var appwithai_language_default = {
     E --> F[Response]`
         },
         stateForm: {
-          description: "stateDiagram-v2 expresses a long-running/entity status workflow. States map to a status enum; transitions map to allowed status changes and can be guarded.",
+          description: "stateDiagram-v2 expresses a long-running/entity status workflow. States map to a status enum; transitions are the moves background workflows may make. The state field is system-managed: no person changes it through a form.",
           example: `stateDiagram-v2
     [*] --> Draft
     Draft --> Submitted : submit
@@ -6225,9 +6231,9 @@ var appwithai_language_default = {
     displayValue: {
       description: "What a record is called wherever something other than the record shows it: a Table Direct dropdown, and a grid cell holding a foreign key. Stored as sys_column.is_identifier, and the display value is the identifier columns concatenated in seq_no order - the same rule in both stacks.",
       derivation: [
-        "1. A column named name, full_name, display_name, title, label or subject - whichever appears first in that order.",
+        "1. A column named name, full_name, display_name, title, label or subject - whichever appears first in that order - or, failing those, the entity's own <entity>_name, <entity>_title or <entity>_label (department_name on Department, key department_id). Never a reference, never an enum column.",
         "2. Otherwise first_name and last_name together, if the entity declares both. This is why the value is a concatenation and not one column.",
-        "3. Otherwise code, reference or number - not a name, but what people quote at each other, and better than a uuid.",
+        "3. Otherwise code, reference or number, or the entity's own <entity>_code, <entity>_reference or <entity>_number - not a name, but what people quote at each other, and better than a uuid.",
         "4. Otherwise, if the entity declares two or more FK columns ending _id/_by, it is a join entity: its first two references are the identifiers, each resolved through the parent's own label. CampaignMember reads as `Spring Promo - Omar Kowalski`.",
         "5. Otherwise the first declared string/text column that is neither the key nor a reference.",
         "6. Otherwise the key, so a lookup still lists something."
@@ -6259,13 +6265,76 @@ var appwithai_language_default = {
         EML103: "A column the generator manages, declared in the model - the declaration is ignored."
       }
     },
+    fieldLogic: {
+      description: "Compiere's Display Logic, Read Only Logic and Mandatory Logic: three conditions a field carries in the Application Dictionary, each a boolean expression over the values of the record being edited. They are declared on the column with %%field and kept as three separate rules, as Compiere keeps them, because showing a field, letting it be changed and requiring it are three different decisions.",
+      declare: {
+        display: "%%field <Entity>.<column> display: <logic> - the field is on the form only while the logic is true. Compiled to sys_field.display_logic.",
+        readonly: "%%field <Entity>.<column> readonly: <logic> - the field cannot be changed while the logic is true. Compiled to sys_column.read_only_logic and sys_field.read_only_logic.",
+        mandatory: "%%field <Entity>.<column> mandatory: <logic> - the field must have a value while the logic is true. Compiled to sys_column.mandatory_logic and sys_field.mandatory_logic."
+      },
+      syntax: {
+        condition: `<operand> <operator> <operand>, where an operand is @column@ (a column of the same entity), a quoted literal 'x' or "x", or a bare word. One side must be a column.`,
+        operators: {
+          "=": "equal",
+          "!": "not equal (!=, ^ and <> are read the same)",
+          ">": "greater than",
+          "<": "less than",
+          ">=": "greater than or equal",
+          "<=": "less than or equal"
+        },
+        joins: "& (and) and | (or), evaluated strictly left to right with no precedence and no parentheses - a | b & c is (a | b) & c, as Compiere's Evaluator reads it.",
+        values: "A Yes/No column reads Y or N; an empty value is the empty string (@x@='' tests for it, @x@!'' for a value); two operands that both read as numbers compare as numbers, anything else as text - so an ISO date compares in date order.",
+        examples: [
+          "@IsSOTrx@=Y",
+          "@DocStatus@!DR",
+          "@GrandTotal@>1000",
+          "@IsSOTrx@=Y & @DocStatus@=DR",
+          "@DocStatus@=CO | @DocStatus@=CL"
+        ],
+        oneReading: "language/field-logic.ts parses and evaluates it. The checker validates with it and the generated applications evaluate with a byte-identical copy (templates/common/field-logic.ts) and, in the browser stack, its JavaScript twin (templates/wasm/server/lib/field-logic.js), held to the same cases by a parity test."
+      },
+      columnAndField: "Compiere keeps the column (sys_column - storage: data type, mandatory, updateable) apart from the field (sys_field - one window's view of it: shown, read-only, mandatory, layout). The model's read-only and mandatory logic is written to both, so a new window over the same table inherits it; display logic belongs to the field alone. A field's own logic, when an administrator sets one, wins over the column's.",
+      evaluation: {
+        displayed: "The field's is_displayed flag, and then its display logic.",
+        readOnly: "The field's is_read_only flag, or its read-only logic.",
+        mandatory: "The column's is_mandatory flag, or the mandatory logic - and only while the field is displayed: a value nobody can see is not one anybody can be made to enter.",
+        dependencies: "The form re-evaluates all three on every change to a column the logic reads, so a field appears, locks or becomes required as the record is edited."
+      },
+      enforcement: "The form's evaluation is a convenience; the API is the control. Both generated stacks evaluate the same logic on every create and update: a field whose mandatory logic is true for the record as it will be saved, and which is displayed, must have a value (400, 'Validation failed'); a field whose read-only logic is true for the record as it is stored cannot be changed by an update (400). A create has nothing stored to lock, so read-only logic does not refuse one. Display logic hides a field and never refuses a write.",
+      notSupported: "Compiere's global context variables (@#AD_Client_ID@), SQL logic (@SQL=...) and Java callouts. Logic reads the record's own columns only; a rule that needs another table, a role or a computed value belongs in %%action or a %%hook.",
+      checkerCodes: {
+        EML156: "error - a display:, readonly: or mandatory: value that does not parse as Compiere logic.",
+        EML157: "error - the logic reads @column@ that the entity does not declare.",
+        EML158: "warning - display logic that depends on its own field: once hidden, nobody can see it to change it back.",
+        EML159: "warning - logic placed on the primary key or on the state field, neither of which is ever an input."
+      }
+    },
+    optimisticLocking: {
+      description: "Every generated stack refuses a save made against a record version someone else has already moved past, instead of letting the second save silently overwrite the first. It rides on the managed `version` column, so a model declares nothing to get it.",
+      contract: {
+        version: "Starts at 1 on insert and is raised by one on every update, by the application - a `version` supplied in a request body is ignored.",
+        read: 'GET of one record answers with `ETag: "<version>"`; the record body carries `version` too.',
+        write: 'PUT and PATCH take `If-Match: "<version>"` - the version the caller read. `"3"`, `3`, `W/"3"` and `v3` are accepted; a value naming no version is a 400. With no header, or `*`, the save is unconditional.',
+        conflict: 'A save whose If-Match is older than the stored version is refused with 409 and `details: { code: "VERSION_CONFLICT", entity, id, expectedVersion, currentVersion }`. The record itself is not in the body: the client re-reads it through GET, which applies field access.',
+        atomicity: "The comparison and the write are one step - the NestJS stack locks the row (SELECT ... FOR UPDATE) and updates WHERE version = the version it read, the browser stack updates WHERE version = ..., and the node-rest runtime checks and writes synchronously. Two saves of one version therefore produce exactly one 200 and one 409, never two 200s."
+      },
+      form: "The record form sends the version it opened. On VERSION_CONFLICT it lists the fields the other save changed - theirs beside yours, marking fields both changed - and offers Reload their version (discard my edits), Overwrite with mine (save again against the version just read, itself checked) or Keep editing. The NestJS front end draws it as a dialog; the browser build as an inline panel, because it runs inside an iframe where a modal is not guaranteed.",
+      stacks: {
+        "tanstack-nestjs": "bus.controller (If-Match, ETag) and bus.service (row lock + versioned UPDATE); frontend lib/version-conflict.ts and components/admin/version-conflict-dialog.tsx; generated test suite 22-optimistic-locking.",
+        browser: "server/modules/bus.routes.js and ui/views/entity-form.js in the standalone runtime; the same 409 body as the NestJS stack.",
+        "node-rest": "services.js and server.js in the zero-dependency runtime: version, ETag, If-Match and the same 409 body.",
+        "enterprise-reporting": "The generated update server function takes the version the form read and refuses a stale one with VERSION_CONFLICT."
+      },
+      manual: "The generated manual carries a section, When two people change the same record, naming the three choices."
+    },
     alsoDerived: [
-      "Each entity becomes a sys_table with a window and a tab; attributes become fields in declared order (seqNo = (index + 1) * 10).",
+      "Each entity becomes a sys_table with a window and a tab; attributes become fields in declared order (seqNo = (index + 1) * 10), unless the entity declares %%section - then the fields follow the sections and their rows. See formLayout.",
       "%%index becomes real indexes; a unique attribute or a `name` column is indexed automatically (mergeIndexes).",
       "%%category becomes the dashboard grouping; a model declaring none gets a single General category holding every entity.",
       "%%field <Entity>.<column> help: and %%entity <Name> help: become sys_column.description and sys_table.description - the help a reader sees under the field and beside the table. %%entity description: is the same key under its other name.",
       "%%entity <Child> parent: <Parent> makes the child a line item: no window and no dashboard card, a tab inside the parent's window instead. See masterDetail.",
-      "The remaining %%entity keys (label, icon, prefix, softDelete, audited) are validated but not yet compiled. `icon` in particular: an entity's icon is not taken from the model, it is set in the running application through Application Dictionary -> Table and Column, where it may be a lucide name or an uploaded image. Only %%category carries an icon the model decides."
+      "%%entity <Name> icon: becomes sys_table.icon — the entity's dashboard card, its window heading and its navigation entry all draw it. It is a lucide name, and an administrator may override it afterwards in Table and Column, including by uploading an image; the same column holds both. %%category carries an icon the same way, for its heading.",
+      "The remaining %%entity keys (label, prefix, softDelete, audited) are validated but not yet compiled."
     ],
     helpText: {
       description: "The only explanation a generated application has. `%%entity <Name> help:` becomes sys_table.description and opens that entity's section of manual.html; `%%field <Entity>.<column> help:` becomes sys_column.description, the hint under the control, and the column's row in the manual. There is no second source — no hand-written tooltip, no README beside the form, no designer to ask — so a model that skips it produces an application whose manual is a table of dashes.",
@@ -6284,6 +6353,55 @@ var appwithai_language_default = {
         EML152: "warning — an entity with no `%%entity ... help:` at all.",
         EML153: "warning — the columns of one entity with no `%%field ... help:`, reported once per entity and naming them. One diagnostic per column would bury every other finding on a model that skipped help entirely, which is the common case."
       }
+    },
+    completeness: {
+      description: "Every Application Dictionary value is mandatory, in the model itself. The generated application has no screen, label, lookup, dropdown or explanation the model does not declare, and nothing after authoring adds one — so a value the model leaves out is a gap in every application generated from it.",
+      codes: {
+        EML119: "the FK modifier on a reference column — without it the lookup is lost",
+        EML146: "the %%field ... enum: binding on a status, state or stage column — without it the dropdown is lost",
+        EML151: "help that describes its subject rather than restating its name",
+        EML152: "%%entity <Name> help: on an entity",
+        EML153: "%%field <Entity>.<column> help: on every column but the primary key",
+        EML154: "name: on a %%category — without it the grouping is dropped",
+        EML170: "%%section on every entity — without it the form is one flat, unheaded column of fields",
+        EML172: "every column but the primary key placed in a %%section row — an unplaced column falls into a trailing Other section",
+        EML177: "help: on every %%section that says what the section is for — it is the sentence under the heading"
+      },
+      required: "A delivered model carries none of these nine. They are warnings by severity and gaps by consequence: audit-model.mjs fails a model carrying any of them, and formatReport's verdict names them apart from the advisory warnings (DICTIONARY_COMPLETENESS in language/browser/checker.entry.ts).",
+      planFirst: "Decide every value before writing the document — per entity its help, category and parent; per column its type, modifiers, FK target, enum binding and help; per cross-entity step the row it aims at (targetSource or targetField, else EML265). A value improvised while typing the ERD is the one that comes out as a restatement.",
+      reviewUntilClean: "A clean checker run starts the review rather than ending it: re-read the file against the plan, confirm none of the nine codes and a clean audit, read every help line as the person on the generated screen would, and after any fix re-run the checker and the audit from zero. The review ends when a full pass finds nothing to change, not when a cycle count runs out."
+    },
+    formLayout: {
+      description: "How a record's form is laid out: headed sections, each of rows of one or two fields. It is the third layer of the dictionary - a column says what is stored, a field says that it is on the screen, and a section says where and beside what. Declared by `%%section`, compiled to one sys_field_group per section (sys_field_group.columns = 2, description = the section's help) and to each field's sys_field_group_id, seq_no, is_same_line (the right-hand field of a pair) and column_span (2 for a row of one); the dictionary has no X or Y position. Both stacks draw it: the NestJS form as a two-column grid per group, the browser form the same way.",
+      directive: "%%section entity: <Entity>; name: <Label>; help: <text>; rows: <column>, <column> | <column> | ...; collapsed: true",
+      mandatory: "Every entity declares its sections, and every column but the primary key sits in exactly one row of one of them. A form is the screen people use all day; the model is the only place its layout is decided, and an entity without sections is generated as one flat, unheaded list in declared order - correct, and nothing anyone designed.",
+      rows: [
+        "Two columns per row is the norm. Pair columns a person fills or reads together: first_name beside last_name, start_date beside end_date, quantity beside unit_price, a reference beside the status it moves through.",
+        "A row of one spans the full width. Use it for text and memo columns (reference 14), for an address, and for a reference whose label is long - never to avoid deciding what pairs with what.",
+        "More than two columns in a row is an error (EML174): the form is a two-column grid, and a third column has nowhere to go."
+      ],
+      sections: [
+        "Name a section for what the person is doing in it - Identity, Contact, Terms, Delivery, Clinical findings - not for the kind of column it holds. `References`, `Dates` and `Numbers` are a schema, not a form.",
+        "Open with the section that identifies the record: its name or number and the one or two values someone checks first. The display value's columns belong there.",
+        "Keep a section to the fields that are read together - roughly two to six rows. An entity with eight columns has two or three sections, not one; an entity with three columns may have one.",
+        "Put what is rarely touched last, and mark it `collapsed: true`: internal notes, integration references, figures only an administrator reads.",
+        "A line item (`%%entity <Child> parent:`) has sections too: they are what its own form shows when a row is opened from the parent's tab."
+      ],
+      help: "`help:` on a section is compiled to sys_field_group.description and printed under the heading. Say what the section is for and what has to be true before it is complete - `What was agreed with the supplier: the price, the terms and the date it stops applying.` - not `Terms fields.`. It is part of the help contract (helpText) and held to it the same way: EML177 reports a section with none, or one that restates its name.",
+      unplaced: "A column of a sectioned entity that no row names is not lost: it is generated into a trailing collapsed `Other` section, and EML172 reports it. The fixer places it for you by appending rows of two to the entity's last section, which is a repair and not a design - move it to where it belongs.",
+      entitiesWithoutSections: "An entity with no %%section is generated exactly as it was before the directive existed: one tab, every field in declared order, no headings. It is legal, it is what an older model produces, and it is EML170.",
+      checkerCodes: {
+        EML170: "warning — an entity declares no %%section. Dictionary completeness.",
+        EML171: "error — a %%section without one of its required keys: entity, name or rows.",
+        EML172: "warning — columns of a sectioned entity placed in no row. Dictionary completeness. Auto-fixable: appended to the entity's last section, two per row.",
+        EML173: "error — a %%section names an entity the model does not declare.",
+        EML174: "error — a row with more than two columns. Auto-fixable: split into rows of two.",
+        EML175: "warning — a column placed in two rows. Auto-fixable: the later placement is removed.",
+        EML176: "error — a row names a column the entity does not declare, or its primary key, which no form shows.",
+        EML177: "warning — a %%section with no help:, or help that restates the section's name. Dictionary completeness.",
+        EML178: "warning — a row places the state field of an entity with a state machine. It is shown read-only in the form's header instead. Auto-fixable: removed from the row."
+      },
+      stateField: "The state field of an entity with a kind: state machine is not part of the form body: it is a read-only badge in the form's top header and always a list-grid column (workflowConstructs.stateForm.display). It is the one column a sectioned entity leaves out of every row, and EML170/EML172 do not count it."
     },
     masterDetail: {
       description: "A line item is an entity with no life away from its owner - an invoice line, an order line, a prescription item. The ERD cannot tell one from an ordinary reference, because InvoiceLine.invoice_id and Invoice.patient_id are both a foreign key with a relationship behind it. The modeller says which it is.",
@@ -6319,12 +6437,23 @@ var appwithai_language_default = {
       EML147: "%%entity ... parent: names an entity that is not declared, or the entity names itself.",
       EML148: "%%entity ... parent: is declared but the child has no foreign key back to the parent, so the detail tab has nothing to link on.",
       EML149: "info — an entity shaped like a line item that declares no parent:. Names the candidate parent and the column a tab would link on. Never an error: identifyingAChild's three questions are about the business, not the document.",
+      EML155: "info — a line item of a line item: parent: names an entity that is itself declared parent:. The dictionary has two levels, so the deeper entity is generated as a top-level one (own window and dashboard card, foreign key kept) rather than as a tab. Mirrors flattenNestedLineItems in the generator's parser; only a parent: that takes effect (declared parent, foreign key to it) counts.",
       EML150: "warning — an entity declared parent: is also named in a %%category. The category asks for a dashboard card the directive has taken away.",
       EML151: "warning — entity or column help that restates its own name instead of describing it. See helpText.mustBeDomainKnowledge.",
       EML152: "warning — an entity with no help text at all.",
       EML153: "warning — columns with no help text, reported once per entity.",
       EML154: "warning — a %%category with no `name:` key. category.parser.ts requires one and skips the line without it, so the whole grouping is silently lost and its entities fall into the default General category.",
-      EML500: "A `kind: state` workflow bound to an entity with no status/state/stage column at all - the machine has nothing to track."
+      EML500: "A `kind: state` workflow bound to an entity with no status/state/stage column at all - the machine has nothing to track.",
+      EML275: "error — a cross-entity UpdateEntity/DeleteEntity step whose targetField is not a column of the target entity. targetField is matched on the target table against the triggering record's id; a child reaching its parent writes targetSource: <fk column> instead.",
+      EML513: "warning — a `kind: state` machine ends the diagram at its first state (`draft --> [*]` beside `[*] --> draft`). Every `x --> [*]` state is Final and a Final record is locked, so every record of the entity is locked as soon as it is saved: it can be neither edited nor deleted and moves on only by a button. Remove the `--> [*]` line; if a record may be discarded from the start state, draw a move to a state that ends the diagram instead.",
+      EML514: "warning — a `CreateEntity` step inserts exactly the columns its `fields` map names, and nothing fills a required reference (an FK not marked OPTIONAL) it leaves out. The insert is refused with a NOT NULL violation, the process fails and, when a rule starts it, so does the save that triggered it. Add the column to `fields` (a column of the triggering record, or a variable an earlier step published with `as:`), or mark it OPTIONAL in the erDiagram.",
+      EML515: "warning — a column bound to a `%%enum` of words (`%%field E.c enum: X`) is declared integer, decimal, boolean or a date. The dictionary offers the enum's values as the column's dropdown, the database type refuses the first one chosen (400, \"a value was not valid for its column type\"), and no record of the entity can be created from its form. Declare the column string, or drop the binding if the column is a number.",
+      EML516: "warning — an entity is named like a page of the generated application (`Dashboard`, `Login`, `Admin`, `Api`, `Auth`, `Index`). Each entity's list page is written to a route named after it, so the entity's grid replaces that page: `Dashboard` replaces the home dashboard that lists every category, so the application has no way to its screens. Rename the entity and the columns that point at it.",
+      EML509: "error — a `kind: state` machine draws a state named `final` or `error`. The record lifecycle reserves both as stored values: Final is every state the diagram ends, and Error is where a record whose Draft workflows failed goes. Compared exactly, so a `FINAL` status is an ordinary state.",
+      EML511: "info — a move the state diagram draws that no %%rbac line names. It is open to anyone who may update the entity, and the administrator; reported once per machine, listing the moves, so the choice is a visible one.",
+      EML512: "warning — a move rule (`<Entity>StateProgress`) or move saga (`<Entity><State>Move`) left from before action buttons: the saga only writes the state field and clears `_at` columns, the rule only starts such sagas. A button makes the move now, so they would move the record a second time. Auto-fixable: the section is removed and the `<state>_at` help rewritten (language/move-facts.ts).",
+      EML508: "warning — a saga's UpdateEntity step writes a value into a state field that the entity's state machine does not draw.",
+      EML178: "warning — a %%section row places the state field. The state is shown read-only in the form's header and as a list column, never in the form body. Auto-fixable: removed from the row."
     },
     reportDesigns: {
       description: "Generated applications include a document report subsystem backed by the AnkaReport library. One default AnkaReport layout is seeded per entity into sys_report_designs at generation time. Administrators can customise any layout at Admin → Report Designs. Users get a Print button on a record's detail view (visible only when a design exists for that table), and can export the rendered report to PDF.",
@@ -6582,25 +6711,30 @@ var appwithai_language_default = {
       start: "[*] --> FirstState",
       end: "LastState --> [*]",
       transition: "StateA --> StateB : eventName",
-      mappingHint: "States are treated as a status enum for the bound entity; transitions define the allowed status changes.",
-      enforcement: "The edges are enforced, not merely documented. Every transition a diagram draws is compiled into sys_workflow_transitions, and the generated EntityAccessGuard refuses a write that moves a record to a state with no matching edge from the state it is in — answering 403 and leaving the record where it was. This holds for every caller, the master role included: an edge the diagram never drew is not a permission an administrator lacks, it is a move that does not exist, and allowing it would put the record in a state every rule and workflow downstream was written without. Who may cross an edge that does exist is the separate question %%rbac answers, from sys_transition_access, and that one the master role does bypass. Keep the two apart: enforcing topology only where a role rule happens to cover it leaves every unguarded edge open.",
-      readingTheEdges: "GET /api/workflows/transitions returns the stored edges, optionally narrowed by ?table= and ?from=. A screen offering a status change asks this rather than offering every state and letting the save be refused. A table with no state diagram has no rows and nothing is enforced for it."
+      mappingHint: "States are the values of the bound entity's lifecycle column, between Draft and Error; transitions are the moves its action buttons make.",
+      enforcement: "The edges are enforced, not merely documented. A record moves only along an edge the diagram draws — by an action button (POST /api/bus/<entity>/<id>/transition) or by a workflow's UpdateEntity step — and a move with no edge from the record's state is refused with 409 `INVALID_TRANSITION`. This holds for every caller, the master role included: an edge the diagram never drew is not a permission an administrator lacks, it is a move that does not exist.",
+      lifecycle: "Every record has a lifecycle (language/state-field.ts is the one statement of it). It is saved in Draft. With no state machine it goes to Final when its workflows succeed, or to Error with their message when they fail; its column is `doc_status` (draft | final | error). With a machine its column is the state field, holding Draft, the machine's states and Error: a save from Draft or Error runs the workflows and, if they succeed, moves the record to the machine's initial state (staying in Draft when the machine starts there — a state named draft under any spelling is the lifecycle's Draft). Every state the diagram ends (x --> [*]) is Final. A Final record is locked: an update or delete is refused with 409 `RECORD_FINAL`, and only the `reopen` move, by the administrator or a role `%%rbac role:x on Entity.reopen` names, takes it back to Draft. An Error record stays editable; saving it starts over from Draft. A workflow that fails on a button press, or on saving a record in an intermediate state, rolls the change back with 422 and its message, and the record keeps its status. `final` and `error` are reserved state names (EML509).",
+      moves: "An action button for each edge out of the record's state, labelled with the status it moves to (an edge into `closed_won` reads Closed won, whatever the edge is called); the edge's event stays the move's name for `%%rbac`, the API and the history. Pressing it saves the form in its current status, then runs the workflows bound to that status (`status: <state>` on a workflow) in a second transaction and moves the record only if they all succeed; a choice of several buttons opens a menu. A move is limited to roles with `%%rbac role:<role> on <Entity>.<event>` (or `.from->to` for an edge with no label); a move no line names is open to anyone who may update the entity (EML511, info). A move may name an assignee who holds the next status's role. Each move stamps the `<state>_at` column when the entity has one and is logged in sys_record_transitions.",
+      stateField: "The state field is the column the machine drives: `status`, else `state`, else `stage`, whichever the bound entity declares first in that order (language/state-field.ts is the one statement of it, read by the checker, the generator and both runtimes). An entity with none drives the managed `workflow_status` column and draws EML500.",
+      systemManaged: 'Nobody types a status into a form. The lifecycle column is written by the save pipeline, an action button, or a workflow moving along a drawn edge. The generated API strips a value that equals the stored one (so a whole-record save still works) and refuses one that differs with 403 and `details.code: "STATE_FIELD_SYSTEM_MANAGED"`, for every caller, the master role included — the button is the way to move it. Move rules and sagas written before buttons existed are EML512, and the fixer removes them.',
+      display: "Where an entity has a state field it is shown, and it is shown in two places only. On the record's form it is a read-only badge in the top header, beside the record's title - never an input, on create or on edit. In the list grid it is always a column, whatever else the grid shows; it is not grid noise and an administrator's grid-visibility toggle cannot hide it. It is therefore never placed in a %%section row (EML178), and its absence from every row is not a gap (EML170/EML172 do not count it).",
+      readingTheEdges: "GET /api/bus/<entity>/<id>/actions returns the moves the caller may make from the record's state (the buttons), and GET /api/workflows/transitions every stored edge, optionally narrowed by ?table= and ?from=."
     },
     workflowKinds: {
       hook: {
-        form: "%%workflow <name> entity: <Entity> kind: hook",
+        form: "%%workflow <name> entity: <Entity> kind: hook [status: <state>]",
         description: "A flowchart whose steps represent operations on a single entity. %%hook directives bind named handlers to the entity's CRUD lifecycle events. Fully parsed by the shipped hook-parser.",
         diagram: "flowchart",
         shipped: true
       },
       state: {
         form: "%%workflow <name> entity: <Entity> kind: state",
-        description: "A stateDiagram-v2 whose states map to a status enum for the bound entity. Transitions define the allowed status changes and are enforced as the entity's topology — see stateForm.enforcement. %%rbac directives naming a transition event add the role check on top of that; %%trigger directives declare external event sources. Fully parsed by the shipped hook-parser.",
+        description: "A stateDiagram-v2 whose states are the bound entity's lifecycle between Draft and Error. Each transition is an action button, limited to the roles a %%rbac line names, and the edges are enforced as the entity's topology — see stateForm.lifecycle, stateForm.moves and stateForm.enforcement. %%trigger directives declare external event sources. Fully parsed by the shipped hook-parser.",
         diagram: "stateDiagram-v2",
         shipped: true
       },
       saga: {
-        form: "%%workflow <name> entity: <Entity> kind: saga [trigger: automatic|rule] [operation: CREATE|UPDATE|DELETE|ALL]",
+        form: "%%workflow <name> entity: <Entity> kind: saga [trigger: automatic|rule] [operation: CREATE|UPDATE|DELETE|ALL] [status: <state>]",
         description: "A flowchart whose nodes are executable steps. Each node is bound to a step by a %%step directive naming the node id and its step type; the flowchart edges give the running order. Compiles to BPMN service tasks seeded into sys_workflow_definitions and run by the generated workflow executor. This is how a multi-entity, multi-step process — create a row here, update one there, delete a third, passing values between the steps — is expressed in the model rather than drawn by hand in the app.",
         diagram: "flowchart",
         shipped: true,
@@ -6610,7 +6744,8 @@ var appwithai_language_default = {
         },
         ordering: "Steps run in flowchart edge order, walking forward from every node with no incoming edge. A node with a %%step but no edges still runs, after the wired ones, in document order — the canvas implies a step runs even when the connection was left implicit.",
         example: "%%workflow CriticalDeviationEscalation entity: DeviationReport kind: saga trigger: rule operation: CREATE",
-        operation: "Which write runs the workflow. Defaults to CREATE. Only consulted for trigger: automatic — a rule-triggered workflow is resolved by name, so the rule decides."
+        operation: "Which write runs the workflow. Defaults to CREATE. Only consulted for trigger: automatic — a rule-triggered workflow is resolved by name, so the rule decides.",
+        status: "Bind the workflow to a move: `status: <state>` (a state of the entity's kind: state workflow) with trigger: automatic operation: UPDATE. A button press is two transactions — the first saves the form and leaves the status where it is, the second runs the workflows bound to the target state and moves the record only if every one succeeds. A failure rolls the second back: the saved values stay, the status does not move, and the reason is recorded. Checked by EML243 (the state must be drawn), EML244 (an update must start it) and EML245 (some arrow must lead into the state). An entity with no status machine has Draft and Final only; its update workflows already run on the way to Final, so it takes no status:."
       }
     },
     stepNodes: {
@@ -6622,7 +6757,7 @@ var appwithai_language_default = {
       types: [
         {
           name: "UpdateEntity",
-          purpose: "Write one column on the triggering record, or on rows of a related entity.",
+          purpose: "Write one column on the triggering record, or on rows of a related entity. `value: null` clears the column. It is the only writer of a state field: no person changes one.",
           required: ["field"],
           oneOf: [["source", "value"]],
           optional: ["entity", "targetField", "targetSource"],
@@ -6875,8 +7010,8 @@ var appwithai_language_default = {
         },
         {
           type: "UpdateEntity",
-          purpose: "Write a field, by default on the triggering record.",
-          properties: ["entity", "field", "value"],
+          purpose: "Write a field, by default on the triggering record. To write another entity, name it and say which row: `target: {{id}}` (a value an earlier step published) or `target: <fk_column>` (a column on that entity matched against the triggering record).",
+          properties: ["entity", "target", "field", "value"],
           example: `%%step s3 type: UpdateEntity
 %%step s3 field: status
 %%step s3 value: {{tier}}`
@@ -7026,12 +7161,15 @@ var appwithai_language_default = {
         form: "%%field <Entity>.<attr> <key>: <value>",
         status: "compiled",
         consumedBy: [
-          "packages/generator/src/parsers/mermaid.parser.ts (the `enum:` and `help:` keys; the other keys are reserved)"
+          "packages/generator/src/parsers/mermaid.parser.ts (the `enum:`, `help:`, `display:`, `readonly:` and `mandatory:` keys; the other keys are reserved)"
         ],
-        purpose: "Extended field metadata: enum reference and help text, both compiled; ui control, default value, min/max and format are reserved.",
+        purpose: "Extended field metadata: enum reference, help text and Compiere field logic (display:, readonly:, mandatory: - see applicationDictionary.fieldLogic), all compiled; ui control, default value, min/max and format are reserved.",
         examples: [
           "%%field Order.status enum: OrderStatus",
           "%%field Contact.account_id help: The company this person works for. Leave empty for a personal contact.",
+          "%%field Opportunity.loss_reason display: @stage@=closed_lost",
+          "%%field Opportunity.amount readonly: @stage@=closed_won | @stage@=closed_lost",
+          "%%field Contract.renewal_notice_days mandatory: @auto_renew@=Y",
           "%%field Product.price min: 0",
           "%%field User.email unique: true"
         ]
@@ -7055,6 +7193,22 @@ var appwithai_language_default = {
         examples: [
           "%%category name: Compound Registry; description: Structures and aliases; icon: FlaskConical; color: #6366f1; entities: Compound, CompoundAlias",
           "%%category name: People and Teams; default: true; entities: User, Team"
+        ]
+      },
+      {
+        keyword: "%%section",
+        form: "%%section entity: <Entity>; name: <Label>; help: <text>; rows: <column>, <column> | <column> | ...; collapsed: true",
+        status: "compiled",
+        consumedBy: [
+          "packages/generator/src/parsers/section.parser.ts -> entity.formSections",
+          "packages/generator/src/generators/dictionary.generator.ts -> sys_field_group, sys_field.sys_field_group_id / is_same_line / column_span",
+          "templates/common/seeds/sys-dictionary.ts.hbs (NestJS) and generators/wasm/model-bundle.ts (browser)"
+        ],
+        purpose: "Lay an entity's form out as headed sections of two-column rows. Each directive is one section of one entity: `name` is its heading, `help` the sentence under the heading, and `rows` its fields, rows separated by `|` and the one or two columns of a row by `,`. A row of two puts the columns side by side; a row of one spans the full width, which is where a text or memo column, or a reference worth its whole line, belongs. Sections render in declaration order and fields in row order. Repeating a section's `entity` and `name` continues it, so a long section can be written over several lines; `help` is read from the first. `collapsed: true` closes the section until it is opened. Every column of the entity but its primary key is placed in exactly one section - see applicationDictionary.formLayout. `entity`, `name` and `rows` are required. `help` may contain semicolons; no other value may.",
+        examples: [
+          "%%section entity: Order; name: Order; help: Who placed the order, when, and where it stands.; rows: order_number, order_date | customer_id, status",
+          "%%section entity: Order; name: Delivery; help: Where the goods go and how they travel there.; rows: shipping_address | carrier, tracking_number",
+          "%%section entity: Order; name: Notes; help: Anything the next person handling this order should know.; rows: notes; collapsed: true"
         ]
       },
       {
@@ -7096,26 +7250,25 @@ var appwithai_language_default = {
       },
       {
         keyword: "%%rbac",
-        form: "%%rbac <roleExpr> on <Entity>.<op>   where <op> is a CRUD operation (create|read|update|delete|*) or a transition event in <Entity>'s state machine",
+        form: "%%rbac <roleExpr> on <Entity>.<target>   where <target> is a CRUD operation (create|read|update|delete|*), a move of the entity's state machine (its event, or from->to for an edge with no label), or reopen.",
         status: "compiled",
         consumedBy: [
           "packages/generator/src/rbac/index.ts (compiles both forms)",
           "packages/generator/src/rbac/roles.ts (derives the roles, one seeded account each, and per-entity visibility)",
-          "seeded into sys_operation_access / sys_transition_access",
+          "seeded into sys_access_grant (kind op | move | reopen), read through the sys_user_capability view",
           "enforced by the generated EntityAccessGuard on /bus CRUD",
           "app-and-report-with-ai-tanstack: common/build/reporting-pack.ts -> one reporting role per declared role, scoped to the tables that role may read"
         ],
-        purpose: "Restrict a CRUD operation or a state transition to named roles. It restricts rather than grants: a target no directive mentions is open to any authenticated caller, so a model declaring no %%rbac generates what it always did. A target with one or more directives requires the union of the roles they name. A master role bypasses. That bypass is over access — who may do a thing — and not over the shape of the model: a state machine's topology is enforced for the master role too, because an edge the diagram never drew is a move that does not exist rather than a permission anyone is missing (see workflowConstructs.stateForm.enforcement). Role names are matched case-insensitively, because seeded roles are title-cased (Manager) and directives are written lower-case (role:manager) - an exact match would make such a rule unsatisfiable, locking out exactly the people it was written to admit. Spelled %%guard until that keyword was needed unambiguously for automation conditions.",
+        purpose: "Restrict a CRUD operation to named roles. It restricts rather than grants: a target no directive mentions is open to any authenticated caller, so a model declaring no %%rbac generates what it always did. A target with one or more directives requires the union of the roles they name. A master role bypasses. That bypass is over access — who may do a thing — and not over the shape of the model: a state machine's topology is enforced for the master role too, because an edge the diagram never drew is a move that does not exist rather than a permission anyone is missing (see workflowConstructs.stateForm.enforcement). Role names are matched case-insensitively, because seeded roles are title-cased (Manager) and directives are written lower-case (role:manager) - an exact match would make such a rule unsatisfiable, locking out exactly the people it was written to admit. Spelled %%guard until that keyword was needed unambiguously for automation conditions.",
         examples: [
           "%%rbac role:admin on Order.delete",
           "%%rbac role:sales|manager on Deal.update",
           "%%rbac role:admin on Customer.*",
-          "%%rbac role:sales_manager on Quote.approve",
           "%%rbac role:sales_rep|sales_manager|support_agent on Account.read"
         ],
         notes: {
           operations: "create | read | update | delete, plus * for all four. Aliases are accepted (insert/add, view/select/list, edit/write/modify, remove/destroy).",
-          transitions: "A name that is not a CRUD operation is resolved against the entity's stateDiagram-v2 transitions. There is no named-transition endpoint in a generated application - moving a record along an edge is a status update - so the rule is stored as the (from_state, to_state) pair it covers and the guard recognises the move by the states the write crosses. Both ends are kept because one event can sit on several edges and two events can reach the same state. This directive decides *who* may cross an edge; whether the edge exists at all is decided by the state diagram itself and enforced separately, so an edge no %%rbac names is open to any authenticated caller but an edge the diagram omits is refused to everyone.",
+          transitions: "A move is grantable: `%%rbac role:sales_manager on Opportunity.close_won` shows the Close won button only to sales managers (and the administrator). The target is the edge's event in one token (`close won`, `Close-Won` and `close_won` are one event), `from->to` for an edge with no label, or `reopen` for the move from a Final state back to Draft. A move no line names is open to anyone who may update the entity (EML511, info). Several lines naming one move merge, as `|` inside one line does. A user's access is the union of their roles: a role only adds access, there is no deny.",
           notSysAccess: "A restriction on any operation other than read deliberately does not write sys_access. That is a grant table feeding sys_refresh_dictionary_scope(), where the first row added narrows a window to one role; a restriction on deleting must not become a restriction on looking. read is the one exception, and it is the exception on purpose - see functionalRoles.",
           functionalRoles: "read is the operation that decides which functional role an entity belongs to, and the only one that changes what a role sees. An entity a role may not read is absent from that role's navigation entirely - no menu entry, no dashboard card, no lookup - because a menu full of entries that answer 403 is a worse application than a shorter one. A model is expected to name every entity on at least one `%%rbac ... .read` directive, so that every entity belongs to somebody. Declaring none leaves every entity visible to every signed-in caller, which is what every model did before this rule existed.",
           seededAccounts: "Every role a directive names is created, and one account is seeded holding it, beside the administrator who bypasses everything and a role-less User. An application whose only account is the administrator cannot demonstrate its own access control, because the administrator is exempt from all of it. Both stacks derive the same list from rbac/roles.ts, and both sign-in screens print it with the number of entities each role can see.",
@@ -7166,9 +7319,30 @@ var appwithai_language_default = {
           readOnly: "A report may only read, and this is refused three times: by the checker at authoring time (EML293), by the compiler before the query can reach a seed file or model.json, and by each runtime before it executes - because sys_report is an ordinary table and model.json an ordinary file, so neither reader trusts what it is handed. A single trailing semicolon is allowed; a second statement behind it is not. Anything that writes belongs in a rule or a hook.",
           foreignKeysAreUuid: "A foreign key and a primary key are both UUID, in both stacks, so a join is written plainly: ON c.account_id = p.id. Do not cast. `::text` was needed while the browser stack typed a foreign key as VARCHAR; it does not any more, and PostgreSQL has no implicit cast back, so a cast that is no longer needed is now the thing that breaks the query.",
           chartNeedsAxes: "`chart:` without both `x:` and `y:` is an error (EML294) rather than a silent fall back to a table: a chart that cannot say what it plots renders empty, which reads as no data rather than as a missing declaration.",
-          namesAreKeys: "The name is the pack key, so a duplicate silently replaces the earlier report. Declared twice is an error (EML292).",
+          namesAreKeys: "The name is the pack key, so a duplicate silently replaces the earlier report. Declared twice is an error (EML292). The title is what the platform upserts a query, report and chart by, so two reports with one title collapse into one row and the pack is refused: that is an error too (EML292).",
           againstWhichSchema: "The query runs against the *generated application's* database, so it names `bus_` tables. It is not checked against a live schema at author time - the checker has no database - but `check-reporting-pack.ts in the orchestrator` executes every query in the pack against a real generated schema in CI.",
-          whereItIsCompiled: "Compiled twice, by two readers, and neither replaces the other. Here, packages/generator/src/reports/index.ts puts each report into the generated application itself: a sys_report row served at /sys/reports and shown under Admin > Analysis in the NestJS stack, and a model.json entry served at /api/reports and shown under Reports in the browser application. Separately, businessappwithai/app-and-report-with-ai-tanstack compiles the same directive with common/build/reporting-pack.ts into a saved query, a report definition and, where chart: is set, a chart, seeded into the Enterprise Reporting platform ahead of the derived baseline. That platform is composed beside a deployed application by docker-compose; it is not in the browser application and not in the downloadable zip."
+          whereItIsCompiled: "Compiled twice, by two readers, and neither replaces the other. Here, packages/generator/src/reports/index.ts puts each report into the generated application itself: a sys_report row served at /sys/reports and shown under Admin > Analysis in the NestJS stack, and a model.json entry served at /api/reports and shown under Reports in the browser application. Separately, businessappwithai/app-and-report-with-ai-tanstack compiles the same directive with common/build/reporting-pack.ts into a saved query, a report definition and, where chart: is set, a chart, seeded into the Enterprise Reporting platform ahead of the derived baseline. The real platform runs beside a deployed application, under the orchestrator's docker-compose or as the report service of the deployable archive's own compose file, and the browser application previews the same pack; see generatorContract.reportingApplication."
+        }
+      },
+      {
+        keyword: "%%dashboard",
+        form: "%%dashboard <name> title: <Title> role: <role> reports: <report-name>, <report-name>, ... [help: <who opens it and what they decide>]",
+        status: "compiled",
+        consumedBy: [
+          "packages/generator/src/reports/index.ts -> compileDashboards -> reporting pack dashboards",
+          "language/cli/src/parser.ts -> model.dashboards",
+          "language/checker.ts (shape: EML297; per-role minimums: EML298, EML299)"
+        ],
+        purpose: "Group a role's own %%report directives into a named dashboard. The reporting pack derives one overview dashboard from structure; that cannot say which questions belong together for the person who asks them. A dashboard belongs to the declared %%rbac role named by role:, shows the %%report directives named by reports: in that order (a charted report as a chart tile, an uncharted one as a table tile), and is served by the reporting platform and its browser preview beside the overview.",
+        examples: [
+          "%%dashboard sales-manager-pipeline-review title: Pipeline review role: sales_manager reports: sales-manager-pipeline-by-stage, sales-manager-pipeline-by-owner, sales-manager-slipped-deals help: The Monday forecast meeting."
+        ],
+        notes: {
+          roleIsRequired: "role: must name a role some %%rbac line declares; a dashboard with no role, or an unknown one, is an error (EML297). A dashboard that no role owns is nobody's.",
+          reportsMustExist: "Every name in reports: must be a %%report in the model (EML297). A dashboard may list a report another role also runs, but it should list reports its own role can run: every table the report names must be on that role's read list, or the tile answers 403.",
+          namesAreKeys: "The name is the pack key; declared twice is an error (EML297). The title is what the platform upserts by, so two dashboards with one title would collapse into one row and the pack is refused: that is an error too (EML297).",
+          coverageMinimums: "Reporting is mandatory and covers the whole domain. Every declared %%rbac role needs at least 50 charted %%report directives it can run - one charted report is a report and a chart - and at least 10 dashboards of its own, each listing at least 3 reports so that ten one-report dashboards cannot stand in for ten. The checker warns below either minimum (EML298 for reports, EML299 for dashboards) and audit-model.mjs fails while a warning stands. A role is counted over the %%report directives whose every bus_ table it may read: %%rbac read (or *) lines decide, an entity with no read line is open to every role, and a role called administrator reads everything and, inheriting every other role's reports and dashboards, owes no minimum of its own.",
+          whereItIsCompiled: "Compiled once, by buildReportingPack, into one reporting dashboard per %%dashboard beside the derived overview. Both the real platform (seeded from the pack) and the browser application's preview (model.json) read that pack."
         }
       }
     ],
@@ -7192,16 +7366,115 @@ var appwithai_language_default = {
   },
   generatorContract: {
     description: "How each section feeds the generator pipeline.",
+    reportingApplication: {
+      description: "One model generates two applications. The second is the Enterprise Reporting platform (businessappwithai/enterprise_reporting_tanstack): its own server, database, users and sign-in, loaded with a reporting pack derived from the model. Nothing in the pack is written by hand. packages/generator/src/reporting/pack.ts (buildReportingPack) in app-with-ai-tanstack is the single derivation, and every surface that serves reports reads its output, so the surfaces cannot disagree about what reports a model has.",
+      derivation: "packages/generator/src/reporting/pack.ts -> buildReportingPack(parsedModel, { projectName, databaseName, ... }). Pure: no filesystem, no clock, no database.",
+      pack: {
+        dataSource: "The generated application's database, registered as a PostgreSQL data source.",
+        queries: "Saved SQL over the application's bus_ tables, each carrying the tables it reads.",
+        reports: "Report definitions over those queries.",
+        charts: "Chart definitions (bar, line, pie, area) over those queries.",
+        dashboards: "The overview dashboard - up to four authored charts first, then one tile for each of the six most central entities - plus one dashboard per %%dashboard, each carrying the role it is for.",
+        access: "One reporting role per declared %%rbac role, plus the administrator, each with the bus_ tables it may read."
+      },
+      derivedFrom: [
+        {
+          declares: "an entity",
+          yields: "a register: its display column, up to two enum columns and two numeric columns, newest first"
+        },
+        {
+          declares: "an %%enum-bound column",
+          yields: "a breakdown chart and report, pie at six values or fewer, bar above; at most two per entity, status/state first"
+        },
+        {
+          declares: "created_at",
+          yields: "volume per month over two years, as a line"
+        },
+        {
+          declares: "a kind: state workflow over a status or state column",
+          yields: "a lifecycle over the declared states, in the diagram's order, zeroes included"
+        },
+        {
+          declares: "integer and decimal columns",
+          yields: "measures: totals and averages, grouped by the entity's primary enum column"
+        },
+        {
+          declares: "a oneToMany relationship",
+          yields: "children per parent, ranked"
+        },
+        {
+          declares: "%%report",
+          yields: "the author's own query, report and (with chart:) chart, listed first and placed at the top of the dashboard; a derived item with the same name is dropped in its favour"
+        },
+        {
+          declares: "%%dashboard",
+          yields: "a dashboard of the named role's own reports, one tile per report in the order listed, beside the overview"
+        },
+        {
+          declares: "%%rbac ... .read",
+          yields: "the tables each reporting role may read"
+        },
+        {
+          declares: "%%entity help: / %%field help:",
+          yields: "the names and descriptions of every report, chart and query"
+        }
+      ],
+      surfaces: [
+        {
+          id: "orchestrator",
+          where: "businessappwithai/app-and-report-with-ai-tanstack: ./start.sh, common/build/reporting-pack.ts",
+          runs: "the real platform built from its own source, beside the deployed application, behind nginx at /report (the application at /app, both sets of accounts at /)"
+        },
+        {
+          id: "deployable-archive",
+          where: "the NestJS stack's reporting/ directory and the report and report-seeder services of its docker-compose.yml",
+          runs: "the real platform, cloned at REPORT_REF and seeded once from reporting/reporting-pack.json, on port 3100"
+        },
+        {
+          id: "browser-application",
+          where: "--standalone: model.json carries the pack; #/report in the running application",
+          runs: "a preview drawn in the platform's own layout and tokens, labelled as one on every screen; its Administration (users, roles, per-role table grants, data source, activity log) is real, and the screens that need the platform's servers say where the real ones are"
+        }
+      ],
+      signIn: "Two applications, two sign-ins, never merged. The application's account for a role is <role>@<app>.example.com and the reporting account is <role>@<app>.reports.example.com; the administrator is admin@admin.com on both sides, as two different accounts in two different user tables. Neither password works on the other side. A role in the application decides what a user may do to a record; a reporting role decides which tables their queries may read. Only read rules narrow a reporting role.",
+      verification: "The checker holds %%report to its shape (EML290-EML296), %%dashboard to its shape (EML297) and every declared role to the reporting minimums (EML298, EML299), and cannot see whether a column exists. common/scripts/check-reporting-pack.ts in app-and-report-with-ai-tanstack runs every derived and authored query against a schema the generator actually emitted."
+    },
+    generatedE2E: {
+      description: "Every generated application carries an end-to-end suite that is derived from the same model and runs on demand from its docker-compose.yml. Nothing in it is written by hand per application: the generator (packages/generator/src/generators/tests/bun-e2e.generator.ts) renders the tests/ project from the parsed model, and the reporting suites read the same reporting-pack.json the seeder loaded.",
+      command: "docker compose run --rm e2e",
+      browserCommand: "docker compose run --rm e2e-ui — the same suite's browser layer: Playwright and Chromium drive the front end, the rules and workflows editor, a record's action buttons and the reporting platform's dashboards.",
+      service: "An 'e2e' service behind the 'test' profile (so 'docker compose up' never starts it), built from tests/Dockerfile. It waits for the backend and the reporting platform to be healthy, the front end to have started and the report-seeder to have exited 0, then attaches over the compose network. Results are written to ./test-results. It is generated only when the tests/ project is.",
+      scripts: {
+        "test:attach": "every suite (the default)",
+        "test:crud": "the per-entity CRUD suites",
+        "test:rules": "the per-entity business-rule suites",
+        "test:workflows": "the workflow suites",
+        "test:status": "action buttons per role (suite 26)",
+        "test:reporting": "the reporting platform against the pack (suite 28)",
+        "test:together": "the application and the platform on one set of data (suite 29)",
+        "test:ui": "the browser layer (the e2e-ui service)"
+      },
+      derivedFrom: [
+        { declares: "an entity", yields: "CRUD, listing, filtering, sorting, pagination, optimistic locking and validation suites for it" },
+        { declares: "%%rule or %%action", yields: "per-entity rule suites: a refusing rule refuses, a transform transforms, a trigger-workflow starts its process" },
+        { declares: "%%workflow or %%step", yields: "workflow-run, multi-step and status-bound workflow suites (a failing ENTER:<state> workflow leaves the typed values saved and the status unmoved)" },
+        { declares: "a state diagram", yields: "every drawn edge walked, every undrawn one refused, an end state locked, and the action buttons each role is offered" },
+        { declares: "%%rbac", yields: "one sign-in per declared role, driven against every restricted operation and every move a role is given" },
+        { declares: "%%report and %%dashboard, and every derived report", yields: "the reporting platform held to the pack: every report, chart and dashboard present by name, every widget, every report and chart run, and each role let in exactly when its tables admit the query" }
+      ],
+      reportingTables: "In the pack, an empty 'tables' list means every table for the administrator only. For any other role it means %%rbac left that role no entity to read, and the platform correctly refuses it every report.",
+      needs: "A reporting pack (the reporting suites skip themselves loudly without one) and the tests/ project (--skip-tests omits both the project and the service)."
+    },
     pipeline: [
       "1. ERD section -> MermaidParser -> Entity[] + Relationship[] -> migrations, DTOs, services, controllers, forms, tables. The same pass reads %%index into entity.indexes and %%enum / %%field enum: into bound enums.",
       "2. %%category directives -> category.parser -> resolveCategories -> Application Dictionary groups on the generated dashboard. A model declaring none gets a single 'General' category holding every entity.",
       "3. Rules section -> flowchart-parser -> jdm-converter -> GoRules JDM graph -> seeded into sys_rule_definitions and evaluated by the rules engine.",
       "4. Rules section carrying %%action directives -> compileRules -> a GoRules decision table whose rows carry action/message/ruleId/workflowName outputs, instead of a node graph. This is how a model-declared rule reaches a model-declared saga: the rule's `when` expression decides, and its trigger-workflow action names the workflow.",
       "5. Workflow section, hook form -> compileHooks -> per-entity handler modules under src/modules/hooks/handlers plus a registry the bus service calls around every CRUD operation.",
-      "6. Workflow section, state form -> compileWorkflows -> BPMN seeded into sys_workflow_definitions; the trigger-workflow rules resolve it by name and the run puts a new record into the state machine's starting state. The same pass writes every edge the diagram draws into sys_workflow_transitions, which EntityAccessGuard reads to refuse a status write the model never allowed for, and which GET /api/workflows/transitions exposes so a screen can offer only the moves that exist.",
+      "6. Workflow section, state form -> compileWorkflows -> BPMN seeded into sys_workflow_definitions; the trigger-workflow rules resolve it by name and the run puts a new record into the state machine's starting state. The same pass writes every edge the diagram draws into sys_workflow_transitions, which EntityAccessGuard reads to find the entity's state field and refuse any status write a person makes (stateForm.systemManaged), and which GET /api/workflows/transitions exposes so a screen can say where a record can go next. Saga UpdateEntity steps write the state through the executor, never through /bus.",
       "7. Workflow section, saga form -> compileSagaWorkflows -> one bpmn:serviceTask per %%step, ordered by the flowchart edges, seeded into sys_workflow_definitions with source 'model'. A definition declared in the model is owned by the model: the generated Workflow Designer shows it read-only, and regeneration rewrites it. Definitions authored in the app carry source 'designer' and are never touched by regeneration.",
       "8. The whole document -> language/rag.ts -> retrieval chunks (one per entity, rule, workflow and spec section) -> the pgvector model_context index the assistant searches.",
-      "9. %%rbac directives -> compileRbac -> per-operation rules in sys_operation_access and per-transition rules in sys_transition_access, enforced by EntityAccessGuard on the generated /bus CRUD routes. Restrictive, not granting: a target no directive names stays open.",
+      "9. %%rbac directives -> compileRbac -> sys_access_grant rows (operations, moves along the state machine, reopen), read per user through the sys_user_capability view and enforced by EntityAccessGuard on the generated /bus routes and by the transition service on every button. Restrictive, not granting: a target no directive names stays open.",
       "10. ERD section -> nestjs-backend.generator -> one default AnkaReport layout per entity seeded into sys_report_designs. The layout renders every non-audit, non-PK field as a two-column (label | value) report. Administrators can customise layouts at Admin → Report Designs. Records get a Print button on their detail view if a design exists for their table.",
       "11. %%enum and %%workflow kind: state -> the generated test suite's harness/model.ts, which carries the declared values and edges into the suites as data. This is the one consumer that reads the model rather than the dictionary compiled from it, and the distinction is the point: a suite that asserts a running application against the dictionary the same generator wrote proves only that the application is self-consistent, and passes just as happily when a value or an edge was dropped on the way. Asserting against the model's own word is what makes a dropped %%enum value or a missing state-machine edge fail a test rather than ship. Read by suite 02c (references) and suite 06b (state machines)."
     ],
@@ -7240,7 +7513,7 @@ var appwithai_language_default = {
       help: "%%field <Entity>.<column> help: and %%entity <Name> help: (or description:). Both are compiled: the parser hangs the text on the attribute and the entity, the dictionary generator writes it to sys_column.description and sys_table.description, and the generated application shows it under the field and beside the table. It has a second consumer: packages/generator/src/manual/index.ts renders manual.html from the same parsed model, where this text is the entire 'what it is for' column — a field with no help prints a dash there. Write help on every entity and every column, and write domain knowledge rather than the name again: EML151, EML152 and EML153 report the three ways a model fails to. See applicationDictionary.helpText. Fully compiled.",
       validated: "%%rule and %%trigger, and the %%entity keys other than help:/description:. No compiler reads these yet, but language/checker.ts enforces their syntax and cross-references, so a malformed one fails validation instead of being silently dropped.",
       reserved: "The %%field keys other than enum: and help:. Renderer-safe and documented, with no reader. Writing one is legal and inert.",
-      access: "%%rbac, in both its CRUD and state-transition forms. Compiled to sys_operation_access / sys_transition_access and enforced by the generated EntityAccessGuard."
+      access: "%%rbac on CRUD operations. Compiled to sys_operation_access and enforced by the generated EntityAccessGuard. A state transition is not a grantable operation: the state field is system-managed."
     },
     validationRules: [
       "Every entity name must match ^[a-zA-Z][a-zA-Z0-9_]*$ and be unique within the document.",
@@ -7253,7 +7526,8 @@ var appwithai_language_default = {
       "A %%loop's loopId must be referenced by at least one %%step in: directive, and loops do not nest.",
       "At most one %%category in a document may declare default: true.",
       "A trigger-workflow action must name a workflow the document declares, or a workflow that already exists in the target application.",
-      "A %%rbac operation must be a CRUD operation (create/read/update/delete/*) or a transition event declared in the entity's state machine."
+      "A %%rbac target must be a CRUD operation (create/read/update/delete/*), a move the entity's state machine draws, or reopen (EML214).",
+      "A state machine draws no state named final or error (EML509), and the state field is never placed in a %%section row (EML178); a rule or saga that only moves a record is retired (EML512)."
     ],
     note: "Levels describe what the shipped generator does, not an aspiration. A directive's own `status` field in `directives.reserved` is authoritative for that directive; these levels group them. When a compiler is added for a reserved directive, its status and this list move together."
   },
@@ -7268,7 +7542,7 @@ var appwithai_language_default = {
       "EML001-EML099": "Document level: metadata, emptiness, section structure.",
       "EML100-EML119": "Entities and attributes.",
       "EML120-EML129": "Relationships.",
-      "EML130-EML199": "Directives attached to the ERD: %%enum, %%field, %%entity, %%index, %%category — including the line-item pair EML149 and EML150.",
+      "EML130-EML199": "Directives attached to the ERD: %%enum, %%field, %%entity, %%index, %%category, %%section — including the line-item pair EML149 and EML150, and the form-layout codes EML170-EML177.",
       "EML200-EML299": "Hooks, guards, triggers, workflows and rules as declared by directives.",
       "EML300-EML399": "Business-rule flowcharts.",
       "EML400-EML449": "Workflow sections: hook, state and saga.",
@@ -7280,9 +7554,14 @@ var appwithai_language_default = {
       EML112: "Duplicate attribute - deletes the later line, keeping the stronger constraints.",
       EML114: "Foreign key not ending in _id - appends the suffix.",
       EML117: "Entity has no primary key - prepends `string id PK`.",
+      EML172: "Columns placed in no %%section row - appends them to the entity's last section, two per row.",
+      EML174: "A %%section row with more than two columns - splits it into rows of two.",
+      EML175: "A column placed in two %%section rows - removes the later placement.",
+      EML178: "The state field placed in a %%section row - removes it from the row (a section left empty is removed).",
       EML287: "Rule condition names a camelCase identifier - rewrites it as the snake_case column.",
       EML421: "State workflow has no initial transition - inserts `[*] --> <firstState>`.",
-      EML422: "State workflow has no terminal state - appends `<lastState> --> [*]`."
+      EML422: "State workflow has no terminal state - appends `<lastState> --> [*]`.",
+      EML512: "A move rule or saga an action button replaces - removes the section and rewrites the stock help on its <state>_at columns."
     },
     note: "language/checker.ts AUTO_FIXABLE_CODES and the fixer's dispatch table must list the same codes; a code in one and not the other is either a fix that never runs or a promise the fixer cannot keep."
   }
@@ -7919,7 +8198,7 @@ function nodeify(_name, script) {
       break;
     }
   }
-  result = result.replace(/\bbunx --bun /g, "npx ").replace(/\bbunx /g, "npx ").replace(/\bbun x /g, "npx ").replace(/\bbun install\b/g, "npm install").replace(/\bbun run /g, "npm run ").replace(/\bbun --filter /g, "npm run --workspace ").replace(/\bbun test\b/g, "npm test").replace(/(^|[\s"'])bun(?=\s)/g, "$1node");
+  result = result.replace(/\bbun check\b/g, "tsc --noEmit").replace(/\bHOST=127\.0\.0\.1 bun --bun /g, "").replace(/\bbun --bun /g, "").replace(/\bbunx --bun /g, "npx ").replace(/\bbunx /g, "npx ").replace(/\bbun x /g, "npx ").replace(/\bbun install\b/g, "npm install").replace(/\bbun run /g, "npm run ").replace(/\bbun --filter /g, "npm run --workspace ").replace(/\bbun test\b/g, "npm test").replace(/(^|[\s"'])bun(?=\s)/g, "$1node");
   return result;
 }
 async function readJson(file) {
@@ -8169,149 +8448,37 @@ init_node_path();
 init_memory_fs();
 init_node_path();
 
-// node_modules/.bun/zod@3.25.76/node_modules/zod/v3/external.js
-var exports_external = {};
-__export(exports_external, {
-  BRAND: () => BRAND,
-  DIRTY: () => DIRTY,
-  EMPTY_PATH: () => EMPTY_PATH,
-  INVALID: () => INVALID,
-  NEVER: () => NEVER,
-  OK: () => OK,
-  ParseStatus: () => ParseStatus,
-  Schema: () => ZodType,
-  ZodAny: () => ZodAny,
-  ZodArray: () => ZodArray,
-  ZodBigInt: () => ZodBigInt,
-  ZodBoolean: () => ZodBoolean,
-  ZodBranded: () => ZodBranded,
-  ZodCatch: () => ZodCatch,
-  ZodDate: () => ZodDate,
-  ZodDefault: () => ZodDefault,
-  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion,
-  ZodEffects: () => ZodEffects,
-  ZodEnum: () => ZodEnum,
-  ZodError: () => ZodError,
-  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind,
-  ZodFunction: () => ZodFunction,
-  ZodIntersection: () => ZodIntersection,
-  ZodIssueCode: () => ZodIssueCode,
-  ZodLazy: () => ZodLazy,
-  ZodLiteral: () => ZodLiteral,
-  ZodMap: () => ZodMap,
-  ZodNaN: () => ZodNaN,
-  ZodNativeEnum: () => ZodNativeEnum,
-  ZodNever: () => ZodNever,
-  ZodNull: () => ZodNull,
-  ZodNullable: () => ZodNullable,
-  ZodNumber: () => ZodNumber,
-  ZodObject: () => ZodObject,
-  ZodOptional: () => ZodOptional,
-  ZodParsedType: () => ZodParsedType,
-  ZodPipeline: () => ZodPipeline,
-  ZodPromise: () => ZodPromise,
-  ZodReadonly: () => ZodReadonly,
-  ZodRecord: () => ZodRecord,
-  ZodSchema: () => ZodType,
-  ZodSet: () => ZodSet,
-  ZodString: () => ZodString,
-  ZodSymbol: () => ZodSymbol,
-  ZodTransformer: () => ZodEffects,
-  ZodTuple: () => ZodTuple,
-  ZodType: () => ZodType,
-  ZodUndefined: () => ZodUndefined,
-  ZodUnion: () => ZodUnion,
-  ZodUnknown: () => ZodUnknown,
-  ZodVoid: () => ZodVoid,
-  addIssueToContext: () => addIssueToContext,
-  any: () => anyType,
-  array: () => arrayType,
-  bigint: () => bigIntType,
-  boolean: () => booleanType,
-  coerce: () => coerce,
-  custom: () => custom,
-  date: () => dateType,
-  datetimeRegex: () => datetimeRegex,
-  defaultErrorMap: () => en_default,
-  discriminatedUnion: () => discriminatedUnionType,
-  effect: () => effectsType,
-  enum: () => enumType,
-  function: () => functionType,
-  getErrorMap: () => getErrorMap,
-  getParsedType: () => getParsedType,
-  instanceof: () => instanceOfType,
-  intersection: () => intersectionType,
-  isAborted: () => isAborted,
-  isAsync: () => isAsync,
-  isDirty: () => isDirty,
-  isValid: () => isValid,
-  late: () => late,
-  lazy: () => lazyType,
-  literal: () => literalType,
-  makeIssue: () => makeIssue,
-  map: () => mapType,
-  nan: () => nanType,
-  nativeEnum: () => nativeEnumType,
-  never: () => neverType,
-  null: () => nullType,
-  nullable: () => nullableType,
-  number: () => numberType,
-  object: () => objectType,
-  objectUtil: () => objectUtil,
-  oboolean: () => oboolean,
-  onumber: () => onumber,
-  optional: () => optionalType,
-  ostring: () => ostring,
-  pipeline: () => pipelineType,
-  preprocess: () => preprocessType,
-  promise: () => promiseType,
-  quotelessJson: () => quotelessJson,
-  record: () => recordType,
-  set: () => setType,
-  setErrorMap: () => setErrorMap,
-  strictObject: () => strictObjectType,
-  string: () => stringType,
-  symbol: () => symbolType,
-  transformer: () => effectsType,
-  tuple: () => tupleType,
-  undefined: () => undefinedType,
-  union: () => unionType,
-  unknown: () => unknownType,
-  util: () => util,
-  void: () => voidType
-});
-
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/util.js
 var util;
-(function(util2) {
-  util2.assertEqual = (_) => {};
+(function(util) {
+  util.assertEqual = (_) => {};
   function assertIs(_arg) {}
-  util2.assertIs = assertIs;
+  util.assertIs = assertIs;
   function assertNever(_x) {
     throw new Error;
   }
-  util2.assertNever = assertNever;
-  util2.arrayToEnum = (items) => {
+  util.assertNever = assertNever;
+  util.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
       obj[item] = item;
     }
     return obj;
   };
-  util2.getValidEnumValues = (obj) => {
-    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+  util.getValidEnumValues = (obj) => {
+    const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
     const filtered = {};
     for (const k of validKeys) {
       filtered[k] = obj[k];
     }
-    return util2.objectValues(filtered);
+    return util.objectValues(filtered);
   };
-  util2.objectValues = (obj) => {
-    return util2.objectKeys(obj).map(function(e) {
+  util.objectValues = (obj) => {
+    return util.objectKeys(obj).map(function(e) {
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
     const keys = [];
     for (const key in object) {
       if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -8320,19 +8487,19 @@ var util;
     }
     return keys;
   };
-  util2.find = (arr, checker) => {
+  util.find = (arr, checker) => {
     for (const item of arr) {
       if (checker(item))
         return item;
     }
     return;
   };
-  util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+  util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
   function joinValues(array, separator = " | ") {
     return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util2.joinValues = joinValues;
-  util2.jsonStringifyReplacer = (_, value) => {
+  util.joinValues = joinValues;
+  util.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -8340,8 +8507,8 @@ var util;
   };
 })(util || (util = {}));
 var objectUtil;
-(function(objectUtil2) {
-  objectUtil2.mergeShapes = (first, second) => {
+(function(objectUtil) {
+  objectUtil.mergeShapes = (first, second) => {
     return {
       ...first,
       ...second
@@ -8431,11 +8598,6 @@ var ZodIssueCode = util.arrayToEnum([
   "not_multiple_of",
   "not_finite"
 ]);
-var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
-};
-
 class ZodError extends Error {
   get errors() {
     return this.issues;
@@ -8636,12 +8798,10 @@ var en_default = errorMap;
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
-function setErrorMap(map) {
-  overrideErrorMap = map;
-}
 function getErrorMap() {
   return overrideErrorMap;
 }
+
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
@@ -8668,7 +8828,6 @@ var makeIssue = (params) => {
     message: errorMessage
   };
 };
-var EMPTY_PATH = [];
 function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
   const issue = makeIssue({
@@ -8748,11 +8907,12 @@ var isAborted = (x) => x.status === "aborted";
 var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
+
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
-(function(errorUtil2) {
-  errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
+(function(errorUtil) {
+  errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+  errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/types.js
@@ -8797,12 +8957,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
-  if (errorMap2 && (invalid_type_error || required_error)) {
+  const { errorMap, invalid_type_error, required_error, description } = params;
+  if (errorMap && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap2)
-    return { errorMap: errorMap2, description };
+  if (errorMap)
+    return { errorMap, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -9189,11 +9349,11 @@ class ZodString extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.string) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -9747,11 +9907,11 @@ class ZodNumber extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.number) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -10173,17 +10333,17 @@ class ZodDate extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.date) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     if (Number.isNaN(input.data.getTime())) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_date
       });
       return INVALID;
@@ -10471,8 +10631,8 @@ class ZodArray extends ZodType {
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-      })).then((result2) => {
-        return ParseStatus.mergeArray(status, result2);
+      })).then((result) => {
+        return ParseStatus.mergeArray(status, result);
       });
     }
     const result = [...ctx.data].map((item, i) => {
@@ -10560,11 +10720,11 @@ class ZodObject extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.object) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -10868,7 +11028,7 @@ class ZodUnion extends ZodType {
         ctx.common.issues.push(...dirty.ctx.common.issues);
         return dirty.result;
       }
-      const unionErrors = issues.map((issues2) => new ZodError(issues2));
+      const unionErrors = issues.map((issues) => new ZodError(issues));
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
@@ -11308,9 +11468,9 @@ class ZodSet extends ZodType {
       }
     }
     const valueType = this._def.valueType;
-    function finalizeSet(elements2) {
+    function finalizeSet(elements) {
       const parsedSet = new Set;
-      for (const element of elements2) {
+      for (const element of elements) {
         if (element.status === "aborted")
           return INVALID;
         if (element.status === "dirty")
@@ -11321,7 +11481,7 @@ class ZodSet extends ZodType {
     }
     const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
     if (ctx.common.async) {
-      return Promise.all(elements).then((elements2) => finalizeSet(elements2));
+      return Promise.all(elements).then((elements) => finalizeSet(elements));
     } else {
       return finalizeSet(elements);
     }
@@ -11674,11 +11834,11 @@ class ZodEffects extends ZodType {
     if (effect.type === "preprocess") {
       const processed = effect.transform(ctx.data, checkCtx);
       if (ctx.common.async) {
-        return Promise.resolve(processed).then(async (processed2) => {
+        return Promise.resolve(processed).then(async (processed) => {
           if (status.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
-            data: processed2,
+            data: processed,
             path: ctx.path,
             parent: ctx
           });
@@ -11870,10 +12030,10 @@ class ZodCatch extends ZodType {
       }
     });
     if (isAsync(result)) {
-      return result.then((result2) => {
+      return result.then((result) => {
         return {
           status: "valid",
-          value: result2.status === "valid" ? result2.value : this._def.catchValue({
+          value: result.status === "valid" ? result.value : this._def.catchValue({
             get error() {
               return new ZodError(newCtx.common.issues);
             },
@@ -12022,78 +12182,48 @@ ZodReadonly.create = (type, params) => {
     ...processCreateParams(params)
   });
 };
-function cleanParams(params, data) {
-  const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
-  const p2 = typeof p === "string" ? { message: p } : p;
-  return p2;
-}
-function custom(check, _params = {}, fatal) {
-  if (check)
-    return ZodAny.create().superRefine((data, ctx) => {
-      const r = check(data);
-      if (r instanceof Promise) {
-        return r.then((r2) => {
-          if (!r2) {
-            const params = cleanParams(_params, data);
-            const _fatal = params.fatal ?? fatal ?? true;
-            ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-          }
-        });
-      }
-      if (!r) {
-        const params = cleanParams(_params, data);
-        const _fatal = params.fatal ?? fatal ?? true;
-        ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-      }
-      return;
-    });
-  return ZodAny.create();
-}
 var late = {
   object: ZodObject.lazycreate
 };
 var ZodFirstPartyTypeKind;
-(function(ZodFirstPartyTypeKind2) {
-  ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
+(function(ZodFirstPartyTypeKind) {
+  ZodFirstPartyTypeKind["ZodString"] = "ZodString";
+  ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
+  ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
+  ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
+  ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
+  ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
+  ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
+  ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
+  ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
+  ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
+  ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
+  ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
+  ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
+  ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
+  ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
+  ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
+  ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+  ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
+  ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
+  ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
+  ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
+  ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
+  ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
+  ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
+  ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
+  ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
+  ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
+  ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
+  ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
+  ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
+  ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
+  ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
+  ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
+  ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
+  ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
+  ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
-var instanceOfType = (cls, params = {
-  message: `Input not instance of ${cls.name}`
-}) => custom((data) => data instanceof cls, params);
 var stringType = ZodString.create;
 var numberType = ZodNumber.create;
 var nanType = ZodNaN.create;
@@ -12128,20 +12258,6 @@ var optionalType = ZodOptional.create;
 var nullableType = ZodNullable.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
-var ostring = () => stringType().optional();
-var onumber = () => numberType().optional();
-var oboolean = () => booleanType().optional();
-var coerce = {
-  string: (arg) => ZodString.create({ ...arg, coerce: true }),
-  number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
-  boolean: (arg) => ZodBoolean.create({
-    ...arg,
-    coerce: true
-  }),
-  bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
-  date: (arg) => ZodDate.create({ ...arg, coerce: true })
-};
-var NEVER = INVALID;
 // packages/core/src/types/sys-dictionary.types.ts
 var SYS_TABLE_PREFIX = "sys_";
 var BUS_TABLE_PREFIX = "bus_";
@@ -12181,197 +12297,195 @@ var ReferenceType = {
   EMAIL: 30,
   PHONE: 31
 };
-var SysTableSchema = exports_external.object({
-  sys_table_id: exports_external.string().uuid(),
-  table_name: exports_external.string().min(1).max(100),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  icon: exports_external.string().max(100).optional(),
-  access_level: exports_external.enum(["S", "C", "O", "CO", "A"]),
-  is_view: exports_external.boolean(),
-  is_document: exports_external.boolean(),
-  is_high_volume: exports_external.boolean(),
-  is_changelog: exports_external.boolean(),
-  replication_type: exports_external.string().optional(),
-  sys_window_id: exports_external.string().uuid().optional(),
-  po_window_id: exports_external.string().uuid().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysTableSchema = objectType({
+  sys_table_id: stringType().uuid(),
+  table_name: stringType().min(1).max(100),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  icon: stringType().max(100).optional(),
+  access_level: enumType(["S", "C", "O", "CO", "A"]),
+  is_view: booleanType(),
+  is_document: booleanType(),
+  is_high_volume: booleanType(),
+  is_changelog: booleanType(),
+  replication_type: stringType().optional(),
+  sys_window_id: stringType().uuid().optional(),
+  po_window_id: stringType().uuid().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysColumnSchema = exports_external.object({
-  sys_column_id: exports_external.string().uuid(),
-  sys_table_id: exports_external.string().uuid(),
-  column_name: exports_external.string().min(1).max(100),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  sys_reference_id: exports_external.number(),
-  sys_val_rule_id: exports_external.string().uuid().optional(),
-  field_length: exports_external.number().optional(),
-  default_value: exports_external.string().optional(),
-  value_min: exports_external.string().optional(),
-  value_max: exports_external.string().optional(),
-  is_key: exports_external.boolean(),
-  is_parent: exports_external.boolean(),
-  is_mandatory: exports_external.boolean(),
-  is_updateable: exports_external.boolean(),
-  is_identifier: exports_external.boolean(),
-  is_selection_column: exports_external.boolean(),
-  is_translated: exports_external.boolean(),
-  is_encrypted: exports_external.boolean(),
-  is_allow_logging: exports_external.boolean(),
-  is_allow_copy: exports_external.boolean(),
-  seq_no: exports_external.number(),
-  callout: exports_external.string().optional(),
-  read_only_logic: exports_external.string().optional(),
-  mandatory_logic: exports_external.string().optional(),
-  format_pattern: exports_external.string().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysColumnSchema = objectType({
+  sys_column_id: stringType().uuid(),
+  sys_table_id: stringType().uuid(),
+  column_name: stringType().min(1).max(100),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  sys_reference_id: numberType(),
+  sys_val_rule_id: stringType().uuid().optional(),
+  field_length: numberType().optional(),
+  default_value: stringType().optional(),
+  value_min: stringType().optional(),
+  value_max: stringType().optional(),
+  is_key: booleanType(),
+  is_parent: booleanType(),
+  is_mandatory: booleanType(),
+  is_updateable: booleanType(),
+  is_identifier: booleanType(),
+  is_selection_column: booleanType(),
+  is_translated: booleanType(),
+  is_encrypted: booleanType(),
+  is_allow_logging: booleanType(),
+  is_allow_copy: booleanType(),
+  seq_no: numberType(),
+  callout: stringType().optional(),
+  read_only_logic: stringType().optional(),
+  mandatory_logic: stringType().optional(),
+  format_pattern: stringType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysFieldSchema = exports_external.object({
-  sys_field_id: exports_external.string().uuid(),
-  sys_tab_id: exports_external.string().uuid(),
-  sys_column_id: exports_external.string().uuid(),
-  sys_field_group_id: exports_external.string().uuid().optional(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  help: exports_external.string().optional(),
-  seq_no: exports_external.number(),
-  seq_no_grid: exports_external.number(),
-  display_length: exports_external.number().optional(),
-  x_position: exports_external.number().optional(),
-  y_position: exports_external.number().optional(),
-  column_span: exports_external.number().optional(),
-  num_lines: exports_external.number().optional(),
-  is_displayed: exports_external.boolean(),
-  is_displayed_grid: exports_external.boolean(),
-  is_read_only: exports_external.boolean(),
-  is_encrypted: exports_external.boolean(),
-  is_same_line: exports_external.boolean(),
-  is_heading: exports_external.boolean(),
-  is_field_only: exports_external.boolean(),
-  display_logic: exports_external.string().optional(),
-  read_only_logic: exports_external.string().optional(),
-  mandatory_logic: exports_external.string().optional(),
-  obscure_type: exports_external.string().optional(),
-  included_tab_id: exports_external.string().uuid().optional(),
-  default_value: exports_external.string().optional(),
-  sort_no: exports_external.number().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysFieldSchema = objectType({
+  sys_field_id: stringType().uuid(),
+  sys_tab_id: stringType().uuid(),
+  sys_column_id: stringType().uuid(),
+  sys_field_group_id: stringType().uuid().optional(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  help: stringType().optional(),
+  seq_no: numberType(),
+  seq_no_grid: numberType(),
+  display_length: numberType().optional(),
+  column_span: numberType().optional(),
+  num_lines: numberType().optional(),
+  is_displayed: booleanType(),
+  is_displayed_grid: booleanType(),
+  is_read_only: booleanType(),
+  is_encrypted: booleanType(),
+  is_same_line: booleanType(),
+  is_heading: booleanType(),
+  is_field_only: booleanType(),
+  display_logic: stringType().optional(),
+  read_only_logic: stringType().optional(),
+  mandatory_logic: stringType().optional(),
+  obscure_type: stringType().optional(),
+  included_tab_id: stringType().uuid().optional(),
+  default_value: stringType().optional(),
+  sort_no: numberType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysWindowSchema = exports_external.object({
-  sys_window_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  help: exports_external.string().optional(),
-  window_type: exports_external.enum(["M", "T", "Q"]),
-  is_sales_transaction: exports_external.boolean(),
-  is_default: exports_external.boolean(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysWindowSchema = objectType({
+  sys_window_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  help: stringType().optional(),
+  window_type: enumType(["M", "T", "Q"]),
+  is_sales_transaction: booleanType(),
+  is_default: booleanType(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysTabSchema = exports_external.object({
-  sys_tab_id: exports_external.string().uuid(),
-  sys_window_id: exports_external.string().uuid(),
-  sys_table_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  help: exports_external.string().optional(),
-  tab_level: exports_external.number(),
-  seq_no: exports_external.number(),
-  is_single_row: exports_external.boolean(),
-  has_tree: exports_external.boolean(),
-  is_info_tab: exports_external.boolean(),
-  is_translation_tab: exports_external.boolean(),
-  is_read_only: exports_external.boolean(),
-  is_insert_record: exports_external.boolean(),
-  is_advanced_tab: exports_external.boolean(),
-  parent_column_id: exports_external.string().uuid().optional(),
-  link_column_id: exports_external.string().uuid().optional(),
-  order_by_clause: exports_external.string().optional(),
-  where_clause: exports_external.string().optional(),
-  display_logic: exports_external.string().optional(),
-  read_only_logic: exports_external.string().optional(),
-  commit_warning: exports_external.string().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysTabSchema = objectType({
+  sys_tab_id: stringType().uuid(),
+  sys_window_id: stringType().uuid(),
+  sys_table_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  help: stringType().optional(),
+  tab_level: numberType(),
+  seq_no: numberType(),
+  is_single_row: booleanType(),
+  has_tree: booleanType(),
+  is_info_tab: booleanType(),
+  is_translation_tab: booleanType(),
+  is_read_only: booleanType(),
+  is_insert_record: booleanType(),
+  is_advanced_tab: booleanType(),
+  parent_column_id: stringType().uuid().optional(),
+  link_column_id: stringType().uuid().optional(),
+  order_by_clause: stringType().optional(),
+  where_clause: stringType().optional(),
+  display_logic: stringType().optional(),
+  read_only_logic: stringType().optional(),
+  commit_warning: stringType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysUserSchema = exports_external.object({
-  sys_user_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  email: exports_external.string().email(),
-  password_hash: exports_external.string(),
-  description: exports_external.string().optional(),
-  is_system_user: exports_external.boolean(),
-  is_sales_rep: exports_external.boolean(),
-  login_date: exports_external.date().optional(),
-  login_failure_count: exports_external.number(),
-  is_locked: exports_external.boolean(),
-  is_account_verified: exports_external.boolean(),
-  notification_type: exports_external.string().optional(),
-  supervisor_id: exports_external.string().uuid().optional(),
-  default_sys_role_id: exports_external.string().uuid().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysUserSchema = objectType({
+  sys_user_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  email: stringType().email(),
+  password_hash: stringType(),
+  description: stringType().optional(),
+  is_system_user: booleanType(),
+  is_sales_rep: booleanType(),
+  login_date: dateType().optional(),
+  login_failure_count: numberType(),
+  is_locked: booleanType(),
+  is_account_verified: booleanType(),
+  notification_type: stringType().optional(),
+  supervisor_id: stringType().uuid().optional(),
+  default_sys_role_id: stringType().uuid().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysRoleSchema = exports_external.object({
-  sys_role_id: exports_external.string().uuid(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  user_level: exports_external.string(),
-  is_master_role: exports_external.boolean(),
-  is_can_export: exports_external.boolean(),
-  is_can_report: exports_external.boolean(),
-  is_personal_lock: exports_external.boolean(),
-  is_personal_access: exports_external.boolean(),
-  max_query_records: exports_external.number(),
-  connection_profile: exports_external.string().optional(),
-  preference_type: exports_external.string().optional(),
-  is_show_accounting: exports_external.boolean(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysRoleSchema = objectType({
+  sys_role_id: stringType().uuid(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  user_level: stringType(),
+  is_master_role: booleanType(),
+  is_can_export: booleanType(),
+  is_can_report: booleanType(),
+  is_personal_lock: booleanType(),
+  is_personal_access: booleanType(),
+  max_query_records: numberType(),
+  connection_profile: stringType().optional(),
+  preference_type: stringType().optional(),
+  is_show_accounting: booleanType(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
-var SysReferenceSchema = exports_external.object({
-  sys_reference_id: exports_external.number(),
-  name: exports_external.string().min(1).max(100),
-  description: exports_external.string().optional(),
-  validation_type: exports_external.enum(["S", "L", "T", "R"]),
-  vformat: exports_external.string().optional(),
-  entity_type: exports_external.string(),
-  is_active: exports_external.boolean(),
-  created_by: exports_external.string(),
-  updated_by: exports_external.string(),
-  created_at: exports_external.date(),
-  updated_at: exports_external.date()
+var SysReferenceSchema = objectType({
+  sys_reference_id: numberType(),
+  name: stringType().min(1).max(100),
+  description: stringType().optional(),
+  validation_type: enumType(["S", "L", "T", "R"]),
+  vformat: stringType().optional(),
+  entity_type: stringType(),
+  is_active: booleanType(),
+  created_by: stringType(),
+  updated_by: stringType(),
+  created_at: dateType(),
+  updated_at: dateType()
 });
 function isSystemTable(tableName) {
   return tableName.startsWith(SYS_TABLE_PREFIX);
@@ -12403,11 +12517,11 @@ function entityToBusEntity(entity, declared) {
     displayName: formatDisplayName(entity.name),
     windowOwner: entity.parentEntity ?? entity.name,
     indexes: mergeIndexes(entity),
-    attributes: withIdentifiers(entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey, declared)), entity.primaryKey)
+    attributes: withIdentifiers(entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey, declared)), entity.primaryKey, entity.name)
   };
 }
-function withIdentifiers(attributes, primaryKey) {
-  const identifiers = new Set(identifierColumnNames(attributes, primaryKey));
+function withIdentifiers(attributes, primaryKey, entityName) {
+  const identifiers = new Set(identifierColumnNames(attributes, primaryKey, entityName));
   return attributes.map((attribute) => ({
     ...attribute,
     isIdentifier: identifiers.has(attribute.name)
@@ -12433,24 +12547,49 @@ var SEMANTIC_REFERENCE = {
   password: ReferenceType.PASSWORD,
   color: ReferenceType.COLOR
 };
-function identifierColumnNames(attributes, primaryKey) {
-  const names = new Set(attributes.map((attribute) => attribute.name));
-  const has = (name) => names.has(name);
+function identifierColumnNames(attributes, primaryKey, entityName) {
+  const byName = new Map(attributes.map((attribute) => [attribute.name, attribute]));
+  const has = (name) => byName.has(name);
+  const prefixes = [
+    primaryKey?.endsWith("_id") ? primaryKey.slice(0, -3) : undefined,
+    entityName ? entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() : undefined
+  ].filter((prefix, i, all) => !!prefix && all.indexOf(prefix) === i);
+  const prefixed = (...suffixes) => {
+    for (const prefix of prefixes) {
+      for (const suffix of suffixes) {
+        const attribute = byName.get(`${prefix}_${suffix}`);
+        if (attribute && !attribute.isForeignKey && !attribute.enumReferenceId) {
+          return attribute.name;
+        }
+      }
+    }
+    return;
+  };
   for (const candidate of ["name", "full_name", "display_name", "title", "label", "subject"]) {
     if (has(candidate))
       return [candidate];
   }
+  const ownName = prefixed("name", "title", "label");
+  if (ownName)
+    return [ownName];
   if (has("first_name") && has("last_name"))
     return ["first_name", "last_name"];
   for (const candidate of ["code", "reference", "number"]) {
     if (has(candidate))
       return [candidate];
   }
+  const ownCode = prefixed("code", "reference", "number");
+  if (ownCode)
+    return [ownCode];
   const references = attributes.filter((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName(attribute.name));
   if (references.length >= 2)
     return references.slice(0, 2).map((attribute) => attribute.name);
-  const readable = attributes.find((attribute) => attribute.name !== primaryKey && !attribute.isForeignKey && !attribute.name.endsWith("_id") && (attribute.type === "string" || attribute.type === "text"));
-  return readable ? [readable.name] : [];
+  const readable = attributes.find((attribute) => attribute.name !== primaryKey && !attribute.isForeignKey && !attribute.enumReferenceId && !attribute.name.endsWith("_id") && (attribute.type === "string" || attribute.type === "text"));
+  if (readable)
+    return [readable.name];
+  const parent = attributes.find((attribute) => attribute.name !== primaryKey && attribute.isForeignKey && isForeignKeyColumnName(attribute.name));
+  const when = attributes.find((attribute) => attribute.type === "date" || attribute.type === "datetime");
+  return parent && when ? [parent.name, when.name] : [];
 }
 function attributeReferenceId(attr, entityPrimaryKey) {
   if (attr.name === "id")
@@ -12647,6 +12786,72 @@ function generateSysWindow(entity, config = defaultDictionaryConfig) {
     updated_by: config.createdBy
   };
 }
+function generateSysTab(windowId, tableId, entity, tabLevel = 0, config = defaultDictionaryConfig) {
+  return {
+    sys_window_id: windowId,
+    sys_table_id: tableId,
+    name: entity.displayName,
+    description: undefined,
+    help: undefined,
+    tab_level: tabLevel,
+    seq_no: (tabLevel + 1) * 10,
+    is_single_row: tabLevel === 0,
+    has_tree: false,
+    is_info_tab: false,
+    is_translation_tab: false,
+    is_read_only: false,
+    is_insert_record: true,
+    is_advanced_tab: false,
+    parent_column_id: undefined,
+    link_column_id: undefined,
+    order_by_clause: undefined,
+    where_clause: undefined,
+    display_logic: undefined,
+    read_only_logic: undefined,
+    commit_warning: undefined,
+    entity_type: config.defaultEntityType,
+    is_active: true,
+    created_by: config.createdBy,
+    updated_by: config.createdBy
+  };
+}
+function generateSysFields(tabId, columns, config = defaultDictionaryConfig) {
+  const seqNumbers = columns.map((_, index) => (index + 1) * 10);
+  if (config.randomizeFieldOrder) {
+    shuffleArray(seqNumbers);
+  }
+  return columns.map((col, index) => ({
+    sys_tab_id: tabId,
+    sys_column_id: col.sys_column_id,
+    sys_field_group_id: undefined,
+    name: col.name,
+    description: col.description,
+    help: undefined,
+    seq_no: seqNumbers[index] ?? (index + 1) * 10,
+    seq_no_grid: (index + 1) * 10,
+    display_length: undefined,
+    column_span: undefined,
+    num_lines: undefined,
+    is_displayed: true,
+    is_displayed_grid: true,
+    is_read_only: false,
+    is_encrypted: false,
+    is_same_line: false,
+    is_heading: false,
+    is_field_only: false,
+    display_logic: undefined,
+    read_only_logic: undefined,
+    mandatory_logic: undefined,
+    obscure_type: undefined,
+    included_tab_id: undefined,
+    default_value: undefined,
+    sort_no: undefined,
+    entity_type: config.defaultEntityType,
+    is_active: true,
+    created_by: config.createdBy,
+    updated_by: config.createdBy
+  }));
+}
 function generateSysFieldGroups(entityName, config = defaultDictionaryConfig) {
   if (!config.includeFieldGroups) {
     return [];
@@ -12683,6 +12888,14 @@ function splitWords(name) {
 function titleWord(word) {
   return /^[A-Z0-9]+$/.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1);
 }
+function shuffleArray(array) {
+  for (let i = array.length - 1;i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = array[i];
+    array[i] = array[j];
+    array[j] = temp;
+  }
+}
 function generateEntityDictionary(entity, config = defaultDictionaryConfig) {
   const busEntity = entityToBusEntity(entity);
   const busAttributes = entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index, entity.primaryKey));
@@ -12696,44 +12909,44 @@ function generateEntityDictionary(entity, config = defaultDictionaryConfig) {
     }
   };
 }
-var BusEntitySchema = exports_external.object({
-  name: exports_external.string(),
-  tableName: exports_external.string().regex(/^bus_/, "Table name must start with bus_"),
-  originalName: exports_external.string(),
-  displayName: exports_external.string(),
-  description: exports_external.string().optional(),
-  attributes: exports_external.array(exports_external.any()),
-  primaryKey: exports_external.string(),
-  timestamps: exports_external.boolean()
+var BusEntitySchema = objectType({
+  name: stringType(),
+  tableName: stringType().regex(/^bus_/, "Table name must start with bus_"),
+  originalName: stringType(),
+  displayName: stringType(),
+  description: stringType().optional(),
+  attributes: arrayType(anyType()),
+  primaryKey: stringType(),
+  timestamps: booleanType()
 });
-var DictionaryGenerationConfigSchema = exports_external.object({
-  defaultEntityType: exports_external.string(),
-  createdBy: exports_external.string(),
-  randomizeFieldOrder: exports_external.boolean(),
-  includeFieldGroups: exports_external.boolean(),
-  defaultAccessLevel: exports_external.enum(["S", "C", "O", "CO", "A"])
+var DictionaryGenerationConfigSchema = objectType({
+  defaultEntityType: stringType(),
+  createdBy: stringType(),
+  randomizeFieldOrder: booleanType(),
+  includeFieldGroups: booleanType(),
+  defaultAccessLevel: enumType(["S", "C", "O", "CO", "A"])
 });
 // packages/core/src/types/entity.types.ts
-var EntityAttributeSchema = exports_external.object({
-  name: exports_external.string(),
-  type: exports_external.enum(["string", "integer", "decimal", "boolean", "date", "datetime", "text", "json"]),
-  required: exports_external.boolean(),
-  description: exports_external.string().optional(),
-  semanticType: exports_external.enum(["email", "url", "phone", "password", "color"]).optional(),
-  unique: exports_external.boolean().optional(),
-  default: exports_external.any().optional(),
-  maxLength: exports_external.number().optional(),
-  minLength: exports_external.number().optional(),
-  pattern: exports_external.string().optional()
+var EntityAttributeSchema = objectType({
+  name: stringType(),
+  type: enumType(["string", "integer", "decimal", "boolean", "date", "datetime", "text", "json"]),
+  required: booleanType(),
+  description: stringType().optional(),
+  semanticType: enumType(["email", "url", "phone", "password", "color"]).optional(),
+  unique: booleanType().optional(),
+  default: anyType().optional(),
+  maxLength: numberType().optional(),
+  minLength: numberType().optional(),
+  pattern: stringType().optional()
 });
-var EntitySchema = exports_external.object({
-  name: exports_external.string(),
-  tableName: exports_external.string(),
-  description: exports_external.string().optional(),
-  attributes: exports_external.array(EntityAttributeSchema),
-  primaryKey: exports_external.string(),
-  timestamps: exports_external.boolean(),
-  icon: exports_external.string().optional()
+var EntitySchema = objectType({
+  name: stringType(),
+  tableName: stringType(),
+  description: stringType().optional(),
+  attributes: arrayType(EntityAttributeSchema),
+  primaryKey: stringType(),
+  timestamps: booleanType(),
+  icon: stringType().optional()
 });
 // packages/generator/src/hooks/index.ts
 var HOOK_TYPES = [
@@ -12862,25 +13075,25 @@ function compileHooks(source, knownEntities = [], onWarn = () => {}) {
       onWarn(`Skipping malformed hook directive: ${line}`);
       continue;
     }
-    const [, type, handler, entity2, bracket] = match;
+    const [, type, handler, entity, bracket] = match;
     if (!HOOK_TYPE_SET.has(type)) {
-      onWarn(`Hook "${handler}" on ${entity2} uses unknown event "${type}" — skipped.`);
+      onWarn(`Hook "${handler}" on ${entity} uses unknown event "${type}" — skipped.`);
       continue;
     }
-    if (known.size && !known.has(entity2)) {
-      onWarn(`Hook "${handler}" targets unknown entity "${entity2}" — skipped.`);
+    if (known.size && !known.has(entity)) {
+      onWarn(`Hook "${handler}" targets unknown entity "${entity}" — skipped.`);
       continue;
     }
-    const key = `${entity2}:${type}:${handler}`;
+    const key = `${entity}:${type}:${handler}`;
     if (seen.has(key)) {
-      onWarn(`Hook "${handler}" is declared twice for ${entity2}.${type} — keeping the first.`);
+      onWarn(`Hook "${handler}" is declared twice for ${entity}.${type} — keeping the first.`);
       continue;
     }
     seen.add(key);
-    const order = perEntity.get(entity2) ?? 0;
-    perEntity.set(entity2, order + 1);
+    const order = perEntity.get(entity) ?? 0;
+    perEntity.set(entity, order + 1);
     hooks.push({
-      entity: entity2,
+      entity,
       type,
       handler,
       field: parseFields(bracket),
@@ -12889,26 +13102,26 @@ function compileHooks(source, knownEntities = [], onWarn = () => {}) {
   }
   const byName = new Map;
   const kept = [];
-  for (const hook2 of hooks) {
-    const nameKey = `${hook2.entity}:${hook2.handler}`;
+  for (const hook of hooks) {
+    const nameKey = `${hook.entity}:${hook.handler}`;
     const clash = byName.get(nameKey);
     if (clash) {
-      onWarn(`Hook "${hook2.handler}" on ${hook2.entity} is bound to both ${clash.type} and ` + `${hook2.type} — keeping ${clash.type}. Give each event its own handler name.`);
+      onWarn(`Hook "${hook.handler}" on ${hook.entity} is bound to both ${clash.type} and ` + `${hook.type} — keeping ${clash.type}. Give each event its own handler name.`);
       continue;
     }
-    byName.set(nameKey, hook2);
-    kept.push(hook2);
+    byName.set(nameKey, hook);
+    kept.push(hook);
   }
   return kept;
 }
 function hooksByEntity(hooks) {
   const grouped = new Map;
-  for (const hook2 of hooks) {
-    const list = grouped.get(hook2.entity);
+  for (const hook of hooks) {
+    const list = grouped.get(hook.entity);
     if (list)
-      list.push(hook2);
+      list.push(hook);
     else
-      grouped.set(hook2.entity, [hook2]);
+      grouped.set(hook.entity, [hook]);
   }
   for (const list of grouped.values())
     list.sort((a, b) => a.order - b.order);
@@ -12981,6 +13194,51 @@ var log_spec_default = {
     ],
     rationale: "Redaction is declared once, here, rather than remembered at each call site. A credential reaches stdout exactly once before it is in a log aggregator forever, so the default is to censor by key name anywhere in the object rather than to trust every caller to strip it."
   },
+  errorCategories: [
+    { name: "validation", statuses: [400, 422], level: "warn", expose: "message", description: "The request was understood but its data is not acceptable: a bad payload, an unparseable value, a field-logic violation." },
+    { name: "authentication", statuses: [401], level: "warn", expose: "generic", description: "The caller is not signed in, or the session has ended." },
+    { name: "authorization", statuses: [403], level: "warn", expose: "code", description: "The caller is signed in and is not allowed to do this: a role, an entity grant, a move no grant names." },
+    { name: "not_found", statuses: [404], level: "info", expose: "message", description: "The record, report or route named does not exist, or is not visible to the caller." },
+    { name: "conflict", statuses: [409, 428], level: "info", expose: "message", description: "The request is fine but the record is not in a state that accepts it: a stale version, a Final record, a unique key already taken." },
+    { name: "business_rule", statuses: [422], level: "info", expose: "message", description: "A business rule of the model refused the write. Expected behaviour, worded by the model's author." },
+    { name: "workflow", statuses: [409, 422], level: "warn", expose: "message", description: "A drawn edge is missing, or a process bound to a move failed. Names the workflow and the phase." },
+    { name: "rate_limit", statuses: [429], level: "warn", expose: "message", description: "The caller is over a throttle. Carries when to retry." },
+    { name: "integration", statuses: [502, 503, 504], level: "error", expose: "generic", description: "Something this application depends on failed: a model server, a mail relay, a job queue, an external data source." },
+    { name: "database", statuses: [500, 503], level: "error", expose: "generic", description: "The application's own database failed in a way no constraint explains: a pool exhausted, a connection dropped." },
+    { name: "configuration", statuses: [500], level: "error", expose: "generic", description: "The deployment is wrong: a required setting is missing or malformed. Fatal at boot, an error at run time." },
+    { name: "internal", statuses: [500], level: "error", expose: "generic", description: "Anything unexpected. The caller gets a reference, never the cause." }
+  ],
+  errors: [
+    { code: "VALIDATION_FAILED", category: "validation", status: 400, message: "The request data is not valid.", surfaces: ["generated"] },
+    { code: "FIELD_LOGIC_VIOLATION", category: "validation", status: 400, message: "A field is required, hidden or read-only under the record's current values.", surfaces: ["generated"] },
+    { code: "UNAUTHENTICATED", category: "authentication", status: 401, message: "Sign in to continue.", surfaces: ["generated"] },
+    { code: "FORBIDDEN", category: "authorization", status: 403, message: "You do not have permission to do this.", surfaces: ["generated"] },
+    { code: "ENTITY_ACCESS_DENIED", category: "authorization", status: 403, message: "You do not have access to this kind of record.", surfaces: ["generated"] },
+    { code: "TRANSITION_FORBIDDEN", category: "authorization", status: 403, message: "You may not make this move.", surfaces: ["generated"] },
+    { code: "CHAT_ONLY", category: "authorization", status: 403, message: "This application is used through the assistant.", surfaces: ["generated"] },
+    { code: "STATE_FIELD_SYSTEM_MANAGED", category: "authorization", status: 403, message: "The status moves only by its action buttons.", surfaces: ["generated"] },
+    { code: "NOT_FOUND", category: "not_found", status: 404, message: "Not found.", surfaces: ["generated"] },
+    { code: "ENTITY_NOT_FOUND", category: "not_found", status: 404, message: "This kind of record does not exist.", surfaces: ["generated"] },
+    { code: "CONFLICT", category: "conflict", status: 409, message: "The request conflicts with the current state.", surfaces: ["generated"] },
+    { code: "UNIQUE_VIOLATION", category: "conflict", status: 409, message: "A record with the same value already exists.", surfaces: ["generated"] },
+    { code: "REFERENCE_VIOLATION", category: "conflict", status: 409, message: "The record is still referenced by another record.", surfaces: ["generated"] },
+    { code: "VERSION_CONFLICT", category: "conflict", status: 409, message: "Someone else saved this record first.", surfaces: ["generated"] },
+    { code: "RECORD_FINAL", category: "conflict", status: 409, message: "This record is Final and can no longer be changed.", surfaces: ["generated"] },
+    { code: "LIFECYCLE_STATES_IN_USE", category: "conflict", status: 409, message: "Records are still in a status that this change would remove.", surfaces: ["generated"] },
+    { code: "PRECONDITION_REQUIRED", category: "conflict", status: 428, message: "This request needs the version it was based on.", surfaces: ["generated"] },
+    { code: "RULE_REFUSED", category: "business_rule", status: 422, message: "A business rule refused this change.", surfaces: ["generated"] },
+    { code: "INVALID_TRANSITION", category: "workflow", status: 409, message: "This move is not drawn from the record's current status.", surfaces: ["generated"] },
+    { code: "WORKFLOW_FAILED", category: "workflow", status: 422, message: "A process bound to this move failed.", surfaces: ["generated"] },
+    { code: "RATE_LIMITED", category: "rate_limit", status: 429, message: "Too many requests. Try again shortly.", surfaces: ["generated"] },
+    { code: "INTEGRATION_FAILED", category: "integration", status: 502, message: "A service this application depends on failed.", surfaces: ["generated"] },
+    { code: "SERVICE_UNAVAILABLE", category: "integration", status: 503, message: "A service this application depends on is unavailable.", surfaces: ["generated"] },
+    { code: "INTEGRATION_TIMEOUT", category: "integration", status: 504, message: "A service this application depends on did not answer in time.", surfaces: ["generated"] },
+    { code: "SESSION_UNAVAILABLE", category: "database", status: 503, message: "Your sign-in could not be checked. Try again.", surfaces: ["generated"] },
+    { code: "DATABASE_UNAVAILABLE", category: "database", status: 503, message: "The database is unavailable. Try again shortly.", surfaces: ["generated"] },
+    { code: "DATABASE_ERROR", category: "database", status: 500, message: "Something went wrong. Quote the reference if you ask for help.", surfaces: ["generated"] },
+    { code: "CONFIGURATION_ERROR", category: "configuration", status: 500, message: "Something went wrong. Quote the reference if you ask for help.", surfaces: ["generated"] },
+    { code: "INTERNAL_ERROR", category: "internal", status: 500, message: "Something went wrong. Quote the reference if you ask for help.", surfaces: ["generated"] }
+  ],
   channels: [
     {
       name: "http",
@@ -13033,6 +13291,12 @@ var log_spec_default = {
     {
       name: "entity",
       description: "Business-entity reads and writes in a generated application.",
+      level: "debug",
+      surfaces: ["generated"]
+    },
+    {
+      name: "cache",
+      description: "The generated application's in-process caches: the expiry each one runs with, and settings that could not be read.",
       level: "info",
       surfaces: ["generated"]
     },
@@ -13041,6 +13305,42 @@ var log_spec_default = {
       description: "Process lifecycle: startup, readiness, configuration, shutdown.",
       level: "info",
       surfaces: ["generator", "generated"]
+    },
+    {
+      name: "audit",
+      description: "Audit trail and record history: the PostgreSQL log and, when enabled, immudb proofs.",
+      level: "info",
+      surfaces: ["generated"]
+    },
+    {
+      name: "jobs",
+      description: "Background tasks handed to the job runner.",
+      level: "info",
+      surfaces: ["generated"]
+    },
+    {
+      name: "notifications",
+      description: "Notifications and the dictionary reads behind them.",
+      level: "warn",
+      surfaces: ["generated"]
+    },
+    {
+      name: "modelcontext",
+      description: "The model-context assistant's index of this application's model.",
+      level: "info",
+      surfaces: ["generated"]
+    },
+    {
+      name: "client",
+      description: "What the browser tells the server about itself: render errors, unhandled rejections, failed queries. Reported, never stored.",
+      level: "info",
+      surfaces: ["generated"]
+    },
+    {
+      name: "logging",
+      description: "The logging system itself: level changes made through the administrator endpoint.",
+      level: "warn",
+      surfaces: ["generated"]
     }
   ],
   events: [
@@ -13080,6 +13380,14 @@ var log_spec_default = {
       fields: ["signal", "uptimeMs"]
     },
     {
+      id: "app.unhandled_rejection",
+      channel: "app",
+      level: "error",
+      message: "Unhandled promise rejection",
+      fields: ["err"],
+      surfaces: ["generated"]
+    },
+    {
       id: "app.uncaught",
       channel: "app",
       level: "fatal",
@@ -13098,14 +13406,22 @@ var log_spec_default = {
       channel: "http",
       level: "warn",
       message: "Request rejected",
-      fields: ["method", "path", "status", "durationMs", "requestId", "reason"]
+      fields: ["method", "path", "status", "durationMs", "requestId", "reason", "errorCategory", "errorCode"]
+    },
+    {
+      id: "http.request.refused",
+      channel: "http",
+      level: "info",
+      message: "Request refused",
+      fields: ["method", "path", "status", "durationMs", "requestId", "reason", "errorCategory", "errorCode"],
+      surfaces: ["generated"]
     },
     {
       id: "http.request.failed",
       channel: "http",
       level: "error",
       message: "Request failed",
-      fields: ["method", "path", "status", "durationMs", "requestId", "err"]
+      fields: ["method", "path", "status", "durationMs", "requestId", "err", "errorCategory", "errorCode"]
     },
     {
       id: "http.request.slow",
@@ -13287,7 +13603,7 @@ var log_spec_default = {
       channel: "rules",
       level: "info",
       message: "Rule action performed",
-      fields: ["entity", "rule", "action"]
+      fields: ["entity", "rule", "action", "detail"]
     },
     {
       id: "rules.write.prevented",
@@ -13302,6 +13618,20 @@ var log_spec_default = {
       level: "error",
       message: "Rule evaluation failed",
       fields: ["entity", "rule", "err"]
+    },
+    {
+      id: "cache.configured",
+      channel: "cache",
+      level: "info",
+      message: "Cache configured",
+      fields: ["cache", "ttlMs", "source"]
+    },
+    {
+      id: "cache.config.invalid",
+      channel: "cache",
+      level: "warn",
+      message: "Cache expiry setting is not a number of milliseconds; using the default",
+      fields: ["cache", "variable", "defaultMs"]
     },
     {
       id: "workflow.transition.applied",
@@ -13322,7 +13652,7 @@ var log_spec_default = {
       channel: "workflow",
       level: "debug",
       message: "Workflow step completed",
-      fields: ["workflow", "step", "type", "durationMs"]
+      fields: ["workflow", "step", "type", "durationMs", "detail"]
     },
     {
       id: "workflow.step.failed",
@@ -13377,8 +13707,386 @@ var log_spec_default = {
       id: "entity.validation.failed",
       channel: "entity",
       level: "warn",
-      message: "Record rejected by validation",
-      fields: ["entity", "field", "reason"]
+      message: "Record failed validation",
+      fields: ["entity", "mode", "count"]
+    },
+    {
+      id: "http.proxy.failed",
+      channel: "http",
+      level: "error",
+      message: "Proxy request failed",
+      fields: ["target", "err"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "workflow.step.skipped",
+      channel: "workflow",
+      level: "warn",
+      message: "Workflow step skipped",
+      fields: ["workflow", "step", "type", "reason"]
+    },
+    {
+      id: "workflow.run.completed",
+      channel: "workflow",
+      level: "info",
+      message: "Workflow completed",
+      fields: ["workflow", "entity", "recordId", "mutations", "trigger"]
+    },
+    {
+      id: "workflow.run.failed",
+      channel: "workflow",
+      level: "error",
+      message: "Workflow failed",
+      fields: ["workflow", "entity", "recordId", "trigger", "err"]
+    },
+    {
+      id: "workflow.definition.unavailable",
+      channel: "workflow",
+      level: "warn",
+      message: "Workflow definition could not be loaded",
+      fields: ["workflow", "entity", "err"]
+    },
+    {
+      id: "workflow.run.unrecorded",
+      channel: "workflow",
+      level: "warn",
+      message: "Workflow run could not be recorded",
+      fields: ["workflow", "err"]
+    },
+    {
+      id: "workflow.trigger.ignored",
+      channel: "workflow",
+      level: "debug",
+      message: "Workflow trigger ignored",
+      fields: ["workflow", "entity", "recordId", "reason"]
+    },
+    {
+      id: "workflow.lifecycle.unavailable",
+      channel: "workflow",
+      level: "warn",
+      message: "Stored status flows could not be read",
+      fields: ["reason"]
+    },
+    {
+      id: "workflow.lifecycle.ignored",
+      channel: "workflow",
+      level: "warn",
+      message: "Stored status flow ignored",
+      fields: ["entity", "reason"]
+    },
+    {
+      id: "rules.definition.changed",
+      channel: "rules",
+      level: "info",
+      message: "Rule changed",
+      fields: ["rule", "entity", "operation", "change", "version"]
+    },
+    {
+      id: "rules.migration.completed",
+      channel: "rules",
+      level: "info",
+      message: "Rule migrated",
+      fields: ["rule", "file", "outcome"]
+    },
+    {
+      id: "rules.migration.failed",
+      channel: "rules",
+      level: "error",
+      message: "Rule migration failed",
+      fields: ["file", "err"]
+    },
+    {
+      id: "rules.action.skipped",
+      channel: "rules",
+      level: "warn",
+      message: "Rule action skipped",
+      fields: ["entity", "rule", "action", "reason"]
+    },
+    {
+      id: "rules.action.failed",
+      channel: "rules",
+      level: "error",
+      message: "Rule action failed",
+      fields: ["entity", "rule", "action", "err"]
+    },
+    {
+      id: "rules.definition.missing",
+      channel: "rules",
+      level: "warn",
+      message: "Rule definition file missing",
+      fields: ["entity", "path"]
+    },
+    {
+      id: "rules.engine.skipped",
+      channel: "rules",
+      level: "debug",
+      message: "Rule evaluation skipped",
+      fields: ["entity", "reason"]
+    },
+    {
+      id: "rules.warning.raised",
+      channel: "rules",
+      level: "warn",
+      message: "Rule raised a warning",
+      fields: ["entity", "event", "warning"]
+    },
+    {
+      id: "entity.window.clause_dropped",
+      channel: "entity",
+      level: "warn",
+      message: "Window clause dropped",
+      fields: ["entity", "clause", "reason"]
+    },
+    {
+      id: "entity.reread.failed",
+      channel: "entity",
+      level: "warn",
+      message: "Record could not be re-read",
+      fields: ["entity", "recordId", "err"]
+    },
+    {
+      id: "entity.labels.unresolved",
+      channel: "entity",
+      level: "warn",
+      message: "Reference labels could not be resolved",
+      fields: ["entity", "err"]
+    },
+    {
+      id: "entity.dictionary.provisioned",
+      channel: "entity",
+      level: "info",
+      message: "Dictionary provisioned for entity",
+      fields: ["entity", "created"]
+    },
+    {
+      id: "entity.promotion.completed",
+      channel: "entity",
+      level: "debug",
+      message: "Record promotion completed",
+      fields: ["entity", "recordId", "operation", "outcome", "steps"]
+    },
+    {
+      id: "entity.promotion.failed",
+      channel: "entity",
+      level: "error",
+      message: "Record promotion failed",
+      fields: ["entity", "recordId", "step", "err"]
+    },
+    {
+      id: "entity.promotion.refused",
+      channel: "entity",
+      level: "warn",
+      message: "Record promotion refused",
+      fields: ["entity", "recordId", "reason"]
+    },
+    {
+      id: "entity.promotion.queued",
+      channel: "entity",
+      level: "info",
+      message: "Record promotion queued",
+      fields: ["entity", "recordId", "operation", "runId"]
+    },
+    {
+      id: "entity.promotion.dispatch_failed",
+      channel: "entity",
+      level: "error",
+      message: "Record promotion could not be queued",
+      fields: ["entity", "recordId", "err"]
+    },
+    {
+      id: "entity.transition.unlogged",
+      channel: "entity",
+      level: "warn",
+      message: "Move could not be logged",
+      fields: ["entity", "recordId", "err"]
+    },
+    {
+      id: "audit.ready",
+      channel: "audit",
+      level: "info",
+      message: "Audit store ready",
+      fields: ["store"]
+    },
+    {
+      id: "audit.write.failed",
+      channel: "audit",
+      level: "error",
+      message: "Audit write failed",
+      fields: ["store", "err"]
+    },
+    {
+      id: "audit.immudb.connected",
+      channel: "audit",
+      level: "info",
+      message: "immudb connected",
+      fields: ["host", "port", "database"]
+    },
+    {
+      id: "audit.immudb.unavailable",
+      channel: "audit",
+      level: "warn",
+      message: "immudb unavailable",
+      fields: ["host", "port", "reason"]
+    },
+    {
+      id: "audit.immudb.failed",
+      channel: "audit",
+      level: "error",
+      message: "immudb operation failed",
+      fields: ["operation", "err"]
+    },
+    {
+      id: "audit.history.degraded",
+      channel: "audit",
+      level: "warn",
+      message: "Record history degraded",
+      fields: ["reason"]
+    },
+    {
+      id: "jobs.task.triggered",
+      channel: "jobs",
+      level: "info",
+      message: "Background task triggered",
+      fields: ["task", "handleId", "target"]
+    },
+    {
+      id: "notifications.send.failed",
+      channel: "notifications",
+      level: "warn",
+      message: "Notification step failed",
+      fields: ["step", "err"]
+    },
+    {
+      id: "modelcontext.ready",
+      channel: "modelcontext",
+      level: "info",
+      message: "Model context ready",
+      fields: ["chunks"]
+    },
+    {
+      id: "modelcontext.unavailable",
+      channel: "modelcontext",
+      level: "warn",
+      message: "Model context unavailable",
+      fields: ["reason"]
+    },
+    {
+      id: "auth.session.unavailable",
+      channel: "auth",
+      level: "error",
+      message: "Session could not be checked",
+      fields: ["step", "err"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "auth.guard.unavailable",
+      channel: "auth",
+      level: "error",
+      message: "Access guard could not decide",
+      fields: ["step", "reason"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "auth.capability.unsynced",
+      channel: "auth",
+      level: "warn",
+      message: "Not listening for access changes",
+      fields: ["err"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "app.admin.bootstrap",
+      channel: "app",
+      level: "info",
+      message: "Administrator account ensured",
+      fields: ["email", "step"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "app.admin.password_generated",
+      channel: "app",
+      level: "warn",
+      message: "Administrator password generated",
+      fields: ["email"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "app.admin.failed",
+      channel: "app",
+      level: "warn",
+      message: "Administrator account could not be ensured",
+      fields: ["err"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "app.admin.password_ignored",
+      channel: "app",
+      level: "warn",
+      message: "ADMIN_PASSWORD ignored",
+      fields: ["reason"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "db.seed.completed",
+      channel: "db",
+      level: "info",
+      message: "Seed completed",
+      fields: ["name", "durationMs"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "db.seed.failed",
+      channel: "db",
+      level: "error",
+      message: "Seed failed",
+      fields: ["name", "err"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "auth.email.not_sent",
+      channel: "auth",
+      level: "warn",
+      message: "Email delivery is not configured; the email was not sent",
+      fields: ["kind", "userId"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "client.error.reported",
+      channel: "client",
+      level: "warn",
+      message: "Browser reported an error",
+      fields: ["source", "message", "url", "component", "code", "ref", "stack", "userId"]
+    },
+    {
+      id: "client.report.received",
+      channel: "client",
+      level: "info",
+      message: "Browser reported a message",
+      fields: ["level", "source", "message", "url", "component", "userId"]
+    },
+    {
+      id: "logging.level.changed",
+      channel: "logging",
+      level: "warn",
+      message: "Log level changed",
+      fields: ["channel", "from", "to", "by"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "logging.overrides.unavailable",
+      channel: "logging",
+      level: "warn",
+      message: "Stored log levels could not be read or written",
+      fields: ["err"],
+      surfaces: ["generated"]
+    },
+    {
+      id: "telemetry.start_failed",
+      channel: "app",
+      level: "warn",
+      message: "Tracing could not be started; requests run untraced",
+      fields: ["err"],
+      surfaces: ["generated"]
     }
   ]
 };
@@ -13396,11 +14104,89 @@ function generatedLogSpec() {
     environments: spec.environments,
     transport: spec.transport,
     redact: spec.redact,
+    errorCategories: spec.errorCategories,
+    errors: spec.errors.filter((error) => error.surfaces.includes(SURFACE)).map(({ surfaces: _surfaces, ...error }) => error),
     channels: channels.map(({ surfaces: _surfaces, ...channel }) => channel),
-    events: spec.events.filter((event) => kept.has(event.channel))
+    events: spec.events.filter((event) => kept.has(event.channel)).filter((event) => event.surfaces === undefined || event.surfaces.includes(SURFACE)).map(({ surfaces: _surfaces, ...event }) => event)
   };
   return `${JSON.stringify(shipped, null, 2)}
 `;
+}
+function generatedErrorCatalogue() {
+  const spec = log_spec_default;
+  const errors = spec.errors.filter((error) => error.surfaces.includes(SURFACE));
+  const categories = spec.errorCategories;
+  const categoryUnion = categories.map((category, index) => `  | ${JSON.stringify(category.name)}${index === categories.length - 1 ? ";" : ""}`);
+  const categoryRows = categories.map((category) => `  ${category.name}: { level: ${JSON.stringify(category.level)}, ` + `expose: ${JSON.stringify(category.expose)}, ` + `statuses: ${JSON.stringify(category.statuses)} },`);
+  const codeRows = errors.map((error) => `  ${error.code}: { category: ${JSON.stringify(error.category)}, ` + `status: ${error.status}, message: ${JSON.stringify(error.message)} },`);
+  return [
+    "/**",
+    " * The errors this application can raise, and what each one is worth.",
+    " *",
+    " * Generated from the APPWITHAI log specification — do not edit by hand. A code",
+    " * names its category, its HTTP status and the message a caller is shown when",
+    " * the error may not show its own. The category decides the level the request",
+    " * is logged at and how much of the error leaves the server.",
+    " */",
+    "",
+    "export type ErrorCategory =",
+    ...categoryUnion,
+    "",
+    'export type ErrorExposure = "message" | "code" | "generic";',
+    "",
+    "export const ERROR_CATEGORIES: Record<",
+    "  ErrorCategory,",
+    '  { level: "warn" | "info" | "error" | "fatal"; expose: ErrorExposure; statuses: number[] }',
+    "> = {",
+    ...categoryRows,
+    "};",
+    "",
+    "export const ERROR_CATALOGUE = {",
+    ...codeRows,
+    "} as const satisfies Record<string, { category: ErrorCategory; status: number; message: string }>;",
+    "",
+    "export type ErrorCode = keyof typeof ERROR_CATALOGUE;",
+    ""
+  ].join(`
+`);
+}
+
+// language/state-field.ts
+var STATE_FIELD_CANDIDATES = ["status", "state", "stage"];
+function stateFieldOf(columns) {
+  const names = new Set(columns);
+  return STATE_FIELD_CANDIDATES.find((candidate) => names.has(candidate));
+}
+var STATE_FIELD_REFUSAL_CODE = "STATE_FIELD_SYSTEM_MANAGED";
+var LIFECYCLE_DRAFT = "draft";
+var LIFECYCLE_FINAL = "final";
+var LIFECYCLE_ERROR = "error";
+var DOC_STATUS_COLUMN = "doc_status";
+var REOPEN_EVENT = "reopen";
+var RESERVED_STATE_NAMES = [LIFECYCLE_FINAL, LIFECYCLE_ERROR];
+function draftValueFor(machine) {
+  const own = machine?.states.find((state) => state.name.toLowerCase() === LIFECYCLE_DRAFT);
+  return own?.name ?? LIFECYCLE_DRAFT;
+}
+function lifecycleValuesFor(machine) {
+  if (!machine)
+    return [LIFECYCLE_DRAFT, LIFECYCLE_FINAL, LIFECYCLE_ERROR];
+  const values = [draftValueFor(machine)];
+  for (const state of machine.states) {
+    if (!values.includes(state.name))
+      values.push(state.name);
+  }
+  if (!values.includes(LIFECYCLE_ERROR))
+    values.push(LIFECYCLE_ERROR);
+  return values;
+}
+function normalizeEvent(event) {
+  return event.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+function moveLabel(_event, to) {
+  const words = to.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const text = words === words.toUpperCase() ? words.toLowerCase() : words;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // packages/generator/src/rbac/index.ts
@@ -13424,7 +14210,7 @@ var OPERATION_ALIASES = {
   remove: "delete",
   destroy: "delete"
 };
-var DIRECTIVE2 = /^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*]\w*)\s*$/;
+var DIRECTIVE2 = /^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/;
 function parseRoleExpression(expression) {
   const roles = [];
   for (const part of expression.split("|")) {
@@ -13434,25 +14220,36 @@ function parseRoleExpression(expression) {
   }
   return roles;
 }
-function busTableName(entity2) {
-  const snake = entity2.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase().replace(/^_/, "");
+function busTableName(entity) {
+  const snake = entity.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase().replace(/^_/, "");
   return snake.startsWith("bus_") || snake.startsWith("sys_") ? snake : `bus_${snake}`;
 }
 function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = () => {}) {
   const known = new Set(knownEntities);
   const operations = new Map;
   const transitions = new Map;
-  const edgesFor = (entity2, event) => {
+  const edgesFor = (entity, target) => {
     const found = [];
+    const arrow = /^([A-Za-z_]\w*)->([A-Za-z_]\w*)$/.exec(target);
     for (const machine of stateMachines) {
-      if (machine.entity !== entity2)
+      if (machine.entity !== entity)
         continue;
+      const draft = machine.transitions.flatMap((edge) => [edge.from, edge.to]).find((state) => state.toLowerCase() === LIFECYCLE_DRAFT) ?? LIFECYCLE_DRAFT;
       for (const edge of machine.transitions) {
-        if (!edge.trigger)
-          continue;
-        const normalized = edge.trigger.trim().toLowerCase().replace(/[\s-]+/g, "_");
-        if (normalized === event.toLowerCase())
+        if (arrow) {
+          if (edge.from === arrow[1] && edge.to === arrow[2])
+            found.push({ from: edge.from, to: edge.to });
+        } else if (edge.trigger && normalizeEvent(edge.trigger) === normalizeEvent(target)) {
           found.push({ from: edge.from, to: edge.to });
+        }
+      }
+      const finals = machine.terminal ?? [];
+      if (arrow && found.length === 0 && finals.includes(arrow[1]) && arrow[2] === draft) {
+        found.push({ from: arrow[1], to: draft });
+      }
+      if (!arrow && found.length === 0 && normalizeEvent(target) === REOPEN_EVENT) {
+        for (const from of finals)
+          found.push({ from, to: draft });
       }
     }
     return found;
@@ -13467,55 +14264,56 @@ function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = ()
       onWarn(`Skipping malformed %%rbac directive: ${line}`);
       continue;
     }
-    const [, roleExpr, entity2, rawTarget] = match;
-    if (known.size && !known.has(entity2)) {
-      onWarn(`%%rbac targets unknown entity "${entity2}" — skipped.`);
+    const [, roleExpr, entity, rawTarget] = match;
+    if (known.size && !known.has(entity)) {
+      onWarn(`%%rbac targets unknown entity "${entity}" — skipped.`);
       continue;
     }
     const roles = parseRoleExpression(roleExpr);
     if (roles.length === 0) {
-      onWarn(`%%rbac on ${entity2}.${rawTarget} names no role — skipped.`);
+      onWarn(`%%rbac on ${entity}.${rawTarget} names no role — skipped.`);
       continue;
     }
     const resolved = OPERATION_ALIASES[rawTarget.toLowerCase()];
     if (resolved) {
       const ops = resolved === "*" ? [...RBAC_OPERATIONS] : [resolved];
       for (const operation of ops) {
-        const key2 = `${entity2}:${operation}`;
-        const existing2 = operations.get(key2);
-        if (existing2) {
+        const key = `${entity}:${operation}`;
+        const existing = operations.get(key);
+        if (existing) {
           for (const role of roles)
-            existing2.roles.add(role);
+            existing.roles.add(role);
         } else {
-          operations.set(key2, { entity: entity2, operation, roles: new Set(roles) });
+          operations.set(key, { entity, operation, roles: new Set(roles) });
         }
       }
       continue;
     }
-    const edges = edgesFor(entity2, rawTarget);
+    const edges = edgesFor(entity, rawTarget);
     if (edges.length === 0) {
-      onWarn(`%%rbac on ${entity2}.${rawTarget} names neither a CRUD operation ` + `(${RBAC_OPERATIONS.join(", ")}, *) nor a transition in ${entity2}'s state machine — skipped.`);
+      onWarn(`%%rbac on ${entity}.${rawTarget} names neither a CRUD operation ` + `(${RBAC_OPERATIONS.join(", ")}, *), a move in ${entity}'s state machine, nor ` + `${REOPEN_EVENT} — skipped.`);
       continue;
     }
-    const key = `${entity2}:${rawTarget.toLowerCase()}`;
+    const transition = rawTarget.includes("->") ? rawTarget : normalizeEvent(rawTarget);
+    const key = `${entity}:${transition}`;
     const existing = transitions.get(key);
     if (existing) {
       for (const role of roles)
         existing.roles.add(role);
     } else {
-      transitions.set(key, { entity: entity2, transition: rawTarget, edges, roles: new Set(roles) });
+      transitions.set(key, { entity, transition, edges, roles: new Set(roles) });
     }
   }
   return {
-    operations: [...operations.values()].map(({ entity: entity2, operation, roles }) => ({
-      entity: entity2,
-      tableName: busTableName(entity2),
+    operations: [...operations.values()].map(({ entity, operation, roles }) => ({
+      entity,
+      tableName: busTableName(entity),
       operation,
       roles: [...roles].sort()
     })).sort((a, b) => a.tableName.localeCompare(b.tableName) || a.operation.localeCompare(b.operation)),
-    transitions: [...transitions.values()].map(({ entity: entity2, transition, edges, roles }) => ({
-      entity: entity2,
-      tableName: busTableName(entity2),
+    transitions: [...transitions.values()].map(({ entity, transition, edges, roles }) => ({
+      entity,
+      tableName: busTableName(entity),
       transition,
       edges,
       roles: [...roles].sort()
@@ -13525,8 +14323,8 @@ function compileRbac(source, knownEntities = [], stateMachines = [], onWarn = ()
 function rbacRoleNames(compiled) {
   return [
     ...new Set([
-      ...compiled.operations.flatMap((rule2) => rule2.roles),
-      ...compiled.transitions.flatMap((rule2) => rule2.roles)
+      ...compiled.operations.flatMap((rule) => rule.roles),
+      ...compiled.transitions.flatMap((rule) => rule.roles)
     ])
   ].sort();
 }
@@ -13565,11 +14363,11 @@ function deriveAccess(compiled, options) {
     if (!declared.has(key))
       declared.set(key, role);
   };
-  for (const rule2 of compiled.operations)
-    for (const role of rule2.roles)
+  for (const rule of compiled.operations)
+    for (const role of rule.roles)
       remember(role);
-  for (const rule2 of compiled.transitions)
-    for (const role of rule2.roles)
+  for (const rule of compiled.transitions)
+    for (const role of rule.roles)
       remember(role);
   const roles = BUILT_IN.map((role) => ({ ...role }));
   const taken = new Set(roles.map((role) => role.name.toLowerCase()));
@@ -13603,21 +14401,21 @@ function deriveAccess(compiled, options) {
     isAdmin: false
   });
   const entityVisibility = {};
-  for (const rule2 of compiled.operations) {
-    if (rule2.operation !== "read")
+  for (const rule of compiled.operations) {
+    if (rule.operation !== "read")
       continue;
-    const existing = entityVisibility[rule2.entity] ?? [];
-    entityVisibility[rule2.entity] = [...new Set([...existing, ...rule2.roles])].sort();
+    const existing = entityVisibility[rule.entity] ?? [];
+    entityVisibility[rule.entity] = [...new Set([...existing, ...rule.roles])].sort();
   }
   const allEntities = options.entities && options.entities.length > 0 ? options.entities : Object.keys(entityVisibility);
-  const normalize2 = (value) => value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const normalize = (value) => value.trim().toLowerCase().replace(/[\s-]+/g, "_");
   const entityCounts = {};
   for (const role of roles) {
-    entityCounts[role.name] = role.isAdmin ? allEntities.length : allEntities.filter((entity2) => {
-      const allowed = entityVisibility[entity2];
+    entityCounts[role.name] = role.isAdmin ? allEntities.length : allEntities.filter((entity) => {
+      const allowed = entityVisibility[entity];
       if (!allowed || allowed.length === 0)
         return true;
-      return allowed.some((name) => normalize2(name) === normalize2(role.declaredAs));
+      return allowed.some((name) => normalize(name) === normalize(role.declaredAs));
     }).length;
   }
   return {
@@ -13656,7 +14454,7 @@ class CliExecutor {
     }
   }
   static async executeAsync(command, args, options = {}) {
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve, reject) => {
       const cwd = options.cwd || process.cwd();
       const env = { ...process.env, ...options.env };
       console.log(`  \uD83D\uDD27 Running: ${command} ${args.join(" ")}`);
@@ -13683,7 +14481,7 @@ class CliExecutor {
       child.on("close", (code) => {
         clearTimeout(timer);
         if (code === 0) {
-          resolve2(stdout);
+          resolve(stdout);
         } else {
           console.error(`  ❌ Command failed with code ${code}: ${command} ${args.join(" ")}`);
           if (stderr)
@@ -13772,16 +14570,22 @@ function extractWorkflowSections(source) {
     const kind = match?.[3];
     const trigger = directive.match(/\btrigger:\s*(\S+)/)?.[1];
     const operation = directive.match(/\boperation:\s*(\S+)/)?.[1]?.toUpperCase();
+    const status = directive.match(/\bstatus:\s*(\S+)/)?.[1];
+    const resolvedKind = kind === "state" || kind === "saga" ? kind : "hook";
     return {
       name: match?.[1] ?? "workflow",
       entity: match?.[2] ?? "",
-      kind: kind === "state" || kind === "saga" ? kind : "hook",
+      kind: resolvedKind,
       trigger: trigger === "rule" ? "rule" : trigger === "automatic" ? "automatic" : undefined,
       operation: operation === "CREATE" || operation === "UPDATE" || operation === "DELETE" || operation === "ALL" ? operation : undefined,
+      status: status && resolvedKind !== "state" ? stateToken(status) : undefined,
       title,
       diagram: body
     };
   });
+}
+function stateToken(name) {
+  return name.trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 function extractSections(source, lead) {
   const lines = source.split(`
@@ -14037,32 +14841,32 @@ function compileSagas(sections, knownEntities = [], onWarn = () => {}) {
         continue;
       const autoType = line.match(AUTO_TYPE_DIRECTIVE);
       if (autoType?.[1] && autoType[2]) {
-        const [, nodeId2 = "", typeName2 = "", rest2 = ""] = autoType;
-        if (!STEP_TYPES.includes(typeName2)) {
-          onWarn(`Workflow "${section.name}": unknown step type "${typeName2}" on node ${nodeId2} — skipped.`);
+        const [, nodeId = "", typeName = "", rest = ""] = autoType;
+        if (!STEP_TYPES.includes(typeName)) {
+          onWarn(`Workflow "${section.name}": unknown step type "${typeName}" on node ${nodeId} — skipped.`);
           continue;
         }
-        const existing = declared.get(nodeId2);
-        declared.set(nodeId2, {
-          nodeId: nodeId2,
-          type: typeName2,
-          label: labels.get(nodeId2) ?? nodeId2,
-          props: { ...existing?.props, ...parseStepProps(rest2) }
+        const existing = declared.get(nodeId);
+        declared.set(nodeId, {
+          nodeId,
+          type: typeName,
+          label: labels.get(nodeId) ?? nodeId,
+          props: { ...existing?.props, ...parseStepProps(rest) }
         });
-        autoNodes.add(nodeId2);
+        autoNodes.add(nodeId);
         continue;
       }
       const autoProp = line.match(AUTO_PROP_DIRECTIVE);
       if (autoProp?.[1] && autoProp[2] && autoProp[2] !== "type") {
-        const [, nodeId2 = "", key = "", value = ""] = autoProp;
-        const existing = declared.get(nodeId2);
-        declared.set(nodeId2, {
-          nodeId: nodeId2,
+        const [, nodeId = "", key = "", value = ""] = autoProp;
+        const existing = declared.get(nodeId);
+        declared.set(nodeId, {
+          nodeId,
           type: existing?.type ?? "Formula",
-          label: labels.get(nodeId2) ?? nodeId2,
+          label: labels.get(nodeId) ?? nodeId,
           props: { ...existing?.props, [key]: value.trim() }
         });
-        autoNodes.add(nodeId2);
+        autoNodes.add(nodeId);
         continue;
       }
       const match = line.match(STEP_DIRECTIVE);
@@ -14124,16 +14928,26 @@ function compileSagas(sections, knownEntities = [], onWarn = () => {}) {
       name: section.name,
       entity: section.entity,
       trigger: section.trigger === "rule" ? "rule" : "automatic",
-      operation: section.operation ?? "CREATE",
+      operation: sagaOperation(section, onWarn),
       steps: orderSteps(section.diagram ?? "", declared)
     });
   }
   return compiled;
 }
+function sagaOperation(section, onWarn) {
+  if (section.status) {
+    if (section.trigger === "rule") {
+      onWarn(`Workflow "${section.name}": status is ignored on a rule-triggered saga.`);
+    } else {
+      return `ENTER:${section.status.trim().toUpperCase().replace(/[\s-]+/g, "_")}`;
+    }
+  }
+  return section.operation ?? "CREATE";
+}
 function escapeXmlAttr(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-function buildSagaBpmn(saga, tableName, resolveTable = (entity2) => entity2) {
+function buildSagaBpmn(saga, tableName, resolveTable = (entity) => entity) {
   const processId = `${tableName}_${saga.name.replace(/[^A-Za-z0-9_]/g, "_")}`;
   const tasks = saga.steps.map((step) => {
     const entries = [["nodeType", step.type]];
@@ -14204,7 +15018,7 @@ ${edges.join(`
 }
 function describeSaga(saga) {
   const chain = saga.steps.map((step) => `${step.type}`).join(" → ");
-  const gate = saga.trigger === "rule" ? "runs when a rule triggers it" : `runs on every ${saga.operation}`;
+  const gate = saga.trigger === "rule" ? "runs when a rule triggers it" : saga.operation.startsWith("ENTER:") ? `runs when a button moves the record to ${saga.operation.slice(6).toLowerCase().replace(/_/g, " ")}` : `runs on every ${saga.operation}`;
   return `${saga.name}: ${saga.steps.length} steps · ${gate} · ${chain}`;
 }
 
@@ -14258,13 +15072,21 @@ function compileWorkflows(source, knownEntities = [], onWarn = () => {}) {
     if (!initial) {
       onWarn(`Workflow "${section.name}" has no starting state — records will not be stamped.`);
     }
+    for (const reserved of RESERVED_STATE_NAMES) {
+      if (states.has(reserved)) {
+        onWarn(`Workflow "${section.name}" draws a state named "${reserved}", which the record ` + `lifecycle reserves (checker EML509).`);
+      }
+    }
+    if (terminal.length === 0) {
+      onWarn(`Workflow "${section.name}" ends nowhere: no state reaches [*], so no record of ` + `${section.entity} can become Final (checker EML422).`);
+    }
+    const machine = { states: [...states.values()], initial, terminal };
     compiled.push({
       name: section.name,
       entity: section.entity,
-      states: [...states.values()],
+      ...machine,
       transitions,
-      initial,
-      terminal
+      lifecycleValues: lifecycleValuesFor(machine)
     });
   }
   return compiled;
@@ -14466,6 +15288,7 @@ function generateForeignKeyName(referencedTableName) {
 }
 // packages/generator/src/templates/loader.ts
 var import_handlebars = __toESM(require_handlebars(), 1);
+var SIGNED_COLUMN = /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
 function resolveOsUser() {
   if (process.env.PGUSER)
     return process.env.PGUSER;
@@ -14530,6 +15353,7 @@ class TemplateLoader {
     import_handlebars.default.registerHelper("and", (...args) => args.slice(0, -1).every(Boolean));
     import_handlebars.default.registerHelper("or", (...args) => args.slice(0, -1).some(Boolean));
     import_handlebars.default.registerHelper("not", (value) => !value);
+    import_handlebars.default.registerHelper("isSignedColumn", (name) => typeof name === "string" && SIGNED_COLUMN.test(name));
     import_handlebars.default.registerHelper("eachFirst", function(items, count, options) {
       if (!Array.isArray(items) || items.length === 0) {
         return options.inverse(this);
@@ -14685,12 +15509,12 @@ class TemplateLoader {
       };
       return mapping[referenceId] || "varchar(255)";
     });
-    import_handlebars.default.registerHelper("tanstackQueryKey", (entity2) => `['${entity2}', 'list']`);
-    import_handlebars.default.registerHelper("tanstackDetailKey", (entity2, id) => {
+    import_handlebars.default.registerHelper("tanstackQueryKey", (entity) => `['${entity}', 'list']`);
+    import_handlebars.default.registerHelper("tanstackDetailKey", (entity, id) => {
       const idVar = typeof id === "string" ? id : "id";
-      return `['${entity2}', 'detail', ${idVar}]`;
+      return `['${entity}', 'detail', ${idVar}]`;
     });
-    import_handlebars.default.registerHelper("tanstackMutationKey", (entity2, action) => `['${entity2}', '${action}']`);
+    import_handlebars.default.registerHelper("tanstackMutationKey", (entity, action) => `['${entity}', '${action}']`);
     import_handlebars.default.registerHelper("tanstackColumnType", (referenceId) => {
       const mapping = {
         [ReferenceType.STRING]: "text",
@@ -14721,10 +15545,10 @@ class TemplateLoader {
       };
       return mapping[referenceId] || "input";
     });
-    import_handlebars.default.registerHelper("nestControllerName", (entity2) => `${pascalCase(entity2)}Controller`);
-    import_handlebars.default.registerHelper("nestServiceName", (entity2) => `${pascalCase(entity2)}Service`);
-    import_handlebars.default.registerHelper("nestModuleName", (entity2) => `${pascalCase(entity2)}Module`);
-    import_handlebars.default.registerHelper("nestDtoName", (entity2, prefix = "") => `${prefix}${pascalCase(entity2)}Dto`);
+    import_handlebars.default.registerHelper("nestControllerName", (entity) => `${pascalCase(entity)}Controller`);
+    import_handlebars.default.registerHelper("nestServiceName", (entity) => `${pascalCase(entity)}Service`);
+    import_handlebars.default.registerHelper("nestModuleName", (entity) => `${pascalCase(entity)}Module`);
+    import_handlebars.default.registerHelper("nestDtoName", (entity, prefix = "") => `${prefix}${pascalCase(entity)}Dto`);
     import_handlebars.default.registerHelper("nestGuardName", (name) => `${pascalCase(name)}Guard`);
     import_handlebars.default.registerHelper("nestDecoratorName", (name) => `${pascalCase(name)}`);
     import_handlebars.default.registerHelper("shadcnInputType", (referenceId) => {
@@ -15135,7 +15959,564 @@ class BaseGenerator {
   }
 }
 
+// packages/generator/src/generators/tanstack-start-nestjs/fk-constraints.ts
+function buildFkConstraints(busEntities, relationships) {
+  const byName = new Map(busEntities.map((entity) => [(entity.originalName || entity.name).toLowerCase(), entity]));
+  const constraints = [];
+  const seen = new Set;
+  for (const relationship of relationships) {
+    if (relationship.cardinality !== "oneToMany")
+      continue;
+    const parent = byName.get(relationship.sourceEntity.toLowerCase());
+    const child = byName.get(relationship.targetEntity.toLowerCase());
+    if (!parent || !child)
+      continue;
+    const column = `${parent.tableName.replace(/^bus_/, "")}_id`;
+    const attribute = (child.attributes ?? []).find((candidate) => (candidate.columnName || candidate.name) === column);
+    if (!attribute)
+      continue;
+    const name = `fk_${child.tableName}_${column}`;
+    if (seen.has(name))
+      continue;
+    seen.add(name);
+    const onDelete = attribute.required ? "RESTRICT" : "SET NULL";
+    constraints.push({
+      childTable: child.tableName,
+      parentTable: parent.tableName,
+      column,
+      name,
+      onDelete
+    });
+  }
+  return constraints;
+}
+
+// language/sections.ts
+var KEYS = new Set(["entity", "name", "help", "rows", "collapsed"]);
+var REQUIRED = ["entity", "name", "rows"];
+var DIRECTIVE3 = /^\s*%%section\b\s*(.*)$/i;
+function parseKeys(body) {
+  const keys = new Map;
+  let last;
+  for (const segment of body.split(";")) {
+    const match = segment.match(/^\s*([A-Za-z]+)\s*:(.*)$/);
+    const key = match?.[1]?.toLowerCase();
+    if (match && key && KEYS.has(key)) {
+      keys.set(key, (match[2] ?? "").trim());
+      last = key;
+    } else if (last && segment.trim()) {
+      keys.set(last, `${keys.get(last) ?? ""}; ${segment.trim()}`.trim());
+    }
+  }
+  return keys;
+}
+function parseRows(text) {
+  return text.split("|").map((row) => row.split(",").map((column) => column.trim()).filter(Boolean)).filter((row) => row.length > 0);
+}
+function formatRows(rows) {
+  return rows.map((row) => row.join(", ")).join(" | ");
+}
+function parseSectionDirectives(source) {
+  const found = [];
+  const lines = source.replace(/\r\n/g, `
+`).split(`
+`);
+  lines.forEach((text, index) => {
+    const match = text.match(DIRECTIVE3);
+    if (!match)
+      return;
+    const keys = parseKeys(match[1] ?? "");
+    const rowsText = keys.get("rows");
+    found.push({
+      line: index + 1,
+      entity: keys.get("entity") || undefined,
+      name: keys.get("name") || undefined,
+      help: keys.get("help") || undefined,
+      collapsed: /^(true|yes)$/i.test(keys.get("collapsed") ?? ""),
+      rows: rowsText === undefined ? undefined : parseRows(rowsText),
+      missing: REQUIRED.filter((key) => !keys.get(key))
+    });
+  });
+  return found;
+}
+function sectionsByEntity(directives) {
+  const byEntity = new Map;
+  for (const directive of directives) {
+    if (directive.missing.length > 0 || !directive.entity || !directive.name)
+      continue;
+    const sections = byEntity.get(directive.entity) ?? [];
+    const existing = sections.find((section) => section.name.toLowerCase() === directive.name?.toLowerCase());
+    if (existing) {
+      existing.rows.push(...directive.rows ?? []);
+      existing.lines.push(directive.line);
+      if (!existing.help && directive.help)
+        existing.help = directive.help;
+      existing.collapsed = existing.collapsed || directive.collapsed;
+    } else {
+      sections.push({
+        name: directive.name,
+        help: directive.help,
+        collapsed: directive.collapsed,
+        rows: [...directive.rows ?? []],
+        lines: [directive.line]
+      });
+    }
+    byEntity.set(directive.entity, sections);
+  }
+  return byEntity;
+}
+function placeFields(sections, declared) {
+  const placed = new Map;
+  let order = 0;
+  sections.forEach((section, sectionIndex) => {
+    let rowNo = 0;
+    for (const raw of section.rows) {
+      const row = raw.filter((column) => (!declared || declared.has(column)) && !placed.has(column));
+      if (row.length === 0)
+        continue;
+      rowNo++;
+      const pair = row.slice(0, 2);
+      pair.forEach((column, position) => {
+        placed.set(column, {
+          section: sectionIndex,
+          row: rowNo,
+          column: position === 0 ? 1 : 2,
+          sameLine: position === 1,
+          span: pair.length === 1 ? 2 : 1,
+          order: ++order
+        });
+      });
+      for (const column of row.slice(2)) {
+        rowNo++;
+        placed.set(column, {
+          section: sectionIndex,
+          row: rowNo,
+          column: 1,
+          sameLine: false,
+          span: 2,
+          order: ++order
+        });
+      }
+    }
+  });
+  return placed;
+}
+var UNPLACED_SECTION = "Other";
+
+// packages/generator/src/parsers/section.parser.ts
+function attachFormSections(source, entities) {
+  const byEntity = sectionsByEntity(parseSectionDirectives(source));
+  for (const entity of entities) {
+    const sections = byEntity.get(entity.name);
+    if (!sections || sections.length === 0)
+      continue;
+    entity.formSections = sections.map((section) => ({
+      name: section.name,
+      help: section.help,
+      collapsed: section.collapsed,
+      rows: section.rows.map((row) => [...row])
+    }));
+  }
+}
+function formLayoutFor(entity) {
+  const sections = entity.formSections;
+  if (!sections || sections.length === 0)
+    return;
+  const columns = entity.attributes.map((attribute) => attribute.name).filter((name) => name !== entity.primaryKey);
+  const placements = placeFields(sections.map((section) => ({ ...section, lines: [] })), new Set(columns));
+  const groups = sections.map((section, index) => ({
+    name: section.name,
+    description: section.help,
+    collapsed: section.collapsed,
+    seqNo: (index + 1) * 10,
+    columns: 2
+  }));
+  const fields = new Map;
+  let order = 0;
+  const ordered = [...placements.entries()].sort((a, b) => a[1].order - b[1].order);
+  for (const [column, placement] of ordered) {
+    order = placement.order;
+    fields.set(column, {
+      group: groups[placement.section]?.name ?? UNPLACED_SECTION,
+      seqNo: placement.order * 10,
+      sameLine: placement.sameLine,
+      columnSpan: placement.span
+    });
+  }
+  const unplaced = columns.filter((column) => !fields.has(column));
+  if (unplaced.length > 0) {
+    let name = UNPLACED_SECTION;
+    while (groups.some((group) => group.name.toLowerCase() === name.toLowerCase()))
+      name += " fields";
+    groups.push({
+      name,
+      description: "Fields the model did not place in a section.",
+      collapsed: true,
+      seqNo: (groups.length + 1) * 10,
+      columns: 2
+    });
+    unplaced.forEach((column, index) => {
+      const right = index % 2 === 1;
+      const alone = !right && index === unplaced.length - 1;
+      fields.set(column, {
+        group: name,
+        seqNo: ++order * 10,
+        sameLine: right,
+        columnSpan: alone ? 2 : 1
+      });
+    });
+  }
+  return { groups, fields };
+}
+
+// packages/generator/src/generators/tanstack-start-nestjs/lifecycle-module.ts
+var LIFECYCLE_MODULE_HEAD = `/**
+ * Every business table's lifecycle — generated from the model, do not edit.
+ *
+ * A record is saved into Draft. With no status flow, a save that its rules and
+ * workflows accept moves it to Final; one they refuse leaves it in Error with the
+ * reason, and saving it again runs them again. With a status flow, the accepted
+ * save moves it to the flow's first status, and from there it moves only when
+ * someone presses a move along an edge the diagram drew. Every end state of a
+ * flow is Final and locked: Reopen (a role the model names, or the
+ * administrator) takes it back to Draft. A record with no flow is never locked:
+ * each save of it runs Draft → Final again.
+ *
+ * Who may press a move is not stated here: that is sys_access_grant, which an
+ * administrator can change in the running application.
+ *
+ * LIFECYCLES is the model's. An administrator can redraw a flow in Rules and
+ * workflows (sys_workflow_definitions, kind = 'state'); lifecycleOf answers with
+ * that one, so every reader follows the edit, and with the model's where there is
+ * none.
+ */
+
+export type LifecyclePhase = 'draft' | 'active' | 'final' | 'error';
+
+export interface LifecycleEdge {
+  from: string;
+  to: string;
+  /** The edge's event, in one token (\`close_won\`); '' when the diagram did not label it. */
+  event: string;
+  /** What the button says. */
+  label: string;
+}
+
+export interface Lifecycle {
+  /** The column the lifecycle is stored in: the state field, else doc_status. */
+  column: string;
+  hasMachine: boolean;
+  /** The value Draft is stored as. */
+  draft: string;
+  /** Where an accepted save sends a Draft record: the flow's first status, else 'final'. */
+  afterDraft: string;
+  /** The Final values: every state the diagram ends. */
+  terminal: string[];
+  /** The drawn edges, the only moves a record makes. */
+  edges: LifecycleEdge[];
+  /** Every value the column may hold. */
+  values: string[];
+}
+
+export const LIFECYCLE_DRAFT = 'draft';
+export const LIFECYCLE_FINAL = 'final';
+export const LIFECYCLE_ERROR = 'error';
+export const REOPEN_EVENT = 'reopen';
+
+export const LIFECYCLES: Readonly<Record<string, Lifecycle>> = {
+`;
+var LIFECYCLE_MODULE_TAIL = `
+};
+
+/**
+ * The lifecycles an administrator changed in Rules and workflows, by table. A
+ * table with no entry here runs the model's lifecycle above. The backend fills it
+ * from sys_workflow_definitions (kind = 'state'); the front end from
+ * GET /api/lifecycles.
+ */
+let overrides: Record<string, Lifecycle> = {};
+let overridesVersion = 0;
+const overrideListeners = new Set<() => void>();
+
+/** A table's lifecycle: the administrator's, else the model's. Every business table has one. */
+export function lifecycleOf(tableName: string): Lifecycle | undefined {
+  return overrides[tableName] ?? LIFECYCLES[tableName];
+}
+
+/** The lifecycle the model declared, whatever an administrator has changed since. */
+export function modelLifecycleOf(tableName: string): Lifecycle | undefined {
+  return LIFECYCLES[tableName];
+}
+
+/** True when the table runs a lifecycle an administrator changed. */
+export function isLifecycleOverridden(tableName: string): boolean {
+  return !!overrides[tableName];
+}
+
+/**
+ * Replace every administrator lifecycle at once. An entry for a table the model
+ * gave no status flow is ignored: the column a lifecycle is stored in is schema,
+ * so a flow can be changed here but not created.
+ */
+export function applyLifecycleOverrides(next: Record<string, Lifecycle | null | undefined>): void {
+  const kept: Record<string, Lifecycle> = {};
+  for (const [tableName, lifecycle] of Object.entries(next ?? {})) {
+    const model = LIFECYCLES[tableName];
+    if (!lifecycle || !model?.hasMachine) continue;
+    kept[tableName] = { ...lifecycle, column: model.column, hasMachine: true };
+  }
+  overrides = kept;
+  overridesVersion += 1;
+  for (const listener of overrideListeners) listener();
+}
+
+/** Called after every applyLifecycleOverrides; returns the unsubscribe. */
+export function subscribeLifecycles(listener: () => void): () => void {
+  overrideListeners.add(listener);
+  return () => {
+    overrideListeners.delete(listener);
+  };
+}
+
+/** Bumped by every applyLifecycleOverrides. */
+export function lifecycleOverridesVersion(): number {
+  return overridesVersion;
+}
+
+/** An edge's event in one token: \`close won\`, \`Close-Won\` and \`close_won\` are one event. */
+export function normalizeLifecycleEvent(event: string): string {
+  return event.trim().toLowerCase().replace(/[\\s-]+/g, '_');
+}
+
+/** What a button says: the status it moves to. The event stays the move's name, not its label. */
+export function lifecycleMoveLabel(_event: string | undefined, to: string): string {
+  const words = to.replace(/[_-]+/g, ' ').replace(/\\s+/g, ' ').trim();
+  // An id written in capitals (\`QUALIFICATION\`) reads as a word, not a shout.
+  const text = words === words.toUpperCase() ? words.toLowerCase() : words;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const DIAGRAM_EDGE = /^(\\[\\*\\]|[A-Za-z_]\\w*)\\s*-->\\s*(\\[\\*\\]|[A-Za-z_]\\w*)\\s*(?::\\s*(.+))?$/;
+
+/**
+ * A table's lifecycle read from a \`stateDiagram-v2\` the way the generator reads
+ * the model's (\`[*] --> first\`, \`a --> b : event\`, \`end --> [*]\`; \`%%\` lines
+ * ignored), on the model's column. Returns the problems instead when the diagram
+ * cannot be a lifecycle: no first state, no end state, a reserved state name, or a
+ * table the model gave no flow.
+ */
+export function lifecycleFromDiagram(
+  tableName: string,
+  diagram: string,
+): { lifecycle?: Lifecycle; problems: string[] } {
+  const model = LIFECYCLES[tableName];
+  if (!model?.hasMachine) {
+    return { problems: [\`\${tableName} has no status flow in the model, so it has no column to keep one in.\`] };
+  }
+  const states: string[] = [];
+  const terminal: string[] = [];
+  const edges: LifecycleEdge[] = [];
+  let initial: string | undefined;
+  const see = (name: string) => {
+    if (name !== '[*]' && !states.includes(name)) states.push(name);
+  };
+  for (const raw of String(diagram ?? '').split('\\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('%%') || /^stateDiagram(-v2)?$/.test(line)) continue;
+    const match = line.match(DIAGRAM_EDGE);
+    if (!match) continue;
+    const [, from, to, label] = match as unknown as [string, string, string, string | undefined];
+    see(from);
+    see(to);
+    if (from === '[*]' && to === '[*]') continue;
+    if (from === '[*]') {
+      initial ??= to;
+      continue;
+    }
+    if (to === '[*]') {
+      if (!terminal.includes(from)) terminal.push(from);
+      continue;
+    }
+    const event = label ? normalizeLifecycleEvent(label) : '';
+    if (edges.some((edge) => edge.from === from && edge.to === to && edge.event === event)) continue;
+    edges.push({ from, to, event, label: lifecycleMoveLabel(label, to) });
+  }
+  const problems: string[] = [];
+  if (!initial) problems.push('The flow needs a first state: draw [*] --> <state>.');
+  if (terminal.length === 0) problems.push('The flow needs at least one end state: draw <state> --> [*].');
+  for (const reserved of [LIFECYCLE_FINAL, LIFECYCLE_ERROR]) {
+    if (states.includes(reserved)) {
+      problems.push(\`"\${reserved}" is the lifecycle's own; name the state something else.\`);
+    }
+  }
+  if (problems.length > 0) return { problems };
+  const draft = states.find((state) => state.toLowerCase() === LIFECYCLE_DRAFT) ?? LIFECYCLE_DRAFT;
+  const values = [draft, ...states.filter((state) => state !== draft)];
+  if (!values.includes(LIFECYCLE_ERROR)) values.push(LIFECYCLE_ERROR);
+  return {
+    lifecycle: {
+      column: model.column,
+      hasMachine: true,
+      draft,
+      afterDraft: initial!,
+      terminal,
+      edges,
+      values,
+    },
+    problems: [],
+  };
+}
+
+/** Where a value sits: Draft, part-way along the flow, Final, or Error. */
+export function phaseOf(lifecycle: Lifecycle, value: unknown): LifecyclePhase {
+  const text = value == null ? '' : String(value);
+  if (text === LIFECYCLE_ERROR) return 'error';
+  if (lifecycle.terminal.includes(text)) return 'final';
+  if (text === '' || text === lifecycle.draft) return 'draft';
+  return lifecycle.hasMachine ? 'active' : 'draft';
+}
+
+/** True when a record in this state is Final. */
+export function isFinal(lifecycle: Lifecycle, value: unknown): boolean {
+  return phaseOf(lifecycle, value) === 'final';
+}
+
+/**
+ * True when a record in this state is locked: an end state of a flow. A record
+ * with no flow is Final after every accepted save and stays editable — saving it
+ * again is how it changes.
+ */
+export function isLocked(lifecycle: Lifecycle, value: unknown): boolean {
+  return lifecycle.hasMachine && isFinal(lifecycle, value);
+}
+
+/**
+ * Where a save goes, decided by where the record is. Draft and Error re-run the
+ * save pipeline from Draft; part-way along the flow a save is an edit in place;
+ * Final refuses it.
+ */
+export function saveMode(lifecycle: Lifecycle, value: unknown): 'pipeline' | 'in-place' | 'locked' {
+  if (isLocked(lifecycle, value)) return 'locked';
+  if (phaseOf(lifecycle, value) === 'active') return 'in-place';
+  return 'pipeline';
+}
+
+export interface LifecycleMove extends LifecycleEdge {
+  kind: 'move' | 'reopen';
+}
+
+/**
+ * Every move out of a value: the drawn edges, and Reopen from a locked end state
+ * back to Draft unless the diagram draws its own way out of that state.
+ */
+export function movesFrom(lifecycle: Lifecycle, value: unknown): LifecycleMove[] {
+  const from = value == null ? '' : String(value);
+  const moves: LifecycleMove[] = lifecycle.edges
+    .filter((edge) => edge.from === from)
+    .map((edge) => ({ ...edge, kind: 'move' as const }));
+  if (isLocked(lifecycle, from) && !moves.some((move) => move.to === lifecycle.draft)) {
+    moves.push({ from, to: lifecycle.draft, event: REOPEN_EVENT, label: 'Reopen', kind: 'reopen' });
+  }
+  return moves;
+}
+
+/** The move a request names, by its event or by the state it goes to. */
+export function findMove(
+  lifecycle: Lifecycle,
+  value: unknown,
+  wanted: { event?: string; to?: string },
+): LifecycleMove | undefined {
+  const event = wanted.event ? wanted.event.trim().toLowerCase().replace(/[\\s-]+/g, '_') : '';
+  const moves = movesFrom(lifecycle, value);
+  if (event && wanted.to) return moves.find((move) => move.event === event && move.to === wanted.to);
+  if (event) {
+    const named = moves.filter((move) => move.event === event);
+    return named.length === 1 ? named[0] : undefined;
+  }
+  if (wanted.to) {
+    const reaching = moves.filter((move) => move.to === wanted.to);
+    return reaching.length === 1 ? reaching[0] : undefined;
+  }
+  return undefined;
+}
+`;
+var quote = (value) => `'${String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+function lifecycleTable(entities, workflows) {
+  const machineOf = (name) => name ? workflows.find((workflow) => workflow.entity === name) : undefined;
+  const table = {};
+  for (const entity of entities) {
+    const machine = machineOf(entity.name) ?? machineOf(entity.className);
+    if (!machine) {
+      table[entity.tableName] = {
+        column: DOC_STATUS_COLUMN,
+        hasMachine: false,
+        draft: LIFECYCLE_DRAFT,
+        afterDraft: LIFECYCLE_FINAL,
+        terminal: [LIFECYCLE_FINAL],
+        edges: [],
+        values: [LIFECYCLE_DRAFT, LIFECYCLE_FINAL, LIFECYCLE_ERROR]
+      };
+      continue;
+    }
+    const columns = (entity.attributes ?? []).map((attribute) => attribute.columnName ?? attribute.name).filter((name) => !!name);
+    const draft = draftValueFor(machine);
+    table[entity.tableName] = {
+      column: stateFieldOf(columns) ?? "workflow_status",
+      hasMachine: true,
+      draft,
+      afterDraft: machine.initial ?? draft,
+      terminal: [...machine.terminal],
+      edges: machine.transitions.filter((edge) => edge.from !== "[*]" && edge.to !== "[*]").map((edge) => ({
+        from: edge.from,
+        to: edge.to,
+        event: edge.trigger ? normalizeEvent(edge.trigger) : "",
+        label: moveLabel(edge.trigger, edge.to)
+      })),
+      values: [...machine.lifecycleValues]
+    };
+  }
+  return table;
+}
+function renderLifecycleModule(entities, workflows) {
+  const rows = [];
+  for (const [tableName, lifecycle] of Object.entries(lifecycleTable(entities, workflows))) {
+    if (!lifecycle.hasMachine) {
+      rows.push(`  ${tableName}: { column: ${quote(lifecycle.column)}, hasMachine: false, draft: ${quote(lifecycle.draft)}, ` + `afterDraft: ${quote(lifecycle.afterDraft)}, terminal: [${lifecycle.terminal.map(quote).join(", ")}], edges: [], ` + `values: [${lifecycle.values.map(quote).join(", ")}] },`);
+      continue;
+    }
+    rows.push([
+      `  ${tableName}: {`,
+      `    column: ${quote(lifecycle.column)},`,
+      `    hasMachine: true,`,
+      `    draft: ${quote(lifecycle.draft)},`,
+      `    afterDraft: ${quote(lifecycle.afterDraft)},`,
+      `    terminal: [${lifecycle.terminal.map(quote).join(", ")}],`,
+      `    edges: [`,
+      ...lifecycle.edges.map((edge) => `      { from: ${quote(edge.from)}, to: ${quote(edge.to)}, event: ${quote(edge.event)}, ` + `label: ${quote(edge.label)} },`),
+      `    ],`,
+      `    values: [${lifecycle.values.map(quote).join(", ")}],`,
+      `  },`
+    ].join(`
+`));
+  }
+  return LIFECYCLE_MODULE_HEAD + rows.join(`
+`) + LIFECYCLE_MODULE_TAIL;
+}
+
 // packages/generator/src/generators/tanstack-start-nestjs/nestjs-backend.generator.ts
+function withFormLayout(entity) {
+  const layout = formLayoutFor(entity);
+  if (!layout)
+    return entity;
+  return {
+    ...entity,
+    formGroups: layout.groups,
+    attributes: entity.attributes.map((attribute) => ({
+      ...attribute,
+      layout: layout.fields.get(attribute.name)
+    }))
+  };
+}
 function jsQuote(value) {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, " ");
 }
@@ -15149,8 +16530,8 @@ function resolveTemplateDir(subpath) {
   ];
   for (const possiblePath of possiblePaths) {
     try {
-      const stat2 = (init_memory_fs(), __toCommonJS(exports_memory_fs)).statSync(possiblePath);
-      if (stat2.isDirectory()) {
+      const stat = (init_memory_fs(), __toCommonJS(exports_memory_fs)).statSync(possiblePath);
+      if (stat.isDirectory()) {
         return possiblePath;
       }
     } catch {}
@@ -15169,10 +16550,10 @@ function normalizeJdmDecisionTables(jdm) {
     if (node?.type !== "decisionTableNode" || !node.content)
       continue;
     const inputIds = (node.content.inputs ?? []).map((input) => input.id);
-    for (const rule2 of node.content.rules ?? []) {
+    for (const rule of node.content.rules ?? []) {
       for (const inputId of inputIds) {
-        if (rule2[inputId] === undefined) {
-          rule2[inputId] = "";
+        if (rule[inputId] === undefined) {
+          rule[inputId] = "";
         }
       }
     }
@@ -15227,6 +16608,8 @@ class NestJsBackendGenerator extends BaseGenerator {
     await this.generateBusEntities(outputDir, context);
     await this.generateAuditModule(outputDir);
     await this.generateNotificationsModule(outputDir);
+    await this.generateClientLogsModule(outputDir);
+    await this.generateLoggingModule(outputDir, context);
     await this.generateWorkflowDefinitionsModule(outputDir);
     await this.generateModelContextModule(outputDir, context);
     await this.generateMigrations(outputDir, context);
@@ -15257,7 +16640,8 @@ class NestJsBackendGenerator extends BaseGenerator {
     }
   }
   async createAdditionalDirectories(outputDir) {
-    const dirs2 = [
+    const dirs = [
+      "src/common/errors",
       "src/common/filters",
       "src/common/guards",
       "src/common/interceptors",
@@ -15275,6 +16659,8 @@ class NestJsBackendGenerator extends BaseGenerator {
       "src/modules/rules/jdm",
       "src/modules/audit",
       "src/modules/notifications",
+      "src/modules/client-logs",
+      "src/modules/logging",
       "src/modules/workflow",
       "src/modules/workflow-definitions",
       "src/trigger",
@@ -15284,14 +16670,14 @@ class NestJsBackendGenerator extends BaseGenerator {
       "test/modules/jobs",
       "test/trigger"
     ];
-    for (const dir of dirs2) {
+    for (const dir of dirs) {
       await mkdir(join(outputDir, dir), { recursive: true });
     }
   }
   prepareContext(entities, relationships) {
     const declared = declaredEntityNames(entities);
-    const busEntities = entities.map((entity2) => entityToBusEntity(entity2, declared)).sort((a, b) => Number(!!a.parentEntity) - Number(!!b.parentEntity));
-    const dictionaryEntries = entities.map((entity2) => generateEntityDictionary(entity2));
+    const busEntities = entities.map((entity) => withFormLayout(entityToBusEntity(entity, declared))).sort((a, b) => Number(!!a.parentEntity) - Number(!!b.parentEntity));
+    const dictionaryEntries = entities.map((entity) => generateEntityDictionary(entity));
     const sysTables = dictionaryEntries.map((entry) => entry.dictionaryPlaceholders.table);
     const modelEnums = this.options.modelEnums ?? [];
     const sysColumns = dictionaryEntries.flatMap((entry, entityIndex) => {
@@ -15324,13 +16710,14 @@ class NestJsBackendGenerator extends BaseGenerator {
         updated_by: "System"
       }));
     });
-    const rbac2 = this.options.compiledRbac ?? { operations: [], transitions: [] };
-    const access2 = deriveAccess(rbac2, {
+    const rbac = this.options.compiledRbac ?? { operations: [], transitions: [] };
+    const access = deriveAccess(rbac, {
       projectId: this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      entities: busEntities.map((entity2) => entity2.name)
+      entities: busEntities.map((entity) => entity.name)
     });
     const dbUser = this.options.databaseType === "postgresql" ? process.env.USER || process.env.USERNAME || "postgres" : "postgres";
     const fkOverrides = this.buildFkOverrides(busEntities, relationships);
+    const fkConstraints = buildFkConstraints(busEntities, relationships);
     return {
       project: {
         name: this.options.projectName,
@@ -15354,31 +16741,45 @@ class NestJsBackendGenerator extends BaseGenerator {
       projectKebab: this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       entities: busEntities,
       relationships,
+      fkConstraints,
       fkOverrides,
       sysTables,
       sysColumns,
       modelEnums,
       sysFields,
       categories: this.prepareCategories(busEntities),
-      compiledRules: (this.options.compiledRules ?? []).map((rule2) => ({
-        ...rule2,
-        jdmContentEscaped: jsQuote(rule2.jdmContent)
+      compiledRules: (this.options.compiledRules ?? []).map((rule) => ({
+        ...rule,
+        jdmContentEscaped: jsQuote(rule.jdmContent)
       })),
-      compiledRbac: rbac2.operations,
-      compiledRbacTransitions: rbac2.transitions.map((rule2) => ({
-        ...rule2,
-        statusField: this.statusFieldFor(rule2.tableName, busEntities)
+      compiledRbac: rbac.operations,
+      compiledRbacTransitions: rbac.transitions.map((rule) => ({
+        ...rule,
+        statusField: this.hasMachine(rule.entity) ? this.statusFieldFor(rule.tableName, busEntities) : DOC_STATUS_COLUMN,
+        edges: rule.edges.map((edge) => ({
+          ...edge,
+          kind: this.isDrawnEdge(rule.entity, edge.from, edge.to) ? "move" : "reopen"
+        }))
       })),
-      rbacRoles: rbacRoleNames(rbac2),
-      hasRbac: hasRbacRules(rbac2),
-      access: access2,
+      rbacRoles: rbacRoleNames(rbac),
+      hasRbac: hasRbacRules(rbac),
+      access,
       now: new Date().toISOString()
     };
   }
+  machineOf(entity) {
+    return (this.options.compiledWorkflows ?? []).find((workflow) => workflow.entity === entity);
+  }
+  hasMachine(entity) {
+    return this.machineOf(entity) !== undefined;
+  }
+  isDrawnEdge(entity, from, to) {
+    return (this.machineOf(entity)?.transitions ?? []).some((edge) => edge.from === from && edge.to === to);
+  }
   statusFieldFor(tableName, busEntities) {
-    const entity2 = busEntities.find((candidate) => candidate.tableName === tableName);
-    const columns = (entity2?.attributes ?? []).map((a) => a.columnName ?? a.name);
-    return columns.includes("status") ? "status" : "workflow_status";
+    const entity = busEntities.find((candidate) => candidate.tableName === tableName);
+    const columns = (entity?.attributes ?? []).map((a) => a.columnName ?? a.name);
+    return stateFieldOf(columns.filter((name) => !!name)) ?? "workflow_status";
   }
   prepareCategories(busEntities) {
     const categories = this.options.categories && this.options.categories.length > 0 ? this.options.categories : [
@@ -15390,10 +16791,10 @@ class NestJsBackendGenerator extends BaseGenerator {
         color: undefined,
         seqNo: 0,
         isDefault: true,
-        entities: busEntities.map((entity2) => entity2.name)
+        entities: busEntities.map((entity) => entity.name)
       }
     ];
-    const tableByName = new Map(busEntities.map((entity2) => [entity2.name.toLowerCase(), entity2.tableName]));
+    const tableByName = new Map(busEntities.map((entity) => [entity.name.toLowerCase(), entity.tableName]));
     return categories.map((category) => ({
       name: jsQuote(category.name),
       code: category.code,
@@ -15410,9 +16811,9 @@ class NestJsBackendGenerator extends BaseGenerator {
     const entityToTable = new Map(busEntities.map((e) => [(e.originalName || e.name).toLowerCase(), e.tableName]));
     const overrides = [];
     const seen = new Set;
-    for (const entity2 of busEntities) {
-      const entityName = (entity2.originalName || entity2.name).toLowerCase();
-      const fkAttrs = (entity2.attributes || []).filter((a) => a.isForeignKey);
+    for (const entity of busEntities) {
+      const entityName = (entity.originalName || entity.name).toLowerCase();
+      const fkAttrs = (entity.attributes || []).filter((a) => a.isForeignKey);
       const parentRels = relationships.filter((r) => r.targetEntity.toLowerCase() === entityName);
       for (const attr of fkAttrs) {
         const col = attr.columnName || attr.name;
@@ -15463,8 +16864,8 @@ class NestJsBackendGenerator extends BaseGenerator {
       overrides.push({ column: col, table: personTable });
       seen.add(col);
     }
-    for (const entity2 of busEntities) {
-      const fkAttrs = (entity2.attributes || []).filter((a) => a.isForeignKey);
+    for (const entity of busEntities) {
+      const fkAttrs = (entity.attributes || []).filter((a) => a.isForeignKey);
       for (const attr of fkAttrs) {
         const col = attr.columnName || attr.name;
         if (seen.has(col))
@@ -15497,6 +16898,11 @@ class NestJsBackendGenerator extends BaseGenerator {
     }
     await mkdir(join(outputDir, "src/common/logging"), { recursive: true });
     await writeFile(join(outputDir, "src/common/logging/log-spec.json"), generatedLogSpec());
+    await mkdir(join(outputDir, "src/common/errors"), { recursive: true });
+    await writeFile(join(outputDir, "src/common/errors/catalogue.ts"), generatedErrorCatalogue());
+    for (const file of ["app-error.ts", "classify.ts"]) {
+      await copyFile(join(this.resolvedTemplateDir, "src/common/errors", file), join(outputDir, "src/common/errors", file));
+    }
     try {
       const publicDecoratorContent = await this.renderTemplate("src/modules/auth/decorators/public.decorator.ts.hbs", context);
       await writeFile(join(outputDir, "src/modules/auth/decorators/public.decorator.ts"), publicDecoratorContent);
@@ -15545,6 +16951,7 @@ class NestJsBackendGenerator extends BaseGenerator {
     } catch (_e) {
       console.warn("Dictionary write guard template not found");
     }
+    await writeFile(join(outputDir, "src/modules/auth/capability.service.ts"), await this.renderTemplate("src/modules/auth/capability.service.ts.hbs", context));
     try {
       const authControllerContent = await this.renderTemplate("src/modules/auth/auth.controller.ts.hbs", context);
       await writeFile(join(outputDir, "src/modules/auth/auth.controller.ts"), authControllerContent);
@@ -15675,8 +17082,12 @@ class NestJsBackendGenerator extends BaseGenerator {
   }
   async writeEntityJdm(busEntity, outputDir) {
     try {
+      const hasMachine = (this.options.compiledWorkflows ?? []).some((workflow) => workflow.entity === busEntity.name || workflow.entity === busEntity.className);
+      const columns = (busEntity.attributes ?? []).map((a) => a.columnName ?? a.name);
+      const stateField = hasMachine ? stateFieldOf(columns) : undefined;
       let jdmContent = await this.renderTemplate("src/modules/rules/jdm/entity.jdm.json.hbs", {
-        ...busEntity
+        ...busEntity,
+        attributes: (busEntity.attributes ?? []).map((a) => stateField && (a.columnName ?? a.name) === stateField ? { ...a, required: false } : a)
       });
       jdmContent = cleanJsonContent(jdmContent);
       jdmContent = JSON.stringify(normalizeJdmDecisionTables(JSON.parse(jdmContent)), null, 2);
@@ -15722,21 +17133,21 @@ class NestJsBackendGenerator extends BaseGenerator {
     await mkdir(handlersDir, { recursive: true });
     const grouped = hooksByEntity(this.options.compiledHooks ?? []);
     const entities = [...grouped.keys()].sort();
-    for (const entity2 of entities) {
-      const hooks = grouped.get(entity2) ?? [];
-      const file = join(handlersDir, `${entity2}.ts`);
+    for (const entity of entities) {
+      const hooks = grouped.get(entity) ?? [];
+      const file = join(handlersDir, `${entity}.ts`);
       let existing = null;
       try {
         existing = await readFile(file, "utf-8");
       } catch {}
       if (existing === null) {
-        await writeFile(file, this.renderHookModule(entity2, hooks));
+        await writeFile(file, this.renderHookModule(entity, hooks));
         continue;
       }
-      const missing = hooks.filter((hook2) => !new RegExp(`\\b(function|const)\\s+${hook2.handler}\\b`).test(existing));
+      const missing = hooks.filter((hook) => !new RegExp(`\\b(function|const)\\s+${hook.handler}\\b`).test(existing));
       if (!missing.length)
         continue;
-      const additions = missing.map((hook2) => this.renderHookFunction(entity2, hook2)).join(`
+      const additions = missing.map((hook) => this.renderHookFunction(entity, hook)).join(`
 `);
       await writeFile(file, `${existing.trimEnd()}
 
@@ -15746,11 +17157,11 @@ ${additions}`);
     }
     await writeFile(join(handlersDir, "index.ts"), this.renderHookRegistry(grouped));
   }
-  renderHookFunction(entity2, hook2) {
-    const contract = HOOK_CONTRACTS[hook2.type];
-    const scope = hook2.field ? `
- * Scoped to \`${hook2.field}\`.` : "";
-    const async = `export async function ${hook2.handler}(${contract.param}: ${contract.paramType})`;
+  renderHookFunction(entity, hook) {
+    const contract = HOOK_CONTRACTS[hook.type];
+    const scope = hook.field ? `
+ * Scoped to \`${hook.field}\`.` : "";
+    const async = `export async function ${hook.handler}(${contract.param}: ${contract.paramType})`;
     const body = contract.returns === "void" ? `  // TODO: implement.
 ` : contract.returns === "boolean" ? `  // TODO: implement. Return false to block the delete.
   return true;
@@ -15758,7 +17169,7 @@ ${additions}`);
   return ${contract.param};
 `;
     return `/**
- * ${hook2.type} on ${entity2}.
+ * ${hook.type} on ${entity}.
  *
  * ${contract.summary}${scope}
  */
@@ -15766,9 +17177,9 @@ ${additions}`);
 ${body}}
 `;
   }
-  renderHookModule(entity2, hooks) {
+  renderHookModule(entity, hooks) {
     const header = `/**
- * Lifecycle handlers for ${entity2}.
+ * Lifecycle handlers for ${entity}.
  *
 ` + ` * Declared by the model's \`%%hook\` directives and wired up in ./index.ts.
 ` + ` * The bodies are yours: this file is generated once and then left alone, so
@@ -15776,7 +17187,7 @@ ${body}}
  */
 
 `;
-    return header + hooks.map((hook2) => this.renderHookFunction(entity2, hook2)).join(`
+    return header + hooks.map((hook) => this.renderHookFunction(entity, hook)).join(`
 `);
   }
   renderHookRegistry(grouped) {
@@ -15802,27 +17213,27 @@ ${body}}
 ` + `export const ENTITY_HOOKS: Record<string, Record<string, Record<string, any>>> = {};
 `;
     }
-    const imports = entities.map((entity2) => `import * as ${entity2}Hooks from './${entity2}';`).join(`
+    const imports = entities.map((entity) => `import * as ${entity}Hooks from './${entity}';`).join(`
 `);
-    const bindings = entities.map((entity2) => {
+    const bindings = entities.map((entity) => {
       const byType = new Map;
-      for (const hook2 of grouped.get(entity2) ?? []) {
-        const list = byType.get(hook2.type);
+      for (const hook of grouped.get(entity) ?? []) {
+        const list = byType.get(hook.type);
         if (list)
-          list.push(hook2.handler);
+          list.push(hook.handler);
         else
-          byType.set(hook2.type, [hook2.handler]);
+          byType.set(hook.type, [hook.handler]);
       }
       const events = [...byType.entries()].map(([type, handlers]) => {
-        const entries = handlers.map((handler) => `      ${handler}: ${entity2}Hooks.${handler},`).join(`
+        const entries = handlers.map((handler) => `      ${handler}: ${entity}Hooks.${handler},`).join(`
 `);
         return `    ${type}: {
 ${entries}
     },`;
       }).join(`
 `);
-      return `  // ${entity2}
-  [hookKey('${entity2}')]: {
+      return `  // ${entity}
+  [hookKey('${entity}')]: {
 ${events}
   },`;
     }).join(`
@@ -16070,7 +17481,11 @@ export async function executeCustomValidateHooks(
     const serviceContent = await this.renderTemplate("src/modules/bus/bus.service.ts.hbs", context);
     await writeFile(join(outputDir, "src/modules/bus/bus.service.ts"), serviceContent);
     await copyFile(join(this.resolvedTemplateDir, "src/modules/bus/window-list-defaults.ts"), join(outputDir, "src/modules/bus/window-list-defaults.ts"));
-    for (const name of ["entity-promotion.service", "promotion-dispatcher.service"]) {
+    for (const name of [
+      "entity-promotion.service",
+      "promotion-dispatcher.service",
+      "transition.service"
+    ]) {
       const content = await this.renderTemplate(`src/modules/bus/${name}.ts.hbs`, context);
       await writeFile(join(outputDir, `src/modules/bus/${name}.ts`), content);
     }
@@ -16152,6 +17567,34 @@ export async function executeCustomValidateHooks(
       {
         slug: "add_dictionary_icons",
         template: "src/migrations/019_add_dictionary_icons.ts.hbs"
+      },
+      {
+        slug: "add_rule_title",
+        template: "src/migrations/020_add_rule_title.ts.hbs"
+      },
+      {
+        slug: "field_dictionary",
+        template: "src/migrations/021_field_dictionary.ts.hbs"
+      },
+      {
+        slug: "record_lifecycle",
+        template: "src/migrations/022_record_lifecycle.ts.hbs",
+        required: true
+      },
+      {
+        slug: "editable_lifecycles",
+        template: "src/migrations/023_editable_lifecycles.ts.hbs",
+        required: true
+      },
+      {
+        slug: "widen_workflow_operation",
+        template: "src/migrations/024_widen_workflow_operation.ts.hbs",
+        required: true
+      },
+      {
+        slug: "log_level_overrides",
+        template: "src/migrations/025_log_level_overrides.ts.hbs",
+        required: true
       }
     ];
     const scaffoldSlugs = new Set(scaffold.map((m) => m.slug));
@@ -16191,7 +17634,7 @@ export async function executeCustomValidateHooks(
     } catch (e) {
       console.warn("Entity categories seed template failed, skipping:", e.message);
     }
-    const businessDataContent = await this.renderTemplate("../../common/seeds/business-data.ts.hbs", context);
+    const businessDataContent = await this.renderTemplate("../../common/seeds/business-data.ts.hbs", this.withMoveFacts(context));
     await writeFile(join(outputDir, "seeds/03_business_data.ts"), businessDataContent);
     try {
       const businessRulesContent = await this.renderTemplate("../../common/seeds/business-rules.ts.hbs", context);
@@ -16207,6 +17650,14 @@ export async function executeCustomValidateHooks(
     }
     await writeFile(join(outputDir, "seeds/05_workflow_definitions.ts"), this.renderWorkflowDefinitionsSeed(context));
     await writeFile(join(outputDir, "seeds/05b_workflow_transitions.ts"), this.renderWorkflowTransitionsSeed(context));
+    await mkdir(join(outputDir, "src/common"), { recursive: true });
+    await writeFile(join(outputDir, "src/common/state-fields.ts"), this.renderStateFields(context));
+    await writeFile(join(outputDir, "src/common/lifecycle.ts"), this.renderLifecycle(context));
+    await copyFile(join(this.resolvedTemplateDir, "src/common/ttl-cache.ts"), join(outputDir, "src/common/ttl-cache.ts"));
+    await copyFile(join(this.resolvedTemplateDir, "src/common/chat-bridge.ts"), join(outputDir, "src/common/chat-bridge.ts"));
+    await copyFile(join(this.resolvedTemplateDir, "../../common/field-logic.ts"), join(outputDir, "src/common/field-logic.ts"));
+    await copyFile(join(this.resolvedTemplateDir, "../../common/field-values.ts"), join(outputDir, "src/common/field-values.ts"));
+    await copyFile(join(this.resolvedTemplateDir, "../../common/cascade-lookups.ts"), join(outputDir, "src/common/cascade-lookups.ts"));
     const reportDesignsSeedContent = await this.renderTemplate("../../common/seeds/report-designs.ts.hbs", context);
     await writeFile(join(outputDir, "seeds/06_report_designs.ts"), reportDesignsSeedContent);
     const systemConfigContent = await this.renderTemplate("../../common/seeds/system-config.ts.hbs", context);
@@ -16220,12 +17671,12 @@ export async function executeCustomValidateHooks(
         byEntity.set(workflow.entity, workflow);
     }
     const rows = [];
-    for (const entity2 of context.entities ?? []) {
-      const tableName = entity2.tableName;
-      const workflow = byEntity.get(entity2.name) ?? byEntity.get(entity2.className);
-      const columns = (entity2.attributes ?? []).map((a) => a.columnName ?? a.name);
-      const statusField = columns.includes("status") ? "status" : "workflow_status";
-      const description = workflow ? describeWorkflow(workflow) : `No state machine declared for ${entity2.displayName ?? tableName}.`;
+    for (const entity of context.entities ?? []) {
+      const tableName = entity.tableName;
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.className);
+      const columns = (entity.attributes ?? []).map((a) => a.columnName ?? a.name);
+      const statusField = stateFieldOf(columns) ?? "workflow_status";
+      const description = workflow ? describeWorkflow(workflow) : `No state machine declared for ${entity.displayName ?? tableName}.`;
       for (const operation of ["create", "update"]) {
         const bpmn = workflow && operation === "create" ? buildStateEntryBpmn(workflow, tableName, statusField) : buildPassThroughBpmn(tableName);
         rows.push(`  {
@@ -16239,14 +17690,14 @@ export async function executeCustomValidateHooks(
       }
     }
     const tableFor = new Map;
-    for (const entity2 of context.entities ?? []) {
-      const table = entity2.tableName;
-      for (const spelling of [entity2.name, entity2.className, table, table.replace(/^bus_/, "")]) {
+    for (const entity of context.entities ?? []) {
+      const table = entity.tableName;
+      for (const spelling of [entity.name, entity.className, table, table.replace(/^bus_/, "")]) {
         if (spelling)
           tableFor.set(String(spelling).toLowerCase(), table);
       }
     }
-    const resolveTable = (entity2) => tableFor.get(entity2.trim().toLowerCase()) ?? entity2;
+    const resolveTable = (entity) => tableFor.get(entity.trim().toLowerCase()) ?? entity;
     for (const saga of this.options.compiledSagas ?? []) {
       const tableName = tableFor.get(saga.entity.toLowerCase());
       if (!tableName)
@@ -16337,6 +17788,75 @@ export async function seed(db: Kysely<any>): Promise<void> {
 }
 `;
   }
+  withMoveFacts(context) {
+    const byEntity = new Map;
+    for (const workflow of this.options.compiledWorkflows ?? []) {
+      if (!byEntity.has(workflow.entity))
+        byEntity.set(workflow.entity, workflow);
+    }
+    const entities = (context.entities ?? []).map((entity) => {
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.className);
+      if (!workflow)
+        return entity;
+      const facts = new Set(workflow.states.map((state) => `${state.name}_at`));
+      return {
+        ...entity,
+        attributes: (entity.attributes ?? []).map((attribute) => facts.has(attribute.columnName ?? attribute.name) && !attribute.required ? { ...attribute, isMoveFact: true } : attribute)
+      };
+    });
+    return { ...context, entities };
+  }
+  renderStateFields(context) {
+    const byEntity = new Map;
+    for (const workflow of this.options.compiledWorkflows ?? []) {
+      if (!byEntity.has(workflow.entity))
+        byEntity.set(workflow.entity, workflow);
+    }
+    const rows = [];
+    for (const entity of context.entities ?? []) {
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.className);
+      if (!workflow)
+        continue;
+      const columns = (entity.attributes ?? []).map((a) => a.columnName ?? a.name);
+      const field = stateFieldOf(columns) ?? "workflow_status";
+      const initial = workflow.initial ? `'${workflow.initial}'` : "null";
+      rows.push(`  ${entity.tableName}: { field: '${field}', initial: ${initial} },`);
+    }
+    return [
+      `/**`,
+      ` * The state field of every entity with a state machine — generated from the`,
+      ` * model, do not edit.`,
+      ` *`,
+      ` * A state field is never changed by a person through a form or a direct API`,
+      ` * write: only background workflows (saga steps, rules, hooks) change it, and a`,
+      ` * new record starts in its machine's initial state. The form shows it`,
+      ` * read-only in the record header and the list grid always shows it.`,
+      ` */`,
+      `export interface StateField {`,
+      `  /** The column the state machine drives. */`,
+      `  field: string;`,
+      `  /** The state a new record starts in — the \`[*] --> x\` edge. */`,
+      `  initial: string | null;`,
+      `}`,
+      ``,
+      `export const STATE_FIELDS: Readonly<Record<string, StateField>> = {`,
+      ...rows,
+      `};`,
+      ``,
+      `/** \`details.code\` of the refusal a person's write to a state field receives. */`,
+      `export const STATE_FIELD_REFUSAL_CODE = '${STATE_FIELD_REFUSAL_CODE}';`,
+      ``,
+      `/** The state field of a \`bus_\` table, or undefined when it has no state machine. */`,
+      `export function stateFieldOf(tableName: string): StateField | undefined {`,
+      `  return STATE_FIELDS[tableName];`,
+      `}`,
+      ``
+    ].join(`
+`);
+  }
+  renderLifecycle(context) {
+    return renderLifecycleModule(context.entities ?? [], this.options.compiledWorkflows ?? []);
+  }
   renderWorkflowTransitionsSeed(context) {
     const byEntity = new Map;
     for (const workflow of this.options.compiledWorkflows ?? []) {
@@ -16344,17 +17864,17 @@ export async function seed(db: Kysely<any>): Promise<void> {
         byEntity.set(workflow.entity, workflow);
     }
     const rows = [];
-    for (const entity2 of context.entities ?? []) {
-      const workflow = byEntity.get(entity2.name) ?? byEntity.get(entity2.className);
+    for (const entity of context.entities ?? []) {
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.className);
       if (!workflow || workflow.transitions.length === 0)
         continue;
-      const columns = (entity2.attributes ?? []).map((a) => a.columnName ?? a.name);
-      const statusField = columns.includes("status") ? "status" : "workflow_status";
+      const columns = (entity.attributes ?? []).map((a) => a.columnName ?? a.name);
+      const statusField = stateFieldOf(columns) ?? "workflow_status";
       for (const t of workflow.transitions) {
         if (t.from === "[*]" || t.to === "[*]")
           continue;
         rows.push(`  {
-` + `    tableName: '${entity2.tableName}',
+` + `    tableName: '${entity.tableName}',
 ` + `    statusField: '${statusField}',
 ` + `    fromState: '${t.from}',
 ` + `    toState: '${t.to}',
@@ -16376,9 +17896,17 @@ export async function seed(db: Kysely<any>): Promise<void> {
       `] as const;`,
       ``,
       `export async function seed(db: Kysely<any>): Promise<void> {`,
-      `  // Replace all model-declared transitions on each table, keeping any`,
-      `  // hand-crafted rows (source = 'designer') untouched.`,
-      `  const tables = [...new Set(TRANSITIONS.map((t) => t.tableName))];`,
+      `  // Replace the model's transitions on each table — except a table whose`,
+      `  // flow an administrator redrew in Rules and workflows (a kind = 'state'`,
+      `  // definition): its edges are the administrator's, and the seed runs on`,
+      `  // every start.`,
+      `  const redrawn = new Set(`,
+      `    (await sql<{ entity_name: string }>\`SELECT entity_name FROM sys_workflow_definitions WHERE kind = 'state'\``,
+      `      .execute(db)`,
+      `      .then((result) => result.rows.map((row) => row.entity_name))`,
+      `      .catch(() => [] as string[]))`,
+      `  );`,
+      `  const tables = [...new Set(TRANSITIONS.map((t) => t.tableName))].filter((tbl) => !redrawn.has(tbl));`,
       `  for (const tbl of tables) {`,
       `    await sql\``,
       `      DELETE FROM sys_workflow_transitions`,
@@ -16386,6 +17914,7 @@ export async function seed(db: Kysely<any>): Promise<void> {
       `    \`.execute(db);`,
       `  }`,
       `  for (const t of TRANSITIONS) {`,
+      `    if (redrawn.has(t.tableName)) continue;`,
       `    await db`,
       `      .insertInto('sys_workflow_transitions')`,
       `      .values({`,
@@ -16418,11 +17947,11 @@ export async function seed(db: Kysely<any>): Promise<void> {
 `;
     }
     const tableByEntity = new Map;
-    for (const entity2 of context.entities ?? []) {
-      if (entity2.name)
-        tableByEntity.set(entity2.name, entity2.tableName);
-      if (entity2.className)
-        tableByEntity.set(entity2.className, entity2.tableName);
+    for (const entity of context.entities ?? []) {
+      if (entity.name)
+        tableByEntity.set(entity.name, entity.tableName);
+      if (entity.className)
+        tableByEntity.set(entity.className, entity.tableName);
     }
     const rows = reports.map((report, index) => {
       const value = {
@@ -16518,6 +18047,8 @@ export async function seed(db: Kysely<any>): Promise<void> {
     for (const file of staticConfigFiles) {
       try {
         await copyFile(join(this.resolvedTemplateDir, file), join(outputDir, file));
+        if (file.endsWith(".sh"))
+          await chmod(join(outputDir, file), 493).catch(() => {});
       } catch (_e) {
         console.warn(`Static config file not found: ${file}`);
       }
@@ -16540,12 +18071,6 @@ export async function seed(db: Kysely<any>): Promise<void> {
       console.log("  ↷ Kept existing backend/.env (see .env.example for new keys)");
     } catch {
       await writeFile(envPath, envContent);
-    }
-    try {
-      const biomeContent = await this.renderTemplate("biome.json.hbs", context);
-      await writeFile(join(outputDir, "biome.json"), biomeContent);
-    } catch (_e) {
-      console.warn("Custom Biome config template not found, using defaults");
     }
     const dbModuleContent = await this.renderTemplate("src/database/database.module.ts.hbs", context);
     await writeFile(join(outputDir, "src/database/database.module.ts"), dbModuleContent);
@@ -16640,17 +18165,48 @@ export async function seed(db: Kysely<any>): Promise<void> {
       }
     }
   }
+  async generateLoggingModule(outputDir, context) {
+    const backend = resolveTemplateDir("tanstack-start-nestjs/backend");
+    const outDir = join(outputDir, "src/modules/logging");
+    await mkdir(outDir, { recursive: true });
+    for (const file of [
+      "logging.controller.ts",
+      "logging.module.ts",
+      "log-level-store.service.ts"
+    ]) {
+      await copyFile(join(backend, "src/modules/logging", file), join(outDir, file));
+    }
+    for (const file of ["level-control.ts", "trace-context.ts", "shutdown.ts"]) {
+      await copyFile(join(backend, "src/common/logging", file), join(outputDir, "src/common/logging", file));
+    }
+    await mkdir(join(outputDir, "src/common/tracing"), { recursive: true });
+    await copyFile(join(backend, "src/common/tracing/tracing.ts"), join(outputDir, "src/common/tracing/tracing.ts"));
+    await copyFile(join(backend, "src/modules/auth/guards/admin-roles.ts"), join(outputDir, "src/modules/auth/guards/admin-roles.ts"));
+    await writeFile(join(outputDir, "src/modules/auth/guards/admin-only.guard.ts"), await this.renderTemplate("src/modules/auth/guards/admin-only.guard.ts.hbs", context));
+  }
+  async generateClientLogsModule(outputDir) {
+    const templateDir = join(resolveTemplateDir("tanstack-start-nestjs/backend"), "src/modules/client-logs");
+    const outDir = join(outputDir, "src/modules/client-logs");
+    await mkdir(outDir, { recursive: true });
+    for (const file of [
+      "client-log-rules.ts",
+      "client-logs.controller.ts",
+      "client-logs.module.ts"
+    ]) {
+      await copyFile(join(templateDir, file), join(outDir, file));
+    }
+  }
   async generateNotificationsModule(outputDir) {
     const templateDir = join(resolveTemplateDir("tanstack-start-nestjs/backend"), "src/modules/notifications");
     const notificationsOutputDir = join(outputDir, "src/modules/notifications");
     await mkdir(notificationsOutputDir, { recursive: true });
-    const files2 = [
+    const files = [
       "notifications.controller.ts",
       "notifications.module.ts",
       "notifications.service.ts",
       "notifications.types.ts"
     ];
-    for (const file of files2) {
+    for (const file of files) {
       try {
         await copyFile(join(templateDir, file), join(notificationsOutputDir, file));
       } catch (e) {
@@ -16679,14 +18235,14 @@ export async function seed(db: Kysely<any>): Promise<void> {
       }
     }
   }
-  async generateSingleEntity(entity2, relationships, outputDir, _allEntities, opts) {
-    const busEntity = entityToBusEntity(entity2, declaredEntityNames(_allEntities));
+  async generateSingleEntity(entity, relationships, outputDir, _allEntities, opts) {
+    const busEntity = entityToBusEntity(entity, declaredEntityNames(_allEntities));
     const toSnake = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase();
     await mkdir(join(outputDir, "src/modules/rules/jdm"), { recursive: true });
     await this.writeEntityJdm(busEntity, outputDir);
     console.log(`  ✓ backend/src/modules/rules/jdm/${busEntity.tableName}.jdm.json`);
     if (!opts?.skipMigration) {
-      const entityRels = relationships.filter((r) => r.sourceEntity === entity2.name || r.targetEntity === entity2.name).map((r) => ({
+      const entityRels = relationships.filter((r) => r.sourceEntity === entity.name || r.targetEntity === entity.name).map((r) => ({
         ...r,
         sourceTableName: `bus_${toSnake(r.sourceEntity)}`,
         targetTableName: `bus_${toSnake(r.targetEntity)}`
@@ -16695,7 +18251,7 @@ export async function seed(db: Kysely<any>): Promise<void> {
       await mkdir(migrationsDir, { recursive: true });
       try {
         const timestamp = Date.now();
-        const snake = toSnake(entity2.name);
+        const snake = toSnake(entity.name);
         const migrationContent = await this.renderTemplate("../../common/migrations/bus-table.migration.ts.hbs", {
           ...busEntity,
           relationships: entityRels,
@@ -16706,20 +18262,20 @@ export async function seed(db: Kysely<any>): Promise<void> {
         await writeFile(join(migrationsDir, migrationFile), migrationContent);
         console.log(`  ✓ backend/src/migrations/${migrationFile}`);
       } catch (e) {
-        console.warn(`  ⚠️  Migration template failed for ${entity2.name}: ${e.message}`);
+        console.warn(`  ⚠️  Migration template failed for ${entity.name}: ${e.message}`);
       }
     }
   }
   async generateModelContextModule(outputDir, context) {
     const moduleDir = join(outputDir, "src/modules/model-context");
     await mkdir(moduleDir, { recursive: true });
-    const files2 = [
+    const files = [
       "model-context.service.ts",
       "model-context.controller.ts",
       "model-context.module.ts",
       "rag.ts"
     ];
-    for (const file of files2) {
+    for (const file of files) {
       try {
         const content = await this.renderTemplate(`src/modules/model-context/${file}.hbs`, context);
         await writeFile(join(moduleDir, file), content);
@@ -16734,7 +18290,10 @@ export async function seed(db: Kysely<any>): Promise<void> {
     const wdFiles = [
       "workflow-definitions.controller.ts",
       "workflow-definitions.module.ts",
-      "workflow-definitions.service.ts"
+      "workflow-definitions.service.ts",
+      "automation-compiler.ts",
+      "lifecycle-store.service.ts",
+      "lifecycles.controller.ts"
     ];
     for (const file of wdFiles) {
       try {
@@ -16749,6 +18308,53 @@ export async function seed(db: Kysely<any>): Promise<void> {
 // packages/generator/src/generators/tanstack-start-nestjs/tanstack-start-frontend.generator.ts
 init_memory_fs();
 init_node_path();
+
+// packages/generator/src/generators/tanstack-start-nestjs/vendor-editors.ts
+init_memory_fs();
+init_node_path();
+var MARKER = "lib/utils.ts";
+var SKIP = /(?:^|\/)__tests__(?:\/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)vite-env\.d\.ts$/;
+async function exists(target) {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function copyTree(source, destination, relative = "") {
+  const entries = await readdir(source, { withFileTypes: true });
+  await mkdir(destination, { recursive: true });
+  let copied = 0;
+  for (const entry of entries) {
+    const inner = relative ? `${relative}/${entry.name}` : entry.name;
+    if (SKIP.test(inner))
+      continue;
+    const from = join(source, entry.name);
+    const to = join(destination, entry.name);
+    if (entry.isDirectory())
+      copied += await copyTree(from, to, inner);
+    else {
+      await copyFile(from, to);
+      copied++;
+    }
+  }
+  return copied;
+}
+async function ensureEditorsVendored(frontendTemplateDir) {
+  const destination = join(frontendTemplateDir, "src/editors");
+  const source = resolve(frontendTemplateDir, "../../../../editors/src");
+  if (await exists(join(source, MARKER))) {
+    await rm(destination, { recursive: true, force: true });
+    await copyTree(source, destination);
+    return;
+  }
+  if (await exists(join(destination, MARKER)))
+    return;
+  throw new Error(`The rule and workflow editors are missing from ${destination}. In a checkout they are ` + "copied from packages/editors/src; in a published package they ship inside templates/. " + "Run `bun run vendor:editors`.");
+}
+
+// packages/generator/src/generators/tanstack-start-nestjs/tanstack-start-frontend.generator.ts
 function resolveTemplateDir2(subpath) {
   const cwd = process.cwd();
   const possiblePaths = [
@@ -16759,8 +18365,8 @@ function resolveTemplateDir2(subpath) {
   ];
   for (const possiblePath of possiblePaths) {
     try {
-      const stat2 = (init_memory_fs(), __toCommonJS(exports_memory_fs)).statSync(possiblePath);
-      if (stat2.isDirectory()) {
+      const stat = (init_memory_fs(), __toCommonJS(exports_memory_fs)).statSync(possiblePath);
+      if (stat.isDirectory()) {
         return possiblePath;
       }
     } catch {}
@@ -16826,7 +18432,7 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     }
   }
   async createAdditionalDirectories(outputDir) {
-    const dirs2 = [
+    const dirs = [
       "src/routes",
       "src/routes/admin",
       "src/routes/auth",
@@ -16848,25 +18454,28 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
       "src/lib/workflow",
       "src/lib/automation",
       "src/components/automation",
+      "src/components/eml",
+      "src/components/rules",
+      "src/lib/eml",
       "src/components/reports",
       "src/components/notifications",
       "src/components/help",
       "src/components/theme",
       "test"
     ];
-    for (const dir of dirs2) {
+    for (const dir of dirs) {
       await mkdir(join(outputDir, dir), { recursive: true });
     }
   }
   prepareContext(entities, relationships) {
     const declared = declaredEntityNames(entities);
-    const busEntities = entities.map((entity2) => entityToBusEntity(entity2, declared));
-    const access2 = deriveAccess(this.options.compiledRbac ?? { operations: [], transitions: [] }, {
+    const busEntities = entities.map((entity) => entityToBusEntity(entity, declared));
+    const access = deriveAccess(this.options.compiledRbac ?? { operations: [], transitions: [] }, {
       projectId: this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      entities: busEntities.map((entity2) => entity2.name)
+      entities: busEntities.map((entity) => entity.name)
     });
     return {
-      access: access2,
+      access,
       project: {
         name: this.options.projectName,
         version: this.options.projectVersion,
@@ -16896,6 +18505,8 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
   }
   async generateCoreFiles(outputDir, context) {
     const templateDir = this.resolvedTemplateDir;
+    await ensureEditorsVendored(templateDir);
+    await this.copyDirRecursive(join(templateDir, "src/editors"), join(outputDir, "src/editors"));
     const clientEntryContent = await this.renderTemplate("src/client.tsx.hbs", context);
     await writeFile(join(outputDir, "src/client.tsx"), clientEntryContent);
     const ssrEntryContent = await this.renderTemplate("src/ssr.tsx.hbs", context);
@@ -17002,6 +18613,14 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     await writeFile(join(outputDir, "src/lib/api-client.ts"), apiClientContent);
     const csvContent = await this.component("src/lib/csv.ts");
     await writeFile(join(outputDir, "src/lib/csv.ts"), csvContent);
+    for (const file of ["logger.ts", "api-error.ts"]) {
+      const content = await this.component(`src/lib/${file}`);
+      await writeFile(join(outputDir, "src/lib", file), content);
+    }
+    const pluralLabelContent = await this.component("src/lib/plural-label.ts");
+    await writeFile(join(outputDir, "src/lib/plural-label.ts"), pluralLabelContent);
+    const versionConflictContent = await this.component("src/lib/version-conflict.ts");
+    await writeFile(join(outputDir, "src/lib/version-conflict.ts"), versionConflictContent);
     try {
       const viteEnv = await this.renderTemplate("src/vite-env.d.ts.hbs", context);
       await writeFile(join(outputDir, "src/vite-env.d.ts"), viteEnv);
@@ -17012,6 +18631,11 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     } catch (e) {
       console.warn("field-schema template not found, skipping:", e.message);
     }
+    const fieldLogic = await this.component("../../common/field-logic.ts");
+    await writeFile(join(outputDir, "src/lib/field-logic.ts"), fieldLogic);
+    const fieldValues = await this.component("../../common/field-values.ts");
+    await writeFile(join(outputDir, "src/lib/field-values.ts"), fieldValues);
+    await writeFile(join(outputDir, "src/lib/lifecycle.ts"), renderLifecycleModule(context.entities ?? [], this.options.compiledWorkflows ?? []));
     try {
       const collectionsContent = await this.component("src/lib/sys-collections.ts");
       await writeFile(join(outputDir, "src/lib/sys-collections.ts"), collectionsContent);
@@ -17174,6 +18798,14 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
         dest: "src/hooks/use-bus-entity-level.ts"
       },
       {
+        src: "src/hooks/use-rule-entities.ts",
+        dest: "src/hooks/use-rule-entities.ts"
+      },
+      {
+        src: "src/hooks/use-dictionary-windows.ts",
+        dest: "src/hooks/use-dictionary-windows.ts"
+      },
+      {
         src: "src/components/ui/breadcrumb.tsx",
         dest: "src/components/ui/breadcrumb.tsx"
       },
@@ -17214,6 +18846,18 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
         dest: "src/components/admin/ad-detail-shell.tsx"
       },
       {
+        src: "src/components/admin/lifecycle-badge.tsx",
+        dest: "src/components/admin/lifecycle-badge.tsx"
+      },
+      {
+        src: "src/components/admin/record-actions.tsx",
+        dest: "src/components/admin/record-actions.tsx"
+      },
+      {
+        src: "src/components/admin/row-actions.tsx",
+        dest: "src/components/admin/row-actions.tsx"
+      },
+      {
         src: "src/components/admin/entity-icon-field.tsx",
         dest: "src/components/admin/entity-icon-field.tsx"
       },
@@ -17242,6 +18886,10 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
         dest: "src/components/admin/entity-window-shell.tsx"
       },
       {
+        src: "src/components/admin/version-conflict-dialog.tsx",
+        dest: "src/components/admin/version-conflict-dialog.tsx"
+      },
+      {
         src: "src/components/admin/unified-field-layout.tsx",
         dest: "src/components/admin/unified-field-layout.tsx"
       },
@@ -17254,44 +18902,20 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
         dest: "src/components/admin/bus-entity-detail-page.tsx"
       },
       {
-        src: "src/lib/workflow/bpmn-model.ts",
-        dest: "src/lib/workflow/bpmn-model.ts"
+        src: "src/worker-modules.d.ts",
+        dest: "src/worker-modules.d.ts"
       },
       {
-        src: "src/lib/automation/model.ts",
-        dest: "src/lib/automation/model.ts"
+        src: "src/components/rules/RuleGraphEditor.tsx",
+        dest: "src/components/rules/RuleGraphEditor.tsx"
       },
       {
-        src: "src/lib/automation/rule-content.ts",
-        dest: "src/lib/automation/rule-content.ts"
+        src: "src/lib/logic-host.ts",
+        dest: "src/lib/logic-host.ts"
       },
       {
-        src: "src/components/automation/LadderCard.tsx",
-        dest: "src/components/automation/LadderCard.tsx"
-      },
-      {
-        src: "src/components/automation/RailList.tsx",
-        dest: "src/components/automation/RailList.tsx"
-      },
-      {
-        src: "src/components/automation/StepInspector.tsx",
-        dest: "src/components/automation/StepInspector.tsx"
-      },
-      {
-        src: "src/components/automation/AutomationBuilder.tsx",
-        dest: "src/components/automation/AutomationBuilder.tsx"
-      },
-      {
-        src: "src/components/automation/RuleTableEditor.tsx",
-        dest: "src/components/automation/RuleTableEditor.tsx"
-      },
-      {
-        src: "src/components/automation/AutomationHelp.tsx",
-        dest: "src/components/automation/AutomationHelp.tsx"
-      },
-      {
-        src: "src/components/admin/doc-status-badge.tsx",
-        dest: "src/components/admin/doc-status-badge.tsx"
+        src: "src/lib/use-lifecycles.ts",
+        dest: "src/lib/use-lifecycles.ts"
       },
       {
         src: "src/providers/browser-router-provider.tsx",
@@ -17355,13 +18979,13 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     const detailPageContent = await this.renderTemplate("src/routes/$entity/$id.tsx.hbs", entityContext);
     await writeFile(join(outputDir, "src/routes", detailPageFilename), detailPageContent);
   }
-  async generateSingleEntity(entity2, relationships, outputDir, allEntities) {
+  async generateSingleEntity(entity, relationships, outputDir, allEntities) {
     const context = this.prepareContext(allEntities, relationships);
     const busEntities = context.entities;
-    const busEntity = busEntities.find((e) => e.originalName === entity2.name || e.name === entity2.name) ?? busEntities[0];
+    const busEntity = busEntities.find((e) => e.originalName === entity.name || e.name === entity.name) ?? busEntities[0];
     await this.generateSingleEntityRoutes(busEntity, context, outputDir);
-    const listFile = `${kebabCase(entity2.name)}.tsx`;
-    const detailFile = `${kebabCase(entity2.name)}.$id.tsx`;
+    const listFile = `${kebabCase(entity.name)}.tsx`;
+    const detailFile = `${kebabCase(entity.name)}.$id.tsx`;
     console.log(`  ✓ frontend/src/routes/${listFile}`);
     console.log(`  ✓ frontend/src/routes/${detailFile}`);
   }
@@ -17443,6 +19067,18 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     } catch (_e) {
       console.warn("Admin roles page template not found");
     }
+    try {
+      const systemConfigContent = await this.component("src/routes/admin/system-config.tsx");
+      await writeFile(join(adminDir, "system-config.tsx"), systemConfigContent);
+    } catch (_e) {
+      console.warn("Admin system configuration page template not found");
+    }
+    try {
+      const accessControlsContent = await this.component("src/routes/admin/access-controls.tsx");
+      await writeFile(join(adminDir, "access-controls.tsx"), accessControlsContent);
+    } catch (_e) {
+      console.warn("Admin access controls page template not found");
+    }
     const adminSubdirs = [
       { src: "src/routes/admin/table", dest: "src/routes/admin/table" },
       { src: "src/routes/admin/window", dest: "src/routes/admin/window" },
@@ -17521,12 +19157,6 @@ class TanStackStartFrontendGenerator extends BaseGenerator {
     } catch (_e) {
       console.warn("Custom tsconfig template not found, keeping TanStack Start default");
     }
-    try {
-      const biomeContent = await this.renderTemplate("biome.json.hbs", context);
-      await writeFile(join(outputDir, "biome.json"), biomeContent);
-    } catch (_e) {
-      console.warn("Custom Biome config template not found, using defaults");
-    }
     const envLocalContent = `VITE_API_URL=
 VITE_BACKEND_URL=${context.config.baseUrl}
 VITE_MASTRA_URL=http://localhost:4111
@@ -17593,6 +19223,7 @@ var HARNESS_FILES = [
   "server.ts",
   "entities.ts",
   "model.ts",
+  "reporting.ts",
   "factory.ts",
   "rules.ts",
   "workflows.ts",
@@ -17608,9 +19239,12 @@ var SHARED_SUITES = [
   "02-dictionary.test.ts",
   "02b-dictionary-layout.test.ts",
   "02c-dictionary-references.test.ts",
+  "02d-error-envelope.test.ts",
+  "02e-log-levels.test.ts",
   "04-bulk-seed.test.ts",
   "06-rules-workflow.test.ts",
   "06b-workflow-transitions.test.ts",
+  "06c-status-bound-workflow.test.ts",
   "07-workflow-random.test.ts",
   "08-users-roles.test.ts",
   "09-workflow-multistep.test.ts",
@@ -17623,11 +19257,31 @@ var SHARED_SUITES = [
   "19-window-list-defaults.test.ts",
   "20-transaction-notifications.test.ts",
   "21-reports.test.ts",
+  "22-optimistic-locking.test.ts",
+  "23-workflow-editors-api.test.ts",
+  "26-status-flows-by-role.test.ts",
+  "28-reporting-platform.test.ts",
+  "29-app-and-reports-together.test.ts",
   "10-benchmark.test.ts",
   "18-write-benchmark.test.ts",
   "11-performance-budget.test.ts"
 ];
-var ROOT_FILES = ["package.json", "tsconfig.json", "README.md", "run.ts", "cleanup.ts"];
+var ROOT_FILES = [
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  "run.ts",
+  "cleanup.ts",
+  "Dockerfile",
+  "Dockerfile.ui",
+  ".dockerignore"
+];
+var UI_FILES = [
+  "playwright.config.ts",
+  "helpers.ts",
+  "app.spec.ts",
+  "reporting.spec.ts"
+];
 var EXECUTABLE_FILES = ["run.ts", "cleanup.ts"];
 
 class BunE2ETestGenerator extends BaseGenerator {
@@ -17641,16 +19295,104 @@ class BunE2ETestGenerator extends BaseGenerator {
     await promises.mkdir(node_path_default.join(testsDir, "harness"), { recursive: true });
     await promises.mkdir(node_path_default.join(testsDir, "suites"), { recursive: true });
     const declared = declaredEntityNames(entities);
-    const busEntities = entities.map((entity2) => entityToBusEntity(entity2, declared));
+    const busEntities = entities.map((entity) => entityToBusEntity(entity, declared));
     const context = this.buildContext(busEntities, relationships);
     await this.writeRootFiles(testsDir, context);
     await this.writeHarness(testsDir, context);
+    await this.writeUi(testsDir, context);
     await this.writeSharedSuites(testsDir, context);
     await this.writePerEntitySuites(testsDir, busEntities, context);
     const perEntity = busEntities.length * 2;
     console.log(`   ✓ tests/ — ${SHARED_SUITES.length + perEntity} suites, ` + `${HARNESS_FILES.length + 1} harness modules`);
   }
+  withValueCeilings(entities) {
+    const ceilings = new Map;
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph;
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode")
+          continue;
+        for (const row of node.content?.rules ?? []) {
+          if (row.o1 !== "'prevent'")
+            continue;
+          const match = /^\s*([A-Za-z_]\w*)\s*(>=|>)\s*(-?\d+(?:\.\d+)?)\s*$/.exec(row.i1 ?? "");
+          if (!match)
+            continue;
+          const [, column, operator, bound] = match;
+          const ceiling = operator === ">=" ? Number(bound) - 0.01 : Number(bound);
+          const key = `${rule.tableName}.${column}`;
+          ceilings.set(key, Math.min(ceilings.get(key) ?? ceiling, ceiling));
+        }
+      }
+    }
+    if (ceilings.size === 0)
+      return entities;
+    return entities.map((entity) => ({
+      ...entity,
+      attributes: (entity.attributes ?? []).map((attribute) => {
+        const column = attribute.columnName ?? attribute.name;
+        const ceiling = ceilings.get(`${entity.tableName}.${column}`);
+        return ceiling === undefined ? attribute : { ...attribute, maxValue: ceiling };
+      })
+    }));
+  }
+  withUniqueTogether(entities) {
+    return entities.map((entity) => ({
+      ...entity,
+      uniqueTogether: (entity.indexes ?? []).filter((index) => index.unique && index.columns.length > 1).map((index) => index.columns)
+    }));
+  }
+  refusals() {
+    const found = [];
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph;
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode")
+          continue;
+        for (const row of node.content?.rules ?? []) {
+          const when = (row.i1 ?? "").trim();
+          if (row.o1 === "'prevent'" && when && when !== "true") {
+            found.push({ tableName: rule.tableName, when });
+          }
+        }
+      }
+    }
+    return found;
+  }
+  transforms() {
+    const found = [];
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph;
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode")
+          continue;
+        for (const row of node.content?.rules ?? []) {
+          const column = (row.o5 ?? "").trim().replace(/^'(.*)'$/, "$1");
+          if (row.o1 === "'transform'" && column) {
+            found.push({ tableName: rule.tableName, column });
+          }
+        }
+      }
+    }
+    return found;
+  }
   buildContext(entities, relationships) {
+    entities = this.withUniqueTogether(this.withValueCeilings(entities));
     return {
       project: {
         name: this.options.projectName,
@@ -17661,7 +19403,8 @@ class BunE2ETestGenerator extends BaseGenerator {
       config: {
         port: this.options.port,
         frontendPort: this.options.frontendPort,
-        recordsPerEntity: this.options.recordsPerEntity ?? 1000
+        recordsPerEntity: this.options.recordsPerEntity ?? 1000,
+        suiteTimeoutMs: Math.max(180000, entities.length * 6000)
       },
       entities,
       relationships,
@@ -17675,7 +19418,10 @@ class BunE2ETestGenerator extends BaseGenerator {
         x: report.x ?? "",
         y: report.y ?? ""
       })),
+      refusals: this.refusals(),
+      transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
+      hasReporting: this.options.reportingPack !== undefined,
       ...this.accessContext(entities),
       now: new Date().toISOString()
     };
@@ -17688,23 +19434,23 @@ class BunE2ETestGenerator extends BaseGenerator {
     const projectId = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const derived = deriveAccess(compiled, {
       projectId,
-      entities: entities.map((entity2) => entity2.originalName || entity2.name),
+      entities: entities.map((entity) => entity.originalName || entity.name),
       adminEmail: this.options.adminEmail
     });
-    const byName = new Map(entities.map((entity2) => [
-      String(entity2.originalName || entity2.name).toLowerCase(),
-      entity2
+    const byName = new Map(entities.map((entity) => [
+      String(entity.originalName || entity.name).toLowerCase(),
+      entity
     ]));
-    const rbacRules = compiled.operations.map((rule2) => {
-      const entity2 = byName.get(rule2.entity.toLowerCase());
+    const rbacRules = compiled.operations.map((rule) => {
+      const entity = byName.get(rule.entity.toLowerCase());
       return {
-        entity: rule2.entity,
-        tableName: rule2.tableName,
-        route: entity2 ? entity2.route || entity2.tableName : rule2.tableName,
-        operation: rule2.operation,
-        roles: rule2.roles
+        entity: rule.entity,
+        tableName: rule.tableName,
+        route: entity ? entity.route || entity.tableName : rule.tableName,
+        operation: rule.operation,
+        roles: rule.roles
       };
-    }).filter((rule2) => byName.has(rule2.entity.toLowerCase()));
+    }).filter((rule) => byName.has(rule.entity.toLowerCase()));
     const roleAccounts = derived.users.map((user) => ({
       email: user.email,
       name: user.name,
@@ -17719,9 +19465,9 @@ class BunE2ETestGenerator extends BaseGenerator {
     const entityToTable = new Map(busEntities.map((e) => [(e.originalName || e.name).toLowerCase(), e.tableName]));
     const overrides = [];
     const seen = new Set;
-    for (const entity2 of busEntities) {
-      const entityName = (entity2.originalName || entity2.name).toLowerCase();
-      const fkAttrs = (entity2.attributes || []).filter((a) => a.isForeignKey);
+    for (const entity of busEntities) {
+      const entityName = (entity.originalName || entity.name).toLowerCase();
+      const fkAttrs = (entity.attributes || []).filter((a) => a.isForeignKey);
       const parentRels = relationships.filter((r) => r.targetEntity.toLowerCase() === entityName);
       for (const attr of fkAttrs) {
         const col = attr.columnName || attr.name;
@@ -17772,8 +19518,8 @@ class BunE2ETestGenerator extends BaseGenerator {
       overrides.push({ column: col, table: personTable });
       seen.add(col);
     }
-    for (const entity2 of busEntities) {
-      const fkAttrs = (entity2.attributes || []).filter((a) => a.isForeignKey);
+    for (const entity of busEntities) {
+      const fkAttrs = (entity.attributes || []).filter((a) => a.isForeignKey);
       for (const attr of fkAttrs) {
         const col = attr.columnName || attr.name;
         if (seen.has(col))
@@ -17793,21 +19539,21 @@ class BunE2ETestGenerator extends BaseGenerator {
         byEntity.set(workflow.entity, workflow);
     }
     const machines = [];
-    for (const entity2 of entities) {
-      const workflow = byEntity.get(entity2.name) ?? byEntity.get(entity2.originalName);
+    for (const entity of entities) {
+      const workflow = byEntity.get(entity.name) ?? byEntity.get(entity.originalName);
       if (!workflow || workflow.transitions.length === 0)
         continue;
-      const columns = (entity2.attributes ?? []).map((attribute) => attribute.columnName ?? attribute.name);
-      const statusField = columns.includes("status") ? "status" : "workflow_status";
+      const columns = (entity.attributes ?? []).map((attribute) => attribute.columnName ?? attribute.name);
+      const statusField = stateFieldOf(columns.filter((name) => !!name)) ?? "workflow_status";
       const edges = workflow.transitions.filter((t) => t.from !== "[*]" && t.to !== "[*]").map((t) => ({ from: t.from, to: t.to, trigger: t.trigger ?? "" }));
       if (edges.length === 0)
         continue;
       machines.push({
-        entity: entity2.name,
-        tableName: entity2.tableName,
+        entity: entity.name,
+        tableName: entity.tableName,
         statusField,
         initial: workflow.initial ?? "",
-        terminal: workflow.terminal ?? [],
+        terminal: (workflow.terminal ?? []).filter((state) => !edges.some((edge) => edge.from === state)),
         edges
       });
     }
@@ -17820,6 +19566,13 @@ class BunE2ETestGenerator extends BaseGenerator {
     }
     for (const file of EXECUTABLE_FILES) {
       await promises.chmod(node_path_default.join(testsDir, file), 493).catch(() => {});
+    }
+  }
+  async writeUi(testsDir, context) {
+    await promises.mkdir(node_path_default.join(testsDir, "ui"), { recursive: true });
+    for (const file of UI_FILES) {
+      const content = await this.renderTemplate(`ui/${file}.hbs`, context);
+      await promises.writeFile(node_path_default.join(testsDir, "ui", file), content);
     }
   }
   async writeHarness(testsDir, context) {
@@ -17836,9 +19589,9 @@ class BunE2ETestGenerator extends BaseGenerator {
     }
   }
   async writePerEntitySuites(testsDir, entities, context) {
-    for (const entity2 of entities) {
-      const slug = entity2.tableName.replace(/^bus_/, "").replace(/[^a-z0-9]+/gi, "-");
-      const entityContext = { ...context, entity: entity2 };
+    for (const entity of entities) {
+      const slug = entity.tableName.replace(/^bus_/, "").replace(/[^a-z0-9]+/gi, "-");
+      const entityContext = { ...context, entity };
       const crud = await this.renderTemplate("suites/crud-entity.test.ts.hbs", entityContext);
       await promises.writeFile(node_path_default.join(testsDir, "suites", `03-crud.${slug}.test.ts`), crud);
       const rules = await this.renderTemplate("suites/rules-entity.test.ts.hbs", entityContext);
@@ -17913,6 +19666,7 @@ class FullStackGenerator {
         skipCliScaffold: this.options.skipCliScaffold,
         compiledRbac: this.options.compiledRbac,
         compiledReports: this.options.compiledReports,
+        compiledWorkflows: this.options.compiledWorkflows,
         ...aiConfig,
         ...this.options.tanstackStartNestjs?.frontend
       };
@@ -17932,7 +19686,9 @@ class FullStackGenerator {
         modelEnums: this.options.modelEnums,
         compiledWorkflows: this.options.compiledWorkflows,
         compiledRbac: this.options.compiledRbac,
-        compiledReports: this.options.compiledReports
+        compiledReports: this.options.compiledReports,
+        compiledRules: this.options.compiledRules,
+        reportingPack: this.options.reportingPack
       });
       await testGenerator.generate(entities, relationships, outputDir);
     }
@@ -18025,12 +19781,13 @@ tests/.e2e-seed-manifest.json
     await this.copyGitHubWorkflows(outputDir);
   }
   async writeContainerFiles(outputDir) {
-    const files2 = [
+    const files = [
       { template: "docker-compose.yml.hbs", output: "docker-compose.yml" },
       { template: "Dockerfile.hbs", output: "Dockerfile" },
       { template: ".dockerignore.hbs", output: ".dockerignore" },
       { template: ".env.example.root.hbs", output: ".env.example" },
-      { template: "docker-start.sh.hbs", output: "docker-start.sh", executable: true }
+      { template: "docker-start.sh.hbs", output: "docker-start.sh", executable: true },
+      { template: "observability/otel-collector.yaml.hbs", output: "observability/otel-collector.yaml" }
     ];
     const certsDir = join(outputDir, "docker", "ca-certificates");
     await mkdir(certsDir, { recursive: true });
@@ -18041,13 +19798,15 @@ tests/.e2e-seed-manifest.json
     const frontendPort = this.options.frontendPort ?? DEFAULT_FRONTEND_PORT;
     const projectId = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const projectSnake = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-    const render = (content) => content.replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake).replace(/\{\{project\.name\}\}/g, this.options.projectName).replace(/\{\{project\.id\}\}/g, projectId).replace(/\{\{project\.backendPort\}\}/g, String(backendPort)).replace(/\{\{project\.frontendPort\}\}/g, String(frontendPort));
-    for (const file of files2) {
+    const render = (content) => (this.options.skipTests ? content.replace(/\n  # <e2e>[\s\S]*?# <\/e2e>\n/, `
+`) : content.replace(/\n  # <\/?e2e>/g, "")).replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake).replace(/\{\{project\.name\}\}/g, this.options.projectName).replace(/\{\{project\.id\}\}/g, projectId).replace(/\{\{project\.backendPort\}\}/g, String(backendPort)).replace(/\{\{project\.frontendPort\}\}/g, String(frontendPort));
+    for (const file of files) {
       try {
         const templateDir = await this.findTemplatesDir();
         const source = join(templateDir, "tanstack-start-nestjs", file.template);
         const rendered = render(await readFile(source, "utf-8"));
         const destination = join(outputDir, file.output);
+        await mkdir(dirname(destination), { recursive: true });
         await writeFile(destination, rendered);
         if (file.executable)
           await chmod(destination, 493).catch(() => {});
@@ -18064,7 +19823,7 @@ tests/.e2e-seed-manifest.json
     await mkdir(join(reportingDir, "pg-init"), { recursive: true });
     await writeFile(join(reportingDir, "reporting-pack.json"), `${JSON.stringify(pack, null, 2)}
 `);
-    const templates2 = [
+    const templates = [
       { template: "reporting/Dockerfile.hbs", output: "reporting/Dockerfile" },
       {
         template: "reporting/pg-init/01-reporting-database.sh.hbs",
@@ -18073,7 +19832,7 @@ tests/.e2e-seed-manifest.json
       },
       { template: "reporting/README.md.hbs", output: "reporting/README.md" }
     ];
-    for (const file of templates2) {
+    for (const file of templates) {
       try {
         const templateDir = await this.findTemplatesDir();
         const source = join(templateDir, "tanstack-start-nestjs", file.template);
@@ -18305,10 +20064,251 @@ MIT
   }
 }
 
+// packages/generator/src/generators/dictionary.generator.ts
+class DictionaryGenerator {
+  config;
+  constructor(options) {
+    this.config = {
+      ...defaultDictionaryConfig,
+      randomizeFieldOrder: options.randomizeFieldOrder
+    };
+  }
+  generateDictionaryContext(entities, relationships) {
+    const busEntities = [];
+    const busAttributesMap = new Map;
+    const sysTables = [];
+    const sysColumns = [];
+    const sysWindows = [];
+    const sysTabs = [];
+    const sysFields = [];
+    const sysFieldGroups = [];
+    let tableCounter = 0;
+    let columnCounter = 0;
+    let windowCounter = 0;
+    let tabCounter = 0;
+    let fieldCounter = 0;
+    let fieldGroupCounter = 0;
+    const windowByEntity = new Map;
+    const childTabs = [];
+    const declared = declaredEntityNames(entities);
+    for (const entity of entities) {
+      const busEntity = entityToBusEntity(entity, declared);
+      busEntities.push(busEntity);
+      const busAttrs = entity.attributes.map((attr, index) => attributeToBusAttribute(attr, index));
+      busAttributesMap.set(busEntity.tableName, busAttrs);
+      const tableId = `table_${++tableCounter}`;
+      const sysTable = {
+        ...generateSysTable(busEntity, this.config),
+        _tempId: tableId
+      };
+      sysTables.push(sysTable);
+      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey, entity.name));
+      const columnEntries = busAttrs.map((attr, _index) => {
+        const colId = `col_${++columnCounter}`;
+        return {
+          sys_table_id: tableId,
+          column_name: attr.columnName,
+          name: attr.displayName,
+          description: attr.description,
+          sys_reference_id: attr.referenceId,
+          sys_val_rule_id: undefined,
+          field_length: attr.maxLength,
+          default_value: attr.default?.toString(),
+          value_min: undefined,
+          value_max: undefined,
+          is_key: attr.name === entity.primaryKey,
+          is_parent: false,
+          is_mandatory: attr.required,
+          is_updateable: attr.name !== entity.primaryKey,
+          is_identifier: identifiers.has(attr.name),
+          is_selection_column: ["name", "email", "title", "description", "status"].includes(attr.name) || attr.unique === true,
+          is_translated: false,
+          is_encrypted: false,
+          is_allow_logging: true,
+          is_allow_copy: attr.name !== entity.primaryKey,
+          seq_no: attr.seqNo,
+          callout: undefined,
+          read_only_logic: attr.readOnlyLogic,
+          mandatory_logic: attr.mandatoryLogic,
+          format_pattern: undefined,
+          entity_type: this.config.defaultEntityType,
+          is_active: true,
+          created_by: this.config.createdBy,
+          updated_by: this.config.createdBy,
+          _tempId: colId,
+          _tableRef: tableId
+        };
+      });
+      sysColumns.push(...columnEntries);
+      const isChild = !!entity.parentEntity;
+      const windowId = `win_${++windowCounter}`;
+      if (!isChild) {
+        sysWindows.push({
+          ...generateSysWindow(busEntity, this.config),
+          _tempId: windowId,
+          _tableRef: tableId
+        });
+      }
+      const tabId = `tab_${++tabCounter}`;
+      const sysTab = {
+        ...generateSysTab(windowId, tableId, busEntity, isChild ? 1 : 0, this.config),
+        _tempId: tabId,
+        _windowRef: windowId,
+        _tableRef: tableId
+      };
+      sysTabs.push(sysTab);
+      if (isChild) {
+        const link = columnEntries.find((col) => col.column_name === entity.parentLinkColumn);
+        if (link)
+          link.is_parent = true;
+        childTabs.push({
+          tab: sysTab,
+          table: sysTable,
+          parentEntity: entity.parentEntity,
+          linkColumnRef: link?._tempId
+        });
+      } else {
+        windowByEntity.set(entity.name, windowId);
+      }
+      const groups = generateSysFieldGroups(busEntity.displayName, this.config);
+      const groupEntries = groups.map((group) => ({
+        ...group,
+        _tempId: `fg_${++fieldGroupCounter}`
+      }));
+      sysFieldGroups.push(...groupEntries);
+      const columnRefs = columnEntries.map((col) => ({
+        sys_column_id: col._tempId,
+        column_name: col.column_name,
+        name: col.name,
+        description: col.description
+      }));
+      const fields = generateSysFields(tabId, columnRefs, this.config);
+      const fieldEntries = fields.map((field, idx) => ({
+        ...field,
+        _tempId: `field_${++fieldCounter}`,
+        _tabRef: tabId,
+        _columnRef: columnEntries[idx]?._tempId ?? "",
+        display_logic: busAttrs[idx]?.displayLogic,
+        read_only_logic: busAttrs[idx]?.readOnlyLogic,
+        mandatory_logic: busAttrs[idx]?.mandatoryLogic
+      }));
+      const layout = formLayoutFor(entity);
+      if (layout) {
+        const groupIds = new Map;
+        for (const group of layout.groups) {
+          const groupId = `fg_${++fieldGroupCounter}`;
+          groupIds.set(group.name, groupId);
+          sysFieldGroups.push({
+            name: group.name,
+            description: group.description,
+            field_group_type: "C",
+            is_collapsed_by_default: group.collapsed,
+            entity_type: this.config.defaultEntityType,
+            is_active: true,
+            created_by: this.config.createdBy,
+            updated_by: this.config.createdBy,
+            _tempId: groupId,
+            _tabRef: tabId,
+            columns: group.columns,
+            seq_no: group.seqNo
+          });
+        }
+        const keyed = new Map(busAttrs.map((attr, idx) => [attr.columnName, fieldEntries[idx]]));
+        for (const [column, place] of layout.fields) {
+          const field = keyed.get(column);
+          if (!field)
+            continue;
+          field._groupRef = groupIds.get(place.group);
+          field.seq_no = place.seqNo;
+          field.is_same_line = place.sameLine;
+          field.column_span = place.columnSpan;
+        }
+        const key = keyed.get(entity.primaryKey);
+        if (key)
+          key.seq_no = 0;
+      }
+      sysFields.push(...fieldEntries);
+    }
+    let childSeq = 20;
+    for (const child of childTabs) {
+      const parentWindow = windowByEntity.get(child.parentEntity);
+      if (!parentWindow)
+        continue;
+      child.tab._windowRef = parentWindow;
+      child.tab.sys_window_id = parentWindow;
+      child.tab.seq_no = childSeq;
+      childSeq += 10;
+      if (child.linkColumnRef)
+        child.tab.link_column_id = child.linkColumnRef;
+      child.table.sys_window_id = parentWindow;
+    }
+    return {
+      entities: busEntities,
+      busAttributes: busAttributesMap,
+      sysTables,
+      sysColumns,
+      sysWindows,
+      sysTabs,
+      sysFields,
+      sysFieldGroups,
+      references: ReferenceType,
+      relationships
+    };
+  }
+  getSystemTableNames() {
+    return [
+      "sys_table",
+      "sys_column",
+      "sys_window",
+      "sys_tab",
+      "sys_field",
+      "sys_field_group",
+      "sys_reference",
+      "sys_ref_list",
+      "sys_ref_table",
+      "sys_val_rule",
+      "sys_user",
+      "sys_role",
+      "sys_user_roles",
+      "sys_access"
+    ];
+  }
+  getStandardReferences() {
+    return [
+      { id: ReferenceType.STRING, name: "String", description: "String/Varchar field" },
+      { id: ReferenceType.INTEGER, name: "Integer", description: "Integer number" },
+      { id: ReferenceType.AMOUNT, name: "Amount", description: "Decimal/Amount" },
+      { id: ReferenceType.ID, name: "ID", description: "Identifier (UUID)" },
+      { id: ReferenceType.TEXT, name: "Text", description: "Long text/memo" },
+      { id: ReferenceType.DATE, name: "Date", description: "Date only" },
+      { id: ReferenceType.DATETIME, name: "DateTime", description: "Date and time" },
+      { id: ReferenceType.LIST, name: "List", description: "Dropdown list" },
+      { id: ReferenceType.TABLE, name: "Table", description: "Table reference" },
+      {
+        id: ReferenceType.TABLE_DIRECT,
+        name: "Table Direct",
+        description: "Direct table reference"
+      },
+      { id: ReferenceType.YES_NO, name: "Yes-No", description: "Boolean (Yes/No)" },
+      { id: ReferenceType.LOCATION, name: "Location", description: "Location/Address" },
+      { id: ReferenceType.LOCATOR, name: "Locator", description: "Warehouse locator" },
+      { id: ReferenceType.ACCOUNT, name: "Account", description: "Account reference" },
+      { id: ReferenceType.URL, name: "URL", description: "URL/Web address" },
+      { id: ReferenceType.IMAGE, name: "Image", description: "Image file" },
+      { id: ReferenceType.FILE, name: "File", description: "File attachment" },
+      { id: ReferenceType.COLOR, name: "Color", description: "Color picker" },
+      { id: ReferenceType.JSON, name: "JSON", description: "JSON data" },
+      { id: ReferenceType.PASSWORD, name: "Password", description: "Masked password" },
+      { id: ReferenceType.EMAIL, name: "Email", description: "Email address" },
+      { id: ReferenceType.PHONE, name: "Phone", description: "Phone number" }
+    ];
+  }
+}
+
 // packages/generator/src/naming/tables.ts
 var snake = (value) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase();
-function tableNameFor(entity2) {
-  const base = snake(entity2.tableName || entity2.name);
+function tableNameFor(entity) {
+  const base = snake(entity.tableName || entity.name);
   return base.startsWith("bus_") || base.startsWith("sys_") ? base : `bus_${base}`;
 }
 
@@ -18409,8 +20409,75 @@ function linkColumn(parent, child, relForeignKey) {
   const expected = `${tableNameFor(parent).replace(/^bus_/, "")}_id`;
   return child.attributes.find((a) => a.name === expected) ?? (relForeignKey ? child.attributes.find((a) => a.name === relForeignKey) : undefined);
 }
+var RESERVED_ALIASES = [
+  "all",
+  "analyse",
+  "analyze",
+  "and",
+  "any",
+  "array",
+  "asc",
+  "both",
+  "case",
+  "cast",
+  "check",
+  "collate",
+  "column",
+  "constraint",
+  "create",
+  "default",
+  "desc",
+  "distinct",
+  "do",
+  "else",
+  "end",
+  "except",
+  "false",
+  "fetch",
+  "for",
+  "foreign",
+  "from",
+  "grant",
+  "group",
+  "having",
+  "in",
+  "initially",
+  "intersect",
+  "into",
+  "leading",
+  "limit",
+  "not",
+  "null",
+  "offset",
+  "on",
+  "only",
+  "or",
+  "order",
+  "primary",
+  "references",
+  "select",
+  "some",
+  "table",
+  "then",
+  "to",
+  "trailing",
+  "true",
+  "union",
+  "unique",
+  "user",
+  "using",
+  "when",
+  "where",
+  "window",
+  "with"
+];
+var RESERVED_ALIAS = new RegExp(`(\\bAS\\s+)(${RESERVED_ALIASES.join("|")})(?![\\w"])`, "gi");
+function quoteReservedAliases(sql) {
+  return sql.replace(RESERVED_ALIAS, (_m, as, word) => `${as}"${word}"`);
+}
 function addQuery(ctx, spec) {
-  ctx.queries.push({ ...spec, tables: tablesIn(spec.sql) });
+  const sql = quoteReservedAliases(spec.sql);
+  ctx.queries.push({ ...spec, sql, tables: tablesIn(sql) });
   return spec.key;
 }
 function deriveEntity(ctx, e) {
@@ -18504,14 +20571,15 @@ ORDER BY 1`
   if (wf && statusCol) {
     const states = declaredStates(wf);
     if (states.length > 0) {
-      const valuesList = states.map((s, i) => `(${lit(s)}, ${i})`).join(", ");
+      const valuesList = states.map((s, i) => i === 0 ? `SELECT ${lit(s)} AS state, ${i} AS position` : `SELECT ${lit(s)}, ${i}`).join(`
+  UNION ALL `);
       const key = `${slug}__lifecycle`;
       const q = addQuery(ctx, {
         key,
         name: `${titleOf(e)} lifecycle — ${wf.name}`,
         description: `Where ${pluralTitle(e).toLowerCase()} sit in the ${wf.name} state machine. Every state the model declares appears, including the ones nothing has reached.`,
-        sql: `WITH declared(state, position) AS (
-  VALUES ${valuesList}
+        sql: `WITH declared AS (
+  ${valuesList}
 )
 SELECT d.state, COALESCE(c.records, 0) AS records
 FROM declared d
@@ -18681,7 +20749,7 @@ function deriveDashboards(ctx, appName, appDescription) {
       y += 4;
     }
   };
-  for (const c of ctx.charts.filter((c2) => c2.key.startsWith("authored__")).slice(0, 4)) {
+  for (const c of ctx.charts.filter((c) => c.key.startsWith("authored__")).slice(0, 4)) {
     place(c.name, c.key);
   }
   for (const e of headline) {
@@ -18699,8 +20767,48 @@ function deriveDashboards(ctx, appName, appDescription) {
       name: `${appName} — overview`,
       description: appDescription?.trim() || `The ${headline.length} entities this model puts at the centre of ${appName}, one tile each.`,
       widgets
-    }
+    },
+    ...deriveAuthoredDashboards(ctx)
   ];
+}
+function deriveAuthoredDashboards(ctx) {
+  const charts = new Set(ctx.charts.map((c) => c.key));
+  const reports = new Set(ctx.reports.map((r) => r.key));
+  const specs = [];
+  for (const d of ctx.model.dashboards ?? []) {
+    const widgets = [];
+    let x = 0;
+    let y = 0;
+    for (const name of d.reports) {
+      const key = `authored__${name}`;
+      const title = ctx.model.reports.find((r) => r.name === name)?.title ?? name;
+      if (charts.has(key)) {
+        widgets.push({ chartKey: key, title, x, y, w: 6, h: 4 });
+        x += 6;
+        if (x >= 12) {
+          x = 0;
+          y += 4;
+        }
+      } else if (reports.has(key)) {
+        if (x !== 0) {
+          x = 0;
+          y += 4;
+        }
+        widgets.push({ reportKey: key, title, x, y, w: 12, h: 4 });
+        y += 4;
+      }
+    }
+    if (widgets.length === 0)
+      continue;
+    specs.push({
+      key: `authored__${d.name}`,
+      name: d.title,
+      description: d.help?.trim() ?? (d.role ? `${d.title} — a dashboard for the ${d.role} role, declared in the model as %%dashboard ${d.name}.` : `Declared in the model as %%dashboard ${d.name}.`),
+      ...d.role ? { role: d.role } : {},
+      widgets
+    });
+  }
+  return specs;
 }
 function dropDerivedDuplicatesOfAuthored(ctx) {
   const authoredNames = new Set([...ctx.reports, ...ctx.charts, ...ctx.queries].filter((x) => x.key.startsWith("authored__")).map((x) => x.name));
@@ -18736,25 +20844,29 @@ ${problems.join(`
 `)}`);
   }
 }
+var RESERVED_PLATFORM_ROLES = new Set(["admin", "administrator"]);
+function reportingRoleName(name) {
+  return RESERVED_PLATFORM_ROLES.has(name.trim().toLowerCase()) ? `${name} (model role)` : name;
+}
 function deriveAccessSpec(model, options) {
   const projectId = kebabName(options.projectName);
-  const access2 = deriveAccess(model.rbac, {
+  const access = deriveAccess(model.rbac, {
     projectId,
     adminEmail: options.adminEmail,
     adminName: options.adminName,
     entities: model.entities.map((e) => e.name)
   });
   const reportDomain = `${projectId || "app"}.reports.example.com`;
-  const roles = access2.roles.map((role) => {
-    const appUser = access2.users.find((u) => u.roleName === role.name);
-    const tables = role.isAdmin ? [] : model.entities.filter((entity2) => {
-      const admitted = access2.entityVisibility[entity2.name];
+  const roles = access.roles.map((role) => {
+    const appUser = access.users.find((u) => u.roleName === role.name);
+    const tables = role.isAdmin ? [] : model.entities.filter((entity) => {
+      const admitted = access.entityVisibility[entity.name];
       if (!admitted || admitted.length === 0)
         return true;
       return admitted.some((r) => r.toLowerCase() === role.declaredAs.toLowerCase());
-    }).map((entity2) => tableNameFor(entity2));
+    }).map((entity) => tableNameFor(entity));
     return {
-      name: role.name,
+      name: role.isAdmin ? role.name : reportingRoleName(role.name),
       declaredAs: role.declaredAs,
       description: role.isAdmin ? "Reads every table of the attached application" : `Reads what ${role.name} may see in the application`,
       isAdmin: role.isAdmin,
@@ -18766,7 +20878,8 @@ function deriveAccessSpec(model, options) {
   for (const role of roles) {
     if (role.isAdmin)
       continue;
-    const expected = access2.entityCounts[role.name];
+    const appName = access.roles.find((r) => r.declaredAs === role.declaredAs)?.name ?? role.name;
+    const expected = access.entityCounts[appName];
     if (expected !== undefined && expected !== role.tables.length) {
       throw new Error(`Reporting role "${role.name}" resolved ${role.tables.length} readable tables, ` + `but the application derives ${expected} for the same role. ` + `These must agree — the reporting side is mirroring %%rbac, not reinterpreting it.`);
     }
@@ -18863,7 +20976,14 @@ var MANAGED_COLUMN_NAMES = new Set([
   "deleted_at",
   "deleted_by"
 ]);
-var NOISE = new Set(["id", "created_by", "updated_by", "deleted_by", "deleted_at", "version"]);
+var GRID_NOISE = new Set([
+  "id",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+  "version"
+]);
 var PERSON_ROLE_COLUMNS = new Set([
   "assigned_to",
   "author_id",
@@ -18918,11 +21038,11 @@ function referenceTarget(column, declared) {
   return declared.get(stem.replace(/_/g, "")) ?? title(stem).replace(/\s+/g, "");
 }
 function declaredNames(model) {
-  return new Map(model.entities.map((entity2) => [entity2.name.toLowerCase().replace(/_/g, ""), entity2.name]));
+  return new Map(model.entities.map((entity) => [entity.name.toLowerCase().replace(/_/g, ""), entity.name]));
 }
-function fieldRows(entity2, declared) {
-  const primaryKey = entity2.primaryKey || "id";
-  return entity2.attributes.map((attribute) => {
+function fieldRows(entity, declared) {
+  const primaryKey = entity.primaryKey || "id";
+  return entity.attributes.map((attribute) => {
     const isPrimary = attribute.name === primaryKey;
     const referenceId = referenceIdFor(attribute, isPrimary);
     const control = controlFor(attribute, referenceId);
@@ -18969,19 +21089,115 @@ function relationshipPhrase(relationship, entityName) {
       return `has one ${link}`;
   }
 }
-function relationshipsFor(model, entity2) {
-  const related = model.relationships.filter((relationship) => relationship.sourceEntity === entity2.name || relationship.targetEntity === entity2.name);
+function relationshipsFor(model, entity) {
+  const related = model.relationships.filter((relationship) => relationship.sourceEntity === entity.name || relationship.targetEntity === entity.name);
   if (related.length === 0)
     return "";
-  const items = related.map((relationship) => `<li>Each <b>${escapeHtml(title(entity2.name))}</b> ${relationshipPhrase(relationship, entity2.name)}.</li>`).join(`
+  const items = related.map((relationship) => `<li>Each <b>${escapeHtml(title(entity.name))}</b> ${relationshipPhrase(relationship, entity.name)}.</li>`).join(`
           `);
   return `      <h4>Related records</h4>
       <ul class="plain">
           ${items}
       </ul>`;
 }
-function workflowFor(model, entity2) {
-  const workflows = model.workflows.filter((workflow) => workflow.entity === entity2.name);
+function screensFor(dictionary, entity) {
+  const layout = dictionary.get(entity.name);
+  if (!layout)
+    return "";
+  const sectioned = layout.sections.length > 0;
+  const rows = layout.fields.map((field) => `          <tr>
+            <td><code>${escapeHtml(field.column)}</code></td>
+            <td>${escapeHtml(field.label)}</td>${sectioned ? `
+            <td>${escapeHtml(field.section ?? "—")}</td>
+            <td>${escapeHtml(field.place ?? "—")}</td>` : ""}
+            <td>${field.onForm ? "Yes" : "No"}</td>
+            <td>${field.inGrid ? "Yes" : "No"}</td>
+            <td>${field.formSeq}</td>
+            <td>${field.readOnly ? "Yes" : "No"}</td>
+          </tr>`).join(`
+`);
+  const sections = sectioned ? `
+      <p>The form is laid out in ${layout.sections.length} section${layout.sections.length === 1 ? "" : "s"}, each a grid of two columns:</p>
+      <ul class="plain">
+          ${layout.sections.map((section) => `<li><b>${escapeHtml(section.name)}</b>${section.help ? ` &mdash; ${escapeHtml(section.help)}` : ""}</li>`).join(`
+          `)}
+      </ul>` : "";
+  return `      <h4>Where it appears</h4>
+      <p>The application opens this record in the <b>${escapeHtml(layout.window)}</b> window, on the <b>${escapeHtml(layout.tab)}</b> tab. These are its ${layout.fields.length} field${layout.fields.length === 1 ? "" : "s"} &mdash; what the screen draws, in the order it draws them. An administrator can change any of this in Application Dictionary &rarr; Fields without regenerating the application.</p>${sections}
+      <table>
+        <thead><tr><th>Column</th><th>Label</th>${sectioned ? "<th>Section</th><th>Place</th>" : ""}<th>On the form</th><th>In the list</th><th>Order</th><th>Read only</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>`;
+}
+function manualDictionary(model) {
+  const context = new DictionaryGenerator({
+    databaseType: "postgresql",
+    includeRbac: true,
+    randomizeFieldOrder: false
+  }).generateDictionaryContext(model.entities, model.relationships);
+  const tableOf = new Map(context.sysTables.map((table) => [table._tempId, table.table_name]));
+  const windowOf = new Map(context.sysWindows.map((w) => [w._tempId, w.name]));
+  const columnOf = new Map(context.sysColumns.map((c) => [c._tempId, c.column_name]));
+  const tabOf = new Map(context.sysTabs.map((tab) => [
+    tab._tempId,
+    {
+      name: tab.name,
+      window: windowOf.get(tab._windowRef) ?? tab.name,
+      table: tableOf.get(tab._tableRef) ?? ""
+    }
+  ]));
+  const byTable = new Map;
+  for (const tab of tabOf.values()) {
+    if (tab.table && !byTable.has(tab.table)) {
+      byTable.set(tab.table, { window: tab.window, tab: tab.name, sections: [], fields: [] });
+    }
+  }
+  const groupOf = new Map(context.sysFieldGroups.map((group) => [group._tempId, group]));
+  for (const group of context.sysFieldGroups) {
+    const tab = group._tabRef ? tabOf.get(group._tabRef) : undefined;
+    const layout = tab?.table ? byTable.get(tab.table) : undefined;
+    layout?.sections.push({
+      name: group.name,
+      help: group.description,
+      seqNo: group.seq_no ?? 0
+    });
+  }
+  for (const field of context.sysFields) {
+    const tab = tabOf.get(field._tabRef);
+    if (!tab?.table)
+      continue;
+    const layout = byTable.get(tab.table);
+    if (!layout)
+      continue;
+    const column = columnOf.get(field._columnRef) ?? "";
+    const group = field._groupRef ? groupOf.get(field._groupRef) : undefined;
+    layout.fields.push({
+      column,
+      label: field.name,
+      section: group?.name,
+      place: group ? field.column_span === 2 ? "full width" : field.is_same_line ? "beside the field before it" : "starts a row" : undefined,
+      onForm: field.is_displayed !== false,
+      inGrid: field.is_displayed_grid !== false && !GRID_NOISE.has(column),
+      formSeq: field.seq_no ?? 0,
+      readOnly: !!field.is_read_only
+    });
+  }
+  for (const layout of byTable.values()) {
+    layout.fields.sort((a, b) => a.formSeq - b.formSeq);
+    layout.sections.sort((a, b) => a.seqNo - b.seqNo);
+  }
+  const byEntity = new Map;
+  for (const entity of model.entities) {
+    const layout = byTable.get(tableNameFor(entity));
+    if (layout)
+      byEntity.set(entity.name, layout);
+  }
+  return byEntity;
+}
+function workflowFor(model, entity) {
+  const workflows = model.workflows.filter((workflow) => workflow.entity === entity.name);
   if (workflows.length === 0)
     return "";
   return workflows.map((workflow) => {
@@ -18998,10 +21214,10 @@ ${rows}
   }).join(`
 `);
 }
-function rulesFor(model, entity2) {
-  const rules = model.rules.filter((rule2) => rule2.entity === entity2.name);
-  const hooks = model.hooks.filter((hook2) => hook2.entity === entity2.name);
-  const sagas = model.sagas.filter((saga) => saga.entity === entity2.name);
+function rulesFor(model, entity) {
+  const rules = model.rules.filter((rule) => rule.entity === entity.name);
+  const hooks = model.hooks.filter((hook) => hook.entity === entity.name);
+  const sagas = model.sagas.filter((saga) => saga.entity === entity.name);
   if (rules.length === 0 && hooks.length === 0 && sagas.length === 0)
     return "";
   const parts = ["      <h4>What happens when it is written</h4>"];
@@ -19009,13 +21225,13 @@ function rulesFor(model, entity2) {
     parts.push(`      <table>
         <thead><tr><th>Rule</th><th>Runs on</th><th>Order</th></tr></thead>
         <tbody>
-${rules.map((rule2) => `          <tr><td><code>${escapeHtml(rule2.name)}</code></td><td>${escapeHtml(rule2.event)} (${escapeHtml(rule2.operation)})</td><td>${rule2.priority}</td></tr>`).join(`
+${rules.map((rule) => `          <tr><td><code>${escapeHtml(rule.name)}</code></td><td>${escapeHtml(rule.event)} (${escapeHtml(rule.operation)})</td><td>${rule.priority}</td></tr>`).join(`
 `)}
         </tbody>
       </table>`);
   }
   if (hooks.length > 0) {
-    parts.push(`      <p><b>Handlers:</b> ${hooks.map((hook2) => `<code>${escapeHtml(hook2.type)}</code>${hook2.field ? ` on <code>${escapeHtml(hook2.field)}</code>` : ""}`).join(", ")}</p>`);
+    parts.push(`      <p><b>Handlers:</b> ${hooks.map((hook) => `<code>${escapeHtml(hook.type)}</code>${hook.field ? ` on <code>${escapeHtml(hook.field)}</code>` : ""}`).join(", ")}</p>`);
   }
   if (sagas.length > 0) {
     parts.push(`      <p><b>Processes:</b> ${sagas.map((saga) => `<a href="#process-${slug(saga.name)}">${escapeHtml(saga.name)}</a>`).join(", ")}</p>`);
@@ -19023,19 +21239,19 @@ ${rules.map((rule2) => `          <tr><td><code>${escapeHtml(rule2.name)}</code>
   return parts.join(`
 `);
 }
-function accessFor(model, entity2, visibility) {
-  const readers = visibility[entity2.name];
-  const rules = model.rbac.operations.filter((rule2) => rule2.entity === entity2.name);
+function accessFor(model, entity, visibility) {
+  const readers = visibility[entity.name];
+  const rules = model.rbac.operations.filter((rule) => rule.entity === entity.name);
   if (!readers && rules.length === 0)
     return "";
   const parts = ["      <h4>Who may use it</h4>"];
   parts.push(readers && readers.length > 0 ? `      <p>Visible to ${readers.map((role) => `<b>${escapeHtml(title(role))}</b>`).join(", ")}, and to the Administrator. Nobody else sees it at all &mdash; it is absent from their menu rather than refused when opened.</p>` : "      <p>Visible to every signed-in user; the model places no restriction on reading it.</p>");
-  const writes = rules.filter((rule2) => rule2.operation !== "read");
+  const writes = rules.filter((rule) => rule.operation !== "read");
   if (writes.length > 0) {
     parts.push(`      <table>
         <thead><tr><th>Action</th><th>Permitted to</th></tr></thead>
         <tbody>
-${writes.map((rule2) => `          <tr><td>${escapeHtml(title(rule2.operation))}</td><td>${rule2.roles.map((role) => escapeHtml(title(role))).join(", ")}</td></tr>`).join(`
+${writes.map((rule) => `          <tr><td>${escapeHtml(title(rule.operation))}</td><td>${rule.roles.map((role) => escapeHtml(title(role))).join(", ")}</td></tr>`).join(`
 `)}
         </tbody>
       </table>`);
@@ -19045,10 +21261,10 @@ ${writes.map((rule2) => `          <tr><td>${escapeHtml(title(rule2.operation))}
 }
 function renderManual(model, options) {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const access2 = deriveAccess(model.rbac, {
+  const access = deriveAccess(model.rbac, {
     projectId: slug(options.name) || "app",
     adminEmail: options.adminEmail,
-    entities: model.entities.map((entity2) => entity2.name)
+    entities: model.entities.map((entity) => entity.name)
   });
   const categoryOf = new Map;
   for (const category of model.categories) {
@@ -19057,6 +21273,7 @@ function renderManual(model, options) {
   }
   const entities = [...model.entities].sort((a, b) => a.name.localeCompare(b.name));
   const declared = declaredNames(model);
+  const dictionary = manualDictionary(model);
   const contents = `
       <nav class="toc" aria-label="Contents">
         <h2>Contents</h2>
@@ -19065,35 +21282,37 @@ function renderManual(model, options) {
           <li><a href="#signing-in">Signing in, and what each role sees</a></li>
           <li><a href="#entities">The records it keeps</a>
             <ul>
-${entities.map((entity2) => `              <li><a href="#entity-${slug(entity2.name)}">${escapeHtml(title(entity2.name))}</a></li>`).join(`
+${entities.map((entity) => `              <li><a href="#entity-${slug(entity.name)}">${escapeHtml(title(entity.name))}</a></li>`).join(`
 `)}
             </ul>
           </li>
+          <li><a href="#concurrent-edits">When two people change the same record</a></li>
 ${model.rules.length ? `          <li><a href="#rules">The decisions it makes</a></li>
 ` : ""}${model.sagas.length ? `          <li><a href="#processes">The processes it runs</a></li>
 ` : ""}          <li><a href="#how-it-was-built">How this application was built</a></li>
         </ol>
       </nav>`;
-  const entitySections = entities.map((entity2) => {
-    const category = categoryOf.get(entity2.name);
-    return `    <section id="entity-${slug(entity2.name)}" class="entity">
-      <h3>${escapeHtml(title(entity2.name))}${category ? ` <span class="group">${escapeHtml(category)}</span>` : ""}</h3>
-      <p class="lede">${entity2.description ? escapeHtml(entity2.description) : '<span class="missing">The model gives this entity no description. Add one with <code>%%entity ' + escapeHtml(entity2.name) + " help: …</code>.</span>"}</p>
-      <p class="meta">Stored as <code>${escapeHtml(tableNameFor(entity2))}</code>, keyed by <code>${escapeHtml(entity2.primaryKey || "id")}</code>.</p>
+  const entitySections = entities.map((entity) => {
+    const category = categoryOf.get(entity.name);
+    return `    <section id="entity-${slug(entity.name)}" class="entity">
+      <h3>${escapeHtml(title(entity.name))}${category ? ` <span class="group">${escapeHtml(category)}</span>` : ""}</h3>
+      <p class="lede">${entity.description ? escapeHtml(entity.description) : '<span class="missing">The model gives this entity no description. Add one with <code>%%entity ' + escapeHtml(entity.name) + " help: …</code>.</span>"}</p>
+      <p class="meta">Stored as <code>${escapeHtml(tableNameFor(entity))}</code>, keyed by <code>${escapeHtml(entity.primaryKey || "id")}</code>.</p>
 
       <h4>Its fields</h4>
-${entity2.attributes.some((attribute) => attribute.description) ? "" : `      <p class="missing">No field here carries help text. Add it with <code>%%field ${escapeHtml(entity2.name)}.&lt;field&gt; help: …</code> and it appears in this column and in the application itself.</p>
+${entity.attributes.some((attribute) => attribute.description) ? "" : `      <p class="missing">No field here carries help text. Add it with <code>%%field ${escapeHtml(entity.name)}.&lt;field&gt; help: …</code> and it appears in this column and in the application itself.</p>
 `}      <table>
         <thead><tr><th>Field</th><th>Shown as</th><th></th><th>What it is for</th></tr></thead>
         <tbody>
-${fieldRows(entity2, declared)}
+${fieldRows(entity, declared)}
         </tbody>
       </table>
 ${[
-      relationshipsFor(model, entity2),
-      workflowFor(model, entity2),
-      rulesFor(model, entity2),
-      accessFor(model, entity2, access2.entityVisibility)
+      screensFor(dictionary, entity),
+      relationshipsFor(model, entity),
+      workflowFor(model, entity),
+      rulesFor(model, entity),
+      accessFor(model, entity, access.entityVisibility)
     ].filter(Boolean).join(`
 `)}
       <p class="back"><a href="#top">Back to contents</a></p>
@@ -19107,7 +21326,7 @@ ${[
     <table>
       <thead><tr><th>Rule</th><th>Applies to</th><th>Runs on</th></tr></thead>
       <tbody>
-${model.rules.map((rule2) => `        <tr><td><code>${escapeHtml(rule2.name)}</code></td><td><a href="#entity-${slug(rule2.entity)}">${escapeHtml(title(rule2.entity))}</a></td><td>${escapeHtml(rule2.event)}</td></tr>`).join(`
+${model.rules.map((rule) => `        <tr><td><code>${escapeHtml(rule.name)}</code></td><td><a href="#entity-${slug(rule.entity)}">${escapeHtml(title(rule.entity))}</a></td><td>${escapeHtml(rule.event)}</td></tr>`).join(`
 `)}
       </tbody>
     </table>
@@ -19127,7 +21346,7 @@ ${saga.steps.map((step) => `        <li>${escapeHtml(step.label)} <span class="t
 `)}
     <p class="back"><a href="#top">Back to contents</a></p>
   </section>` : "";
-  const accountRows = access2.users.map((user) => `        <tr><td>${escapeHtml(user.roleName)}</td><td><code>${escapeHtml(user.email)}</code></td><td>${user.isAdmin ? `all ${model.entities.length}` : `${access2.entityCounts[user.roleName] ?? 0} of ${model.entities.length}`}</td></tr>`).join(`
+  const accountRows = access.users.map((user) => `        <tr><td>${escapeHtml(user.roleName)}</td><td><code>${escapeHtml(user.email)}</code></td><td>${user.isAdmin ? `all ${model.entities.length}` : `${access.entityCounts[user.roleName] ?? 0} of ${model.entities.length}`}</td></tr>`).join(`
 `);
   return `<!doctype html>
 <html lang="en">
@@ -19228,7 +21447,7 @@ ${contents}
 
   <section id="overview">
     <h2>What this application is</h2>
-${options.description && options.description !== "A generated full-stack application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
+${options.description && options.description !== "Generated application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>
 ` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${model.categories.length ? `, grouped into ${model.categories.length} areas of the business` : ""}. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated from the same description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
 ${model.categories.length ? `    <table>
@@ -19261,6 +21480,22 @@ ${options.adminPassword ? `    <p>Every seeded account uses the password <code>$
 ${entitySections}
   </section>
 
+  <section id="concurrent-edits">
+    <h2>When two people change the same record</h2>
+    <p>Every record carries a version number, and every save raises it by one. When you open a record to edit it, the form remembers the version you opened. Saving sends that version back, and the save goes through only if nobody has saved the record since.</p>
+    <p>If somebody has, your save is not applied &mdash; neither of you loses a change without seeing it. The ${options.stack === "browser" ? "form shows a panel" : "form opens a dialog"} listing the fields the other person changed, with their value and yours side by side, and marks the fields you both changed. It offers three choices:</p>
+    <table>
+      <thead><tr><th>Choice</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Reload their version</td><td>Your unsaved edits are discarded and the form shows the record as it now stands.</td></tr>
+        <tr><td>Overwrite with mine</td><td>Your values are saved over theirs. It is checked again against the version you have just been shown, so a third person saving in the meantime is caught the same way.</td></tr>
+        <tr><td>Keep editing</td><td>Nothing is saved yet; the form stays open with your edits so you can change them first.</td></tr>
+      </tbody>
+    </table>
+    <p>Two saves of the same version arriving at the same moment cannot both win: exactly one is applied and the other is offered the same three choices.</p>
+    <p class="back"><a href="#top">Back to contents</a></p>
+  </section>
+
 ${rulesSection}
 
 ${processSection}
@@ -19279,6 +21514,306 @@ ${processSection}
 </div>
 </body>
 </html>
+`;
+}
+
+// packages/generator/src/manual/skills.ts
+var SKILLS_DIRECTORY = "assistant-skills";
+var REPORTS_PER_ENTITY = 12;
+function text(value) {
+  return String(value ?? "").replace(/\s+/g, " ").replace(/\|/g, "/").replace(/^#+\s*/, "").trim();
+}
+function code(value) {
+  return `\`${String(value).replace(/`/g, "'")}\``;
+}
+function skillFileName(entity) {
+  return `${tableNameFor(entity)}.md`;
+}
+function reportsByTable(pack) {
+  const byTable = new Map;
+  if (!pack)
+    return byTable;
+  const tablesOf = new Map(pack.queries.map((query) => [query.key, query.tables]));
+  const add = (kind, name, queryKey) => {
+    for (const table of tablesOf.get(queryKey) ?? []) {
+      const list = byTable.get(table) ?? [];
+      list.push(`${kind}: ${text(name)}`);
+      byTable.set(table, list);
+    }
+  };
+  for (const report of pack.reports)
+    add("Report", report.name, report.queryKey);
+  for (const chart of pack.charts)
+    add(`Chart (${chart.chartType})`, chart.name, chart.queryKey);
+  return byTable;
+}
+function referenceTargets(model, entity, declared) {
+  const declaredNames = new Set(declared.values());
+  const targets = new Map;
+  const unresolved = [];
+  for (const attribute of entity.attributes) {
+    if (!attribute.isForeignKey)
+      continue;
+    const target = referenceTarget(attribute.name, declared);
+    if (target && declaredNames.has(target))
+      targets.set(attribute.name, target);
+    else
+      unresolved.push(attribute.name);
+  }
+  const parents = model.relationships.filter((relationship) => relationship.targetEntity === entity.name && relationship.cardinality === "oneToMany" || relationship.sourceEntity === entity.name && relationship.cardinality === "manyToOne").map((relationship) => relationship.targetEntity === entity.name ? relationship.sourceEntity : relationship.targetEntity);
+  const claimed = new Set(targets.values());
+  const unclaimed = [...new Set(parents.filter((parent) => !claimed.has(parent)))];
+  if (unresolved.length === 1 && unclaimed.length === 1) {
+    targets.set(unresolved[0], unclaimed[0]);
+  }
+  return targets;
+}
+function renderSkills(model, options) {
+  const access = deriveAccess(model.rbac, {
+    projectId: options.name || "app",
+    entities: model.entities.map((entity) => entity.name)
+  });
+  const dictionary = manualDictionary(model);
+  const declared = declaredNames(model);
+  const categoryOf = new Map;
+  for (const category of model.categories) {
+    for (const name of category.entities)
+      categoryOf.set(name, category.name);
+  }
+  let pack = null;
+  try {
+    pack = buildReportingPack(model, {
+      projectName: options.name || "app",
+      databaseName: options.databaseName || options.name || "app"
+    });
+  } catch {
+    pack = null;
+  }
+  const reports = reportsByTable(pack);
+  const files = {};
+  const indexRows = [];
+  for (const entity of [...model.entities].sort((a, b) => a.name.localeCompare(b.name))) {
+    const object = tableNameFor(entity);
+    const label = title(entity.name);
+    const primaryKey = entity.primaryKey || "id";
+    const identifiers = identifierColumnNames(entity.attributes, primaryKey, entity.name);
+    const readers = access.entityVisibility[entity.name] ?? [];
+    const layout = dictionary.get(entity.name);
+    const byColumn = new Map(entity.attributes.map((attribute) => [attribute.name, attribute]));
+    const labelOf = new Map((layout?.fields ?? []).map((field) => [field.column, field.label]));
+    const fieldLabel = (column) => labelOf.get(column) ?? title(column);
+    const targets = referenceTargets(model, entity, declared);
+    const lines = [];
+    lines.push("---", `object: ${object}`, `entity: ${entity.name}`, `label: ${label}`, `category: ${text(categoryOf.get(entity.name) ?? "General")}`, `identifiers: [${identifiers.join(", ")}]`, `readers: [${readers.join(", ")}]`, "---", "", `# ${label}`, "", entity.description ? text(entity.description) : "The model gives this record type no description.", "");
+    lines.push("## Finding one");
+    if (identifiers.length > 0) {
+      lines.push(`A ${label} is known by ${identifiers.map((column) => `**${fieldLabel(column)}** (${code(column)})`).join(" and ")}. ` + `Search with ${code("search_records")} (recordType ${code(object)}) using that value, then open the match with ${code("open_record")} (object ${code(object)} and the id the search returned).`);
+    } else {
+      lines.push(`A ${label} has no naming field; it is shown by its parents. Search with ${code("search_records")} (recordType ${code(object)}) and open the match with ${code("open_record")}.`);
+    }
+    lines.push("If more than one record matches, list them by that value and ask which one is meant. Never guess an id.", "");
+    lines.push("## The form");
+    if (layout) {
+      lines.push(`Opened in the **${text(layout.window)}** window, on the **${text(layout.tab)}** tab.`, "");
+      const sectionNames = new Set(layout.sections.map((section) => section.name));
+      const sections = layout.sections.length > 0 ? [...layout.sections, { name: "Other fields", unplaced: true }] : [{ name: "" }];
+      for (const section of sections) {
+        const fields = layout.fields.filter((field) => field.onForm && (layout.sections.length === 0 || (section.unplaced ? !field.section || !sectionNames.has(field.section) : field.section === section.name)));
+        if (fields.length === 0)
+          continue;
+        if (section.name) {
+          lines.push(`### ${text(section.name)}${section.help ? ` — ${text(section.help)}` : ""}`);
+        }
+        for (const field of fields) {
+          const attribute = byColumn.get(field.column);
+          const parts = [`**${text(field.label)}** (${code(field.column)})`];
+          if (attribute) {
+            const isPrimary = attribute.name === primaryKey;
+            parts.push(controlFor(attribute, referenceIdFor(attribute, isPrimary)));
+            if (attribute.required && !isPrimary)
+              parts.push("required");
+            if (attribute.unique)
+              parts.push("unique");
+            if (attribute.enumValues?.length) {
+              parts.push(`one of ${attribute.enumValues.map((value) => code(value)).join(", ")}`);
+            }
+            if (attribute.isForeignKey) {
+              const target = targets.get(attribute.name);
+              parts.push(target ? `points at ${title(target)}` : "points at another record (see Related records)");
+            }
+          }
+          if (field.readOnly)
+            parts.push("read only");
+          const help = attribute?.description ? ` — ${text(attribute.description)}` : "";
+          lines.push(`- ${parts.join(", ")}${help}`);
+        }
+        lines.push("");
+      }
+    } else {
+      lines.push("No form layout was derived for this record type.", "");
+    }
+    const related = model.relationships.filter((relationship) => relationship.sourceEntity === entity.name || relationship.targetEntity === entity.name);
+    if (related.length > 0) {
+      lines.push("## Related records");
+      for (const relationship of related) {
+        const outgoing = relationship.sourceEntity === entity.name;
+        const other = title(outgoing ? relationship.targetEntity : relationship.sourceEntity);
+        const many = relationship.cardinality === "oneToMany" && outgoing || relationship.cardinality === "manyToOne" && !outgoing || relationship.cardinality === "manyToMany";
+        lines.push(`- ${many ? `Has many ${other} records` : `Belongs to one ${other}`}.`);
+      }
+      lines.push("");
+    }
+    const machines = model.workflows.filter((workflow) => workflow.entity === entity.name && workflow.transitions.some((t) => t.from !== "[*]"));
+    const updaters = model.rbac.operations.find((rule) => rule.entity === entity.name && rule.operation === "update")?.roles;
+    const mayUpdate = updaters?.length ? `${updaters.map((role) => title(role)).join(", ")} (anyone who may update it)` : "anyone who may update it";
+    const grantedRoles = (from, to) => [
+      ...new Set(model.rbac.transitions.filter((rule) => rule.entity === entity.name && rule.edges.some((edge) => edge.from === from && edge.to === to)).flatMap((rule) => rule.roles))
+    ];
+    for (const machine of machines) {
+      lines.push(`## Lifecycle — ${text(machine.name)}`);
+      lines.push(`A record starts at ${code(machine.initial ?? "—")}${machine.terminal.length ? ` and is final at ${machine.terminal.map((state) => code(state)).join(" or ")}` : ""}. It moves only by its buttons: read the ones open to this person with ${code("get_record_actions")}, then propose one with ${code("propose_move")} — the person confirms it.`, "", "| From | Button | To | Who may press |", "|---|---|---|---|");
+      for (const transition of machine.transitions) {
+        if (transition.from === "[*]" || transition.to === "[*]")
+          continue;
+        const event = transition.trigger ?? `${transition.from}->${transition.to}`;
+        const roles = grantedRoles(transition.from, transition.to);
+        lines.push(`| ${code(transition.from)} | ${moveLabel(event, transition.to)} (${code(event)}) | ${code(transition.to)} | ${roles.length ? roles.map((role) => title(role)).join(", ") : mayUpdate} |`);
+      }
+      for (const from of machine.terminal) {
+        const roles = grantedRoles(from, LIFECYCLE_DRAFT);
+        lines.push(`| ${code(from)} | ${moveLabel(REOPEN_EVENT, LIFECYCLE_DRAFT)} (${code(REOPEN_EVENT)}) | ${code(LIFECYCLE_DRAFT)} | ${roles.length ? roles.map((role) => title(role)).join(", ") : "the administrator"} |`);
+      }
+      lines.push("");
+    }
+    const rules = model.rules.filter((rule) => rule.entity === entity.name);
+    if (rules.length > 0) {
+      lines.push("## What can refuse a change");
+      for (const rule of rules)
+        lines.push(`- Rule ${code(rule.name)}, on ${text(rule.event)} (${text(rule.operation)}).`);
+      lines.push("When a change is refused, report the application's own words; do not retry another way.", "");
+    }
+    lines.push("## Who may read it");
+    lines.push(readers.length > 0 ? `${readers.map((role) => title(role)).join(", ")}, and the Administrator. Other people do not see it at all.` : "Every signed-in person.", "");
+    const about = reports.get(object) ?? [];
+    if (about.length > 0) {
+      lines.push("## Reports and charts about it");
+      lines.push(`On the reporting platform. Find one by name with ${code("search_reports")}, then open it with ${code("open_report")}.`);
+      for (const item of about.slice(0, REPORTS_PER_ENTITY))
+        lines.push(`- ${item}`);
+      if (about.length > REPORTS_PER_ENTITY) {
+        lines.push(`- …and ${about.length - REPORTS_PER_ENTITY} more; search by name.`);
+      }
+      lines.push("");
+    }
+    files[skillFileName(entity)] = `${lines.join(`
+`).trimEnd()}
+`;
+    indexRows.push(`| ${code(object)} | ${label} | ${text(categoryOf.get(entity.name) ?? "General")} | ${identifiers.length ? identifiers.map((column) => code(column)).join(", ") : "—"} | ${text(entity.description ?? "").slice(0, 140)} |`);
+  }
+  files["index.md"] = `${[
+    `# ${text(options.name)} — record types`,
+    "",
+    `Every record type this application keeps. Read one type's skill with ${code("read_skill")} (its object) before working with it: how its records are named, its form, its buttons and the reports about it.`,
+    "",
+    "| Object | Label | Group | Named by | What it is |",
+    "|---|---|---|---|---|",
+    ...indexRows
+  ].join(`
+`)}
+`;
+  return files;
+}
+
+// packages/generator/src/rules/model-logic.ts
+function buildModelLogic(sources) {
+  const document = (Array.isArray(sources) ? sources : [sources]).filter(Boolean).join(`
+
+`);
+  if (!document.trim())
+    return [];
+  return extractWorkflowSections(document).map((workflow) => ({
+    name: workflow.name,
+    entity: workflow.entity,
+    kind: workflow.kind,
+    ...workflow.trigger ? { trigger: workflow.trigger } : {},
+    ...workflow.operation ? { operation: workflow.operation } : {},
+    ...workflow.status ? { status: workflow.status } : {},
+    ...workflow.title ? { title: workflow.title } : {},
+    diagram: workflow.diagram
+  }));
+}
+function renderModelLogic(workflows) {
+  return `/**
+ * The workflows this application's model declares, as the author drew them — written when
+ * the application was generated. The Rules & workflows screen lists the hook and saga
+ * workflows read-only: the next generation rewrites them, so they are changed in the model.
+ * A status flow is editable there: the one saved is what records follow from then on.
+ */
+
+export interface ModelWorkflow {
+  name: string;
+  entity: string;
+  kind: "hook" | "state" | "saga";
+  trigger?: "automatic" | "rule";
+  operation?: "CREATE" | "UPDATE" | "DELETE" | "ALL";
+  /** The state whose entering move starts it. */
+  status?: string;
+  title?: string;
+  diagram: string;
+}
+
+export const MODEL_WORKFLOWS: ModelWorkflow[] = ${JSON.stringify(workflows, null, 2)};
+`;
+}
+
+// packages/generator/src/rules/rule-model.ts
+var jsonType = (type) => type === "integer" || type === "decimal" ? "number" : type === "boolean" ? "boolean" : "string";
+function buildRuleModel(model) {
+  const declared = declaredEntityNames(model.entities);
+  return model.entities.map((entity) => {
+    const bus = entityToBusEntity(entity, declared);
+    const values = {};
+    for (const attribute of entity.attributes) {
+      if (attribute.enumValues?.length)
+        values[attribute.name] = [...attribute.enumValues];
+    }
+    for (const machine of model.workflows.filter((w) => w.entity === entity.name)) {
+      const states = machine.states.map((state) => state.name);
+      const column = Object.entries(values).find(([, list]) => states.some((s) => list.includes(s)))?.[0] ?? (entity.attributes.some((a) => a.name === "status") ? "status" : undefined);
+      if (column)
+        values[column] = states;
+    }
+    return {
+      name: entity.name,
+      table: bus.tableName,
+      label: formatDisplayName(entity.name),
+      fields: entity.attributes.map((attribute) => ({
+        name: attribute.name,
+        type: jsonType(attribute.type)
+      })),
+      values,
+      processes: model.sagas.filter((saga) => saga.entity === entity.name).map((saga) => saga.name)
+    };
+  });
+}
+function renderRuleModel(entities) {
+  return `/**
+ * What a rule in this application may name, written when it was generated from
+ * its model: each record type's fields and their types, the values a closed
+ * field may hold (its enum, or its state machine's states) and the processes
+ * defined for it. The rule editor offers these and nothing else.
+ */
+
+export interface RuleModelEntity {
+  name: string;
+  table: string;
+  label: string;
+  fields: Array<{ name: string; type: "string" | "number" | "boolean" }>;
+  values: Record<string, string[]>;
+  processes: string[];
+}
+
+export const RULE_MODEL: RuleModelEntity[] = ${JSON.stringify(entities, null, 2)};
 `;
 }
 
@@ -19340,7 +21875,7 @@ function parseCategories(source) {
     const code = fields.get("code")?.trim() || slugifyCategory(name);
     if (!code)
       continue;
-    const entities = (fields.get("entities") ?? "").split(",").map((entity2) => entity2.trim()).filter(Boolean);
+    const entities = (fields.get("entities") ?? "").split(",").map((entity) => entity.trim()).filter(Boolean);
     const seqRaw = Number(fields.get("seq"));
     const existing = byCode.get(code);
     const category = {
@@ -19447,6 +21982,7 @@ class MermaidParser {
     const declaredEnums = new Map;
     const enumBindings = [];
     const fieldHelpText = [];
+    const fieldLogic = [];
     const entityHelpText = new Map;
     const entityIcons = new Map;
     const entityParents = new Map;
@@ -19470,6 +22006,9 @@ class MermaidParser {
         const fieldHelp = this.parseFieldHelpDirective(trimmed);
         if (fieldHelp)
           fieldHelpText.push(fieldHelp);
+        const logic = this.parseFieldLogicDirective(trimmed);
+        if (logic)
+          fieldLogic.push(logic);
         const entityHelp = this.parseEntityHelpDirective(trimmed);
         if (entityHelp)
           entityHelpText.set(entityHelp.entity, entityHelp.help);
@@ -19519,6 +22058,7 @@ class MermaidParser {
     }
     this.attachIndexes(entities, declaredIndexes);
     this.attachHelp(entities, fieldHelpText, entityHelpText);
+    this.attachFieldLogic(entities, fieldLogic);
     this.attachIcons(entities, entityIcons);
     this.attachParents(entities, entityParents);
     const enums = this.attachEnums(entities, declaredEnums, enumBindings);
@@ -19526,9 +22066,9 @@ class MermaidParser {
   }
   attachHelp(entities, fieldHelp, entityHelp) {
     for (const [name, help] of entityHelp) {
-      const entity2 = entities.find((candidate) => candidate.name === name);
-      if (entity2)
-        entity2.description = help;
+      const entity = entities.find((candidate) => candidate.name === name);
+      if (entity)
+        entity.description = help;
     }
     for (const { entity: name, column, help } of fieldHelp) {
       const attribute = entities.find((candidate) => candidate.name === name)?.attributes.find((candidate) => candidate.name === column);
@@ -19538,9 +22078,9 @@ class MermaidParser {
   }
   attachIcons(entities, icons) {
     for (const [name, icon] of icons) {
-      const entity2 = entities.find((candidate) => candidate.name === name);
-      if (entity2)
-        entity2.icon = icon;
+      const entity = entities.find((candidate) => candidate.name === name);
+      if (entity)
+        entity.icon = icon;
     }
   }
   attachParents(entities, parents) {
@@ -19549,12 +22089,33 @@ class MermaidParser {
       const parent = entities.find((candidate) => candidate.name === parentName);
       if (!child || !parent)
         continue;
-      const snake2 = snakeCase(parent.name);
-      const link = child.attributes.find((a) => a.isForeignKey && a.name === `${snake2}_id`) ?? child.attributes.find((a) => a.isForeignKey && a.name.startsWith(`${snake2}_`));
+      const snake = snakeCase(parent.name);
+      const link = child.attributes.find((a) => a.isForeignKey && a.name === `${snake}_id`) ?? child.attributes.find((a) => a.isForeignKey && a.name.startsWith(`${snake}_`));
       if (!link)
         continue;
       child.parentEntity = parent.name;
       child.parentLinkColumn = link.name;
+    }
+    this.flattenNestedLineItems(entities);
+  }
+  flattenNestedLineItems(entities) {
+    const byName = new Map(entities.map((entity) => [entity.name, entity]));
+    const depth = (entity) => {
+      let levels = 0;
+      const seen = new Set;
+      for (let current = entity.parentEntity ? byName.get(entity.parentEntity) : undefined;current && !seen.has(current.name); current = current.parentEntity ? byName.get(current.parentEntity) : undefined) {
+        seen.add(current.name);
+        levels++;
+      }
+      return levels;
+    };
+    const nested = entities.filter((entity) => entity.parentEntity).map((entity) => ({ entity, levels: depth(entity) })).sort((a, b) => a.levels - b.levels);
+    for (const { entity } of nested) {
+      const parent = entity.parentEntity ? byName.get(entity.parentEntity) : undefined;
+      if (!parent?.parentEntity)
+        continue;
+      entity.parentEntity = undefined;
+      entity.parentLinkColumn = undefined;
     }
   }
   parseIndexDirective(line) {
@@ -19568,14 +22129,14 @@ class MermaidParser {
   }
   attachIndexes(entities, declared) {
     for (const { entity: entityName, columns, unique } of declared) {
-      const entity2 = entities.find((candidate) => candidate.name === entityName);
-      if (!entity2)
+      const entity = entities.find((candidate) => candidate.name === entityName);
+      if (!entity)
         continue;
-      const known = new Set(entity2.attributes.map((attribute) => attribute.name));
+      const known = new Set(entity.attributes.map((attribute) => attribute.name));
       if (!columns.every((column) => known.has(column)))
         continue;
-      entity2.indexes = entity2.indexes ?? [];
-      entity2.indexes.push({ columns, unique });
+      entity.indexes = entity.indexes ?? [];
+      entity.indexes.push({ columns, unique });
     }
   }
   parseEnumDirective(line) {
@@ -19597,6 +22158,26 @@ class MermaidParser {
       return null;
     const help = match[3].trim();
     return help ? { entity: match[1], column: match[2], help } : null;
+  }
+  parseFieldLogicDirective(line) {
+    const match = line.match(/^%%field\s+([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s+(display|readonly|mandatory)\s*:\s*(.+)$/);
+    if (!match?.[1] || !match[2] || !match[3] || !match[4])
+      return null;
+    const logic = match[4].trim();
+    return logic ? { entity: match[1], column: match[2], kind: match[3], logic } : null;
+  }
+  attachFieldLogic(entities, logic) {
+    for (const { entity: name, column, kind, logic: expression } of logic) {
+      const attribute = entities.find((candidate) => candidate.name === name)?.attributes.find((candidate) => candidate.name === column);
+      if (!attribute)
+        continue;
+      if (kind === "display")
+        attribute.displayLogic = expression;
+      else if (kind === "readonly")
+        attribute.readOnlyLogic = expression;
+      else
+        attribute.mandatoryLogic = expression;
+    }
   }
   parseEntityHelpDirective(line) {
     const match = line.match(/^%%entity\s+([A-Za-z_]\w*)\s+(?:help|description)\s*:\s*(.+)$/);
@@ -19623,8 +22204,8 @@ class MermaidParser {
     for (const binding of bindings) {
       if (!declared.has(binding.enumName))
         continue;
-      const entity2 = entities.find((candidate) => candidate.name === binding.entity);
-      const attribute = entity2?.attributes.find((candidate) => candidate.name === binding.column);
+      const entity = entities.find((candidate) => candidate.name === binding.entity);
+      const attribute = entity?.attributes.find((candidate) => candidate.name === binding.column);
       if (attribute)
         used.add(binding.enumName);
     }
@@ -19638,8 +22219,8 @@ class MermaidParser {
       const referenceId = referenceIds.get(binding.enumName);
       if (!values || !referenceId)
         continue;
-      const entity2 = entities.find((candidate) => candidate.name === binding.entity);
-      const attribute = entity2?.attributes.find((candidate) => candidate.name === binding.column);
+      const entity = entities.find((candidate) => candidate.name === binding.entity);
+      const attribute = entity?.attributes.find((candidate) => candidate.name === binding.column);
       if (!attribute)
         continue;
       attribute.enumRef = binding.enumName;
@@ -19747,7 +22328,7 @@ class MermaidParser {
 // packages/generator/src/reports/index.ts
 var REPORT_CHART_TYPES = ["bar", "line", "pie", "area"];
 var CHART_TYPE_SET = new Set(REPORT_CHART_TYPES);
-var KEYS = ["title", "entity", "chart", "x", "y", "help"];
+var KEYS2 = ["title", "entity", "chart", "x", "y", "help"];
 var READ_ONLY = /^\s*(?:with|select)\b/i;
 function hasStatementBreak(sql) {
   const body = sql.replace(/;\s*$/, "");
@@ -19786,7 +22367,7 @@ function parseReportDirective(line) {
   const name = nameMatch[1];
   const keys = head.slice(nameMatch[0].length);
   const read = (key) => {
-    const stop = KEYS.join("|");
+    const stop = KEYS2.join("|");
     const found = keys.match(new RegExp(`\\b${key}:\\s*(.*?)(?=\\s+(?:${stop}):|$)`, "is"));
     return found?.[1]?.trim() || undefined;
   };
@@ -19836,6 +22417,74 @@ function compileReports(source, entityNames, warn = () => {}) {
       parsed.entity = undefined;
     }
     byName.set(parsed.name, parsed);
+  }
+  return [...byName.values()];
+}
+var DASHBOARD_KEYS = ["title", "role", "reports", "help"];
+function scanKeys(text, keys) {
+  const marks = [...text.matchAll(new RegExp(`(?:^|\\s)(${keys.join("|")}):`, "g"))];
+  const out = {};
+  marks.forEach((mark, i) => {
+    const key = mark[1];
+    if (key in out)
+      return;
+    const from = (mark.index ?? 0) + mark[0].length;
+    const to = marks[i + 1]?.index ?? text.length;
+    const value = text.slice(from, to).trim();
+    if (value)
+      out[key] = value;
+  });
+  return out;
+}
+function parseDashboardDirective(line) {
+  const directive = line.trim().match(/^%%+dashboard(\s.*)$/is);
+  const rest = directive?.[1]?.trim();
+  if (!rest)
+    return { error: "not a %%dashboard directive" };
+  const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+  if (!nameMatch?.[1])
+    return { error: "has no name" };
+  const name = nameMatch[1];
+  const keys = rest.slice(nameMatch[0].length);
+  const read = (key) => scanKeys(keys, DASHBOARD_KEYS)[key];
+  const reports = (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+  if (reports.length === 0)
+    return { error: "names no reports" };
+  return {
+    name,
+    title: read("title") ?? name.replace(/[_-]+/g, " "),
+    role: read("role"),
+    reports,
+    help: read("help")
+  };
+}
+function compileDashboards(source, reportNames, warn = () => {}) {
+  const known = new Set(reportNames);
+  const byName = new Map;
+  for (const line of source.split(`
+`)) {
+    if (!/^\s*%%+dashboard\b/i.test(line))
+      continue;
+    const parsed = parseDashboardDirective(line);
+    if ("error" in parsed) {
+      warn(`%%dashboard ${parsed.error} — skipped: ${line.trim().slice(0, 120)}`);
+      continue;
+    }
+    if (byName.has(parsed.name)) {
+      warn(`%%dashboard "${parsed.name}" is declared more than once — keeping the first`);
+      continue;
+    }
+    const shown = parsed.reports.filter((name) => known.has(name));
+    for (const name of parsed.reports) {
+      if (!known.has(name)) {
+        warn(`%%dashboard "${parsed.name}" lists "${name}", which is not a %%report — left off`);
+      }
+    }
+    if (shown.length === 0) {
+      warn(`%%dashboard "${parsed.name}" shows no declared report — skipped`);
+      continue;
+    }
+    byName.set(parsed.name, { ...parsed, reports: shown });
   }
   return [...byName.values()];
 }
@@ -19947,9 +22596,9 @@ function eventToOperation(event) {
     return "DELETE";
   return "ALL";
 }
-function toTableName(entity2) {
-  const snake2 = entity2.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase();
-  return snake2.startsWith("bus_") || snake2.startsWith("sys_") ? snake2 : `bus_${snake2}`;
+function toTableName(entity) {
+  const snake = entity.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase();
+  return snake.startsWith("bus_") || snake.startsWith("sys_") ? snake : `bus_${snake}`;
 }
 var ACTION_DIRECTIVE = /^%%action\s+([A-Za-z_][\w-]*)\s+([A-Za-z][\w-]*)\s*(.*)$/;
 function parseActionProps(rest) {
@@ -20000,6 +22649,140 @@ function parseDecisionTableDirective(flowchart) {
     return null;
   }
 }
+var JDM_GRAPH_DIRECTIVE = "%%jdm-graph ";
+var GRAPH_NODE_TYPES = new Set([
+  "inputNode",
+  "outputNode",
+  "decisionTableNode",
+  "expressionNode",
+  "functionNode",
+  "switchNode"
+]);
+var FORBIDDEN_FUNCTION_SOURCE = /\b(?:import|require|fetch|eval|process|globalThis)\b/;
+function parseJdmGraphDirective(flowchart) {
+  const line = (flowchart ?? "").split(`
+`).map((l) => l.trim()).find((l) => l.startsWith(JDM_GRAPH_DIRECTIVE));
+  if (!line)
+    return null;
+  try {
+    const parsed = JSON.parse(line.slice(JDM_GRAPH_DIRECTIVE.length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function validateJdmGraph(graph) {
+  const problems = [];
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const ids = new Set;
+  if (!nodes.length)
+    return ["the graph has no nodes"];
+  for (const node of nodes) {
+    const label = String(node.name ?? node.id);
+    ids.add(String(node.id));
+    if (typeof node.type !== "string" || !GRAPH_NODE_TYPES.has(node.type)) {
+      problems.push(`node "${label}" has an unsupported type "${String(node.type)}"`);
+      continue;
+    }
+    if (node.type === "inputNode" || node.type === "outputNode")
+      continue;
+    if (node.content === undefined || node.content === null) {
+      problems.push(`${node.type} "${label}" has no content, so the engine would reject it`);
+    }
+    if (node.type === "functionNode") {
+      const content = node.content;
+      const source = typeof content === "string" ? content : typeof content?.source === "string" ? content.source : "";
+      if (!/\bhandler\b/.test(source)) {
+        problems.push(`functionNode "${label}" defines no handler; write export const handler = async (input) => ({ ... })`);
+      }
+      if (FORBIDDEN_FUNCTION_SOURCE.test(source)) {
+        problems.push(`functionNode "${label}" uses import, require, fetch, eval, process or globalThis, which the sandbox does not allow`);
+      }
+    }
+  }
+  if (!nodes.some((n) => n.type === "inputNode"))
+    problems.push("the graph has no input node");
+  if (!nodes.some((n) => n.type === "outputNode"))
+    problems.push("the graph has no output node");
+  for (const edge of edges) {
+    if (!ids.has(String(edge.sourceId)) || !ids.has(String(edge.targetId))) {
+      problems.push(`edge "${String(edge.id)}" joins a node that is not in the graph`);
+    }
+  }
+  return problems;
+}
+function normalizeGraphActions(graph) {
+  const rewrite = (cell) => typeof cell === "string" ? cell.replace(/(["'])validation-error\1/g, "$1prevent$1") : cell;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      const content = node.content;
+      if (node.type === "functionNode" && typeof content === "string") {
+        return { ...node, content: { source: content } };
+      }
+      const table = content;
+      if (node.type !== "decisionTableNode" || !Array.isArray(table?.rules)) {
+        return node;
+      }
+      const inputs = (table.inputs ?? []).filter((col) => (col.field ?? "").trim() !== "");
+      const outputs = (table.outputs ?? []).map((col) => ({
+        ...col,
+        field: col.field || col.name || col.id
+      }));
+      const inputIds = new Set(inputs.map((column) => column.id));
+      const outputIds = new Set(outputs.map((column) => column.id));
+      return {
+        ...node,
+        content: withTransformData({
+          ...table,
+          inputs,
+          outputs,
+          rules: table.rules.map((row) => Object.fromEntries(Object.entries(row).map(([key, cell]) => [
+            key,
+            inputIds.has(key) ? emptyMeansBlank(rewrite(cell)) : outputIds.has(key) ? zenCell(rewrite(cell)) : rewrite(cell)
+          ])))
+        })
+      };
+    })
+  };
+}
+function emptyMeansBlank(cell) {
+  if (typeof cell !== "string")
+    return cell;
+  const text = cell.trim();
+  if (text === "null")
+    return 'null, ""';
+  if (text === "!= null")
+    return '!= null and != ""';
+  return cell;
+}
+function literalText(cell) {
+  const match = String(cell ?? "").trim().match(/^(?:'(.*)'|"(.*)")$/s);
+  return match ? match[1] ?? match[2] ?? "" : null;
+}
+function withTransformData(content) {
+  const outputs = content.outputs ?? [];
+  const fieldColumn = outputs.find((column) => column.field === "field");
+  const valueColumn = outputs.find((column) => column.field === "value");
+  const actionColumn = outputs.find((column) => column.field === "action");
+  if (!fieldColumn || !valueColumn || !actionColumn || outputs.some((column) => column.field === "transformData")) {
+    return content;
+  }
+  const dataColumn = { id: "transformData-auto", name: "Transform Data", field: "transformData" };
+  return {
+    ...content,
+    outputs: [...outputs, dataColumn],
+    rules: (content.rules ?? []).map((row) => {
+      const target = literalText(row[fieldColumn.id])?.trim();
+      const isTransform = literalText(row[actionColumn.id])?.trim() === "transform";
+      if (!isTransform || !target)
+        return { ...row, [dataColumn.id]: row[dataColumn.id] ?? "" };
+      const value = literalText(row[valueColumn.id]) ?? String(row[valueColumn.id] ?? "");
+      return { ...row, [dataColumn.id]: zenLiteral(JSON.stringify({ [target]: value })) };
+    })
+  };
+}
 function isBareLiteral(value) {
   return value === "true" || value === "false" || value === "null" || value !== "" && !Number.isNaN(Number(value));
 }
@@ -20020,12 +22803,12 @@ function zenInputCell(raw) {
     return "";
   const match = value.match(/^(>=|<=|!=|=|>|<)\s*(.*)$/);
   if (!match)
-    return zenCell(value);
+    return emptyMeansBlank(zenCell(value));
   const [, operator, operand] = match;
   const cell = zenCell(operand);
   if (!cell)
     return "";
-  return operator === "=" ? cell : `${operator} ${cell}`;
+  return emptyMeansBlank(operator === "=" ? cell : `${operator} ${cell}`);
 }
 function buildEditorDecisionTable(ruleName, table) {
   const inputs = (table.inputs ?? []).filter((column) => (column.field ?? "").trim() !== "");
@@ -20046,7 +22829,7 @@ function buildEditorDecisionTable(ruleName, table) {
         id: tableId,
         name: ruleName,
         type: "decisionTableNode",
-        content: {
+        content: withTransformData({
           hitPolicy: table.hitPolicy === "collect" ? "collect" : "first",
           inputs: inputs.map((column) => ({
             id: column.id,
@@ -20059,7 +22842,7 @@ function buildEditorDecisionTable(ruleName, table) {
             field: column.field ?? ""
           })),
           rules: rows
-        }
+        })
       },
       { id: "output", name: "Output", type: "outputNode" }
     ],
@@ -20141,6 +22924,24 @@ function compileRules(sections, onWarn = () => {}) {
     }
     try {
       const editorTable = parseDecisionTableDirective(section.flowchart);
+      const editorGraph = parseJdmGraphDirective(section.flowchart);
+      if (editorGraph) {
+        const problems = validateJdmGraph(editorGraph);
+        if (problems.length) {
+          onWarn(`Rule "${section.name}" has a graph that cannot run: ${problems.join("; ")}.`);
+          continue;
+        }
+        compiled.push({
+          name: section.name,
+          entity: section.entity,
+          tableName: toTableName(section.entity),
+          event: section.event,
+          operation: eventToOperation(section.event),
+          priority: section.priority ?? 100,
+          jdmContent: JSON.stringify(normalizeGraphActions(editorGraph))
+        });
+        continue;
+      }
       const ast = parseMermaidFlowchart(section.flowchart);
       if (!editorTable && !ast.nodes.size) {
         onWarn(`Rule "${section.name}" has no nodes; skipping.`);
@@ -20201,14 +23002,16 @@ function parseModel(sources) {
   }
   const joined = list.join(`
 `);
-  const categories = resolveCategories(joined, entities.map((entity2) => entity2.name));
+  attachFormSections(joined, entities);
+  const categories = resolveCategories(joined, entities.map((entity) => entity.name));
   const warn = (message) => console.warn(`  ⚠️  ${message}`);
   const rules = compileRules(extractRuleSections(joined), warn);
-  const hooks = compileHooks(joined, entities.map((entity2) => entity2.name), warn);
-  const workflows = compileWorkflows(joined, entities.map((entity2) => entity2.name), warn);
-  const sagas = compileSagaWorkflows(joined, entities.map((entity2) => entity2.name), warn);
-  const rbac2 = compileRbac(joined, entities.map((entity2) => entity2.name), workflows, warn);
-  const reports = compileReports(joined, entities.map((entity2) => entity2.name), warn);
+  const hooks = compileHooks(joined, entities.map((entity) => entity.name), warn);
+  const workflows = compileWorkflows(joined, entities.map((entity) => entity.name), warn);
+  const sagas = compileSagaWorkflows(joined, entities.map((entity) => entity.name), warn);
+  const rbac = compileRbac(joined, entities.map((entity) => entity.name), workflows, warn);
+  const reports = compileReports(joined, entities.map((entity) => entity.name), warn);
+  const dashboards = compileDashboards(joined, reports.map((report) => report.name), warn);
   return {
     entities,
     relationships,
@@ -20218,8 +23021,9 @@ function parseModel(sources) {
     hooks,
     workflows,
     sagas,
-    rbac: rbac2,
-    reports
+    rbac,
+    reports,
+    dashboards
   };
 }
 
@@ -20282,10 +23086,10 @@ async function writeManifest(outputDir, model, settings, extras = {}, log = NO_L
       backendPort: port,
       frontendPort: settings.frontendPort ?? port + 1,
       apiUrl: settings.apiBaseUrl ?? `http://localhost:${port}`,
-      entities: model.entities.map((entity2) => entity2.name),
+      entities: model.entities.map((entity) => entity.name),
       categories: model.categories.map((category) => category.name),
-      rules: model.rules.map((rule2) => `${rule2.name} on ${rule2.entity} (${rule2.operation})`),
-      hooks: model.hooks.map((hook2) => `${hook2.type} ${hook2.handler} on ${hook2.entity}`),
+      rules: model.rules.map((rule) => `${rule.name} on ${rule.entity} (${rule.operation})`),
+      hooks: model.hooks.map((hook) => `${hook.type} ${hook.handler} on ${hook.entity}`),
       workflows: model.workflows.map((w) => `${w.name} on ${w.entity} (${w.states.length} states)`),
       sagas: model.sagas.map((s) => `${s.name} on ${s.entity} (${s.steps.length} steps, ${s.trigger})`),
       rbac: [
@@ -20345,6 +23149,9 @@ async function generateApplication(options) {
     stage = "artifacts";
     await writeModelSource(options.outputDir, options.sources, log);
     await writeManual(options.outputDir, model, options, log);
+    await writeSkills(options.outputDir, model, options, log);
+    await writeRuleModel(options.outputDir, model, log);
+    await writeModelLogic(options.outputDir, options.sources, log);
     if (options.writeManifestFile !== false) {
       await writeManifest(options.outputDir, model, options, options.manifest ?? {}, log);
     }
@@ -20359,6 +23166,32 @@ async function generateApplication(options) {
     throw err;
   }
 }
+async function writeRuleModel(outputDir, model, log = NO_LOG) {
+  const directory = join(outputDir, "frontend", "src", "lib");
+  try {
+    await access(directory);
+  } catch {
+    return;
+  }
+  try {
+    await writeFile(join(directory, "rule-model.ts"), renderRuleModel(buildRuleModel(model)), "utf-8");
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: "rule-model.ts", err });
+  }
+}
+async function writeModelLogic(outputDir, sources, log = NO_LOG) {
+  const directory = join(outputDir, "frontend", "src", "lib");
+  try {
+    await access(directory);
+  } catch {
+    return;
+  }
+  try {
+    await writeFile(join(directory, "model-logic.ts"), renderModelLogic(buildModelLogic(sources)), "utf-8");
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: "model-logic.ts", err });
+  }
+}
 async function writeManual(outputDir, model, options, log = NO_LOG) {
   try {
     const directory = join(outputDir, "frontend", "public");
@@ -20371,6 +23204,18 @@ async function writeManual(outputDir, model, options, log = NO_LOG) {
     }), "utf-8");
   } catch (err) {
     log.event("pipeline.artifact.write_failed", { artifact: "manual.html", err });
+  }
+}
+async function writeSkills(outputDir, model, options, log = NO_LOG) {
+  try {
+    const directory = join(outputDir, SKILLS_DIRECTORY);
+    await mkdir(directory, { recursive: true });
+    const files = renderSkills(model, { name: options.projectName });
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(directory, name), content, "utf-8");
+    }
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: SKILLS_DIRECTORY, err });
   }
 }
 async function writeModelSource(outputDir, sources, log = NO_LOG) {
@@ -20404,6 +23249,7 @@ function emptyModel() {
     indexes: [],
     rules: [],
     reports: [],
+    dashboards: [],
     workflows: [],
     hooks: [],
     guards: [],
@@ -20419,8 +23265,8 @@ function toSnakeCase(str) {
   return str.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z])/g, (m, _c, offset) => offset === 0 ? m : m).replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase().replace(/^_/, "");
 }
 function foreignKeyName(targetEntity) {
-  const snake2 = toSnakeCase(targetEntity).replace(/^bus_/, "");
-  return `${snake2}_id`;
+  const snake = toSnakeCase(targetEntity).replace(/^bus_/, "");
+  return `${snake}_id`;
 }
 function stripQuotes(str) {
   return str.replace(/^["']|["']$/g, "").trim();
@@ -20540,7 +23386,7 @@ function parseDirective(line, n, model) {
         });
         return;
       }
-      const [type, handler, entity2, paramsRaw] = caps(m, 4);
+      const [type, handler, entity, paramsRaw] = caps(m, 4);
       const fields = paramsRaw ? parseHookFields(paramsRaw) : [];
       if (!isHookType(type)) {
         model.diagnostics.push({
@@ -20551,25 +23397,25 @@ function parseDirective(line, n, model) {
         });
         return;
       }
-      model.hooks.push({ type, handler, entity: entity2, fields });
+      model.hooks.push({ type, handler, entity, fields });
       return;
     }
     case "entity": {
       const m = rest.match(/^(\w+)\s+([A-Za-z_]\w*)\s*:\s*(.+)$/);
       if (m) {
-        const [entity2, key, value] = caps(m, 3);
-        applyEntityMeta(model, entity2, key, value.trim());
+        const [entity, key, value] = caps(m, 3);
+        applyEntityMeta(model, entity, key, value.trim());
       }
       return;
     }
     case "field": {
       const m = rest.match(/^(\w+)\.(\w+)\s+([A-Za-z_]\w*)\s*:\s*(.+)$/);
       if (m) {
-        const [entity2, attr, key, value] = caps(m, 4);
+        const [entity, attr, key, value] = caps(m, 4);
         if (key === "enum")
-          fieldEnumRefs.push({ entity: entity2, attr, enumName: value.trim() });
+          fieldEnumRefs.push({ entity, attr, enumName: value.trim() });
         else if (key === "help" || key === "description")
-          fieldHelp.push({ entity: entity2, attr, text: value.trim() });
+          fieldHelp.push({ entity, attr, text: value.trim() });
       }
       return;
     }
@@ -20623,6 +23469,40 @@ function parseDirective(line, n, model) {
       });
       return;
     }
+    case "dashboard": {
+      const nameMatch = rest.match(/^([A-Za-z_][\w-]*)\s*/);
+      if (!nameMatch) {
+        model.diagnostics.push({
+          severity: "error",
+          code: "EML297",
+          message: `%%dashboard has no name: "${line}"`,
+          line: n
+        });
+        return;
+      }
+      const [name] = caps(nameMatch, 1);
+      const keys = rest.slice(nameMatch[0].length);
+      const marks = [...keys.matchAll(/(?:^|\s)(title|role|reports|help):/g)];
+      const values = {};
+      marks.forEach((mark, i) => {
+        const key = mark[1];
+        if (key in values)
+          return;
+        const from = (mark.index ?? 0) + mark[0].length;
+        const value = keys.slice(from, marks[i + 1]?.index ?? keys.length).trim();
+        if (value)
+          values[key] = value;
+      });
+      const read = (key) => values[key];
+      model.dashboards.push({
+        name,
+        title: read("title") ?? name.replace(/[_-]+/g, " "),
+        role: read("role"),
+        reports: (read("reports") ?? "").split(",").map((r) => r.trim()).filter(Boolean),
+        help: read("help")
+      });
+      return;
+    }
     case "enum": {
       const m = rest.match(/^(\w+)\s*:\s*(.+)$/);
       if (m) {
@@ -20636,20 +23516,20 @@ function parseDirective(line, n, model) {
     case "index": {
       const m = rest.match(/^(\w+)\s*\(([^)]*)\)\s*(unique)?/i);
       if (m) {
-        const [entity2, rawColumns, uniqueFlag] = caps(m, 3);
+        const [entity, rawColumns, uniqueFlag] = caps(m, 3);
         const columns = rawColumns.split(",").map((c) => c.trim()).filter(Boolean);
-        model.indexes.push({ entity: entity2, columns, unique: !!uniqueFlag });
+        model.indexes.push({ entity, columns, unique: !!uniqueFlag });
       }
       return;
     }
     case "rule": {
       const m = rest.match(/^(\w+)\s+on\s+(\w+)(?:\s+event:\s*(\w+))?(?:\s+priority:\s*(\d+))?/);
       if (m) {
-        const [name, entity2, event, priority] = caps(m, 4);
+        const [name, entity, event, priority] = caps(m, 4);
         return {
           rule: {
             name,
-            entity: entity2,
+            entity,
             event: event || undefined,
             priority: priority ? Number(priority) : undefined
           }
@@ -20660,11 +23540,11 @@ function parseDirective(line, n, model) {
     case "workflow": {
       const m = rest.match(/^(\w+)\s+entity:\s*(\w+)\s+kind:\s*(\w+)/);
       if (m) {
-        const [name, entity2, kind] = caps(m, 3);
+        const [name, entity, kind] = caps(m, 3);
         return {
           workflow: {
             name,
-            entity: entity2,
+            entity,
             kind: kind || "hook"
           }
         };
@@ -20674,17 +23554,17 @@ function parseDirective(line, n, model) {
     case "guard": {
       const m = rest.match(/^(\S+)\s+on\s+(\w+)\.(\w+)/);
       if (m) {
-        const [roleExpr, entity2, op] = caps(m, 3);
+        const [roleExpr, entity, op] = caps(m, 3);
         const roles = roleExpr.split("|").map((r) => r.replace(/^role:/, "").trim()).filter(Boolean);
-        model.guards.push({ roles, entity: entity2, op });
+        model.guards.push({ roles, entity, op });
       }
       return;
     }
     case "trigger": {
       const m = rest.match(/^(.+?)\s*->\s*(\w+)\s+on\s+(\w+)/);
       if (m) {
-        const [source, handler, entity2] = caps(m, 3);
-        model.triggers.push({ source: source.trim(), handler, entity: entity2 });
+        const [source, handler, entity] = caps(m, 3);
+        model.triggers.push({ source: source.trim(), handler, entity });
       }
       return;
     }
@@ -20698,18 +23578,18 @@ function parseHookFields(paramsRaw) {
 }
 function applyEntityMeta(model, name, key, value) {
   const ensure = () => {
-    let e2 = model.entities.find((x) => x.name === name);
-    if (!e2) {
-      e2 = {
+    let e = model.entities.find((x) => x.name === name);
+    if (!e) {
+      e = {
         name,
         tableName: toSnakeCase(name),
         attributes: [],
         primaryKey: "id",
         timestamps: true
       };
-      model.entities.push(e2);
+      model.entities.push(e);
     }
-    return e2;
+    return e;
   };
   const e = ensure();
   if (key === "audited")
@@ -20771,14 +23651,14 @@ function parseErdSection(section, model, diags) {
   }
   flush();
 }
-function mergeEntity(model, entity2, attrs) {
-  const existing = model.entities.find((e) => e.name === entity2.name);
-  const target = existing ?? entity2;
+function mergeEntity(model, entity, attrs) {
+  const existing = model.entities.find((e) => e.name === entity.name);
+  const target = existing ?? entity;
   if (existing) {
-    existing.tableName = toSnakeCase(entity2.name);
-    existing.timestamps = entity2.timestamps;
+    existing.tableName = toSnakeCase(entity.name);
+    existing.timestamps = entity.timestamps;
   } else {
-    model.entities.push(entity2);
+    model.entities.push(entity);
   }
   target.attributes = attrs;
   const hasId = attrs.some((a) => a.name === "id" || a.name.endsWith("_id"));
@@ -20849,15 +23729,15 @@ function parseRelationship(line) {
 }
 function parseFlowSection(section, model) {
   const { nodes, edges } = parseFlowGraph(section.lines.map((l) => l.text));
-  const rule2 = section.rule;
+  const rule = section.rule;
   const workflow = section.workflow;
-  const isRules = section.metaKind === "rules" || !!rule2 && section.metaKind !== "workflow" && !workflow;
+  const isRules = section.metaKind === "rules" || !!rule && section.metaKind !== "workflow" && !workflow;
   if (isRules) {
     model.rules.push({
-      name: rule2?.name ?? section.metaName ?? `rule_${model.rules.length + 1}`,
-      entity: rule2?.entity,
-      event: rule2?.event,
-      priority: rule2?.priority,
+      name: rule?.name ?? section.metaName ?? `rule_${model.rules.length + 1}`,
+      entity: rule?.entity,
+      event: rule?.event,
+      priority: rule?.priority,
       nodes,
       edges,
       raw: `flowchart TD
@@ -20884,7 +23764,7 @@ function parseFlowGraph(lines) {
   const edges = [];
   const nodeToken = "([A-Za-z_]\\w*)(\\(\\[[^\\]]*\\]\\)|\\(\\([^)]*\\)\\)|\\{[^}]*\\}|\\[[^\\]]*\\]|\\([^)]*\\))?";
   const edgeRe = new RegExp(`^${nodeToken}\\s*(?:-->|---|-\\.->|==>)\\s*(?:\\|([^|]*)\\|)?\\s*${nodeToken}`);
-  const ensureNode2 = (id, suffix) => {
+  const ensureNode = (id, suffix) => {
     const existing = nodesById.get(id);
     if (existing) {
       if (suffix && existing.label === id) {
@@ -20900,14 +23780,14 @@ function parseFlowGraph(lines) {
     const em = line.match(edgeRe);
     if (em) {
       const [srcId, srcSuffix, edgeLabel, tgtId, tgtSuffix] = caps(em, 5);
-      ensureNode2(srcId, srcSuffix);
-      ensureNode2(tgtId, tgtSuffix);
+      ensureNode(srcId, srcSuffix);
+      ensureNode(tgtId, tgtSuffix);
       edges.push({ source: srcId, target: tgtId, label: edgeLabel?.trim() || undefined });
       continue;
     }
     const nm = line.match(new RegExp(`^${nodeToken}\\s*$`));
     if (nm?.[1] && nm[2])
-      ensureNode2(nm[1], nm[2]);
+      ensureNode(nm[1], nm[2]);
   }
   const sources = new Set(edges.map((e) => e.source));
   const targets = new Set(edges.map((e) => e.target));
@@ -20991,29 +23871,29 @@ function parseStateSection(section, model) {
     transitions.push({ from, to, event });
   }
   const wf = section.workflow;
-  const entity2 = wf?.entity;
+  const entity = wf?.entity;
   model.workflows.push({
     name: wf?.name ?? section.metaName ?? `workflow_${model.workflows.length + 1}`,
-    entity: entity2,
+    entity,
     kind: "state",
-    hooks: entity2 ? model.hooks.filter((h) => h.entity === entity2) : [],
+    hooks: entity ? model.hooks.filter((h) => h.entity === entity) : [],
     states: [...states],
     transitions,
-    guards: entity2 ? model.guards.filter((g) => g.entity === entity2) : [],
-    triggers: entity2 ? model.triggers.filter((t) => t.entity === entity2) : []
+    guards: entity ? model.guards.filter((g) => g.entity === entity) : [],
+    triggers: entity ? model.triggers.filter((t) => t.entity === entity) : []
   });
 }
 function applyFieldEnumRefs(model) {
   for (const ref of fieldEnumRefs) {
-    const entity2 = model.entities.find((e) => e.name === ref.entity);
-    const attr = entity2?.attributes.find((a) => a.name === ref.attr);
+    const entity = model.entities.find((e) => e.name === ref.entity);
+    const attr = entity?.attributes.find((a) => a.name === ref.attr);
     if (attr)
       attr.enumRef = ref.enumName;
   }
   fieldEnumRefs.length = 0;
   for (const h of fieldHelp) {
-    const entity2 = model.entities.find((e) => e.name === h.entity);
-    const attr = entity2?.attributes.find((a) => a.name === h.attr);
+    const entity = model.entities.find((e) => e.name === h.entity);
+    const attr = entity?.attributes.find((a) => a.name === h.attr);
     if (attr)
       attr.description = h.text;
   }
@@ -21022,6 +23902,301 @@ function applyFieldEnumRefs(model) {
 
 // language/checker.ts
 init_language();
+
+// language/field-logic.ts
+var OPERATOR_ALIASES = {
+  "=": "=",
+  "==": "=",
+  "!": "!",
+  "!=": "!",
+  "^": "!",
+  "<>": "!",
+  ">": ">",
+  "<": "<",
+  ">=": ">=",
+  "<=": "<="
+};
+var OPERATOR_TOKENS = ["!=", "<>", ">=", "<=", "==", "=", "!", "^", ">", "<"];
+var VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function splitConditions(source) {
+  const parts = [];
+  const joins = [];
+  let current = "";
+  let quote = null;
+  let inVariable = false;
+  for (const ch of source) {
+    if (quote) {
+      current += ch;
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "@")
+      inVariable = !inVariable;
+    if (!inVariable && (ch === "&" || ch === "|")) {
+      parts.push(current);
+      joins.push(ch);
+      current = "";
+      continue;
+    }
+    if (!inVariable && (ch === "(" || ch === ")")) {
+      return "Parentheses are not supported: conditions are evaluated left to right.";
+    }
+    current += ch;
+  }
+  if (quote)
+    return "A quoted value is not closed.";
+  if (inVariable)
+    return "A variable is not closed: write it as @column@.";
+  parts.push(current);
+  return { parts, joins };
+}
+function parseOperand(raw) {
+  const text = raw.trim();
+  if (text === "")
+    return { kind: "literal", value: "" };
+  if (text.startsWith("@")) {
+    if (!text.endsWith("@") || text.length < 3)
+      return `"${text}" is not a variable: write @column@.`;
+    const name = text.slice(1, -1).trim();
+    if (!VARIABLE_NAME.test(name))
+      return `"${text}" is not a column name.`;
+    return { kind: "variable", name };
+  }
+  const first = text[0];
+  if (first === "'" || first === '"') {
+    if (text.length < 2 || text[text.length - 1] !== first)
+      return `${text} is not closed.`;
+    return { kind: "literal", value: text.slice(1, -1) };
+  }
+  if (text.includes("@"))
+    return `"${text}" mixes a variable into a value.`;
+  return { kind: "literal", value: text };
+}
+function splitComparison(text) {
+  let quote = null;
+  let inVariable = false;
+  for (let i = 0;i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === "@") {
+      inVariable = !inVariable;
+      continue;
+    }
+    if (inVariable)
+      continue;
+    for (const token of OPERATOR_TOKENS) {
+      if (text.startsWith(token, i)) {
+        return [text.slice(0, i), token, text.slice(i + token.length)];
+      }
+    }
+  }
+  return null;
+}
+function parseLogic(source) {
+  const text = (source ?? "").trim();
+  if (!text)
+    return { ok: false, error: "The expression is empty." };
+  const split = splitConditions(text);
+  if (typeof split === "string")
+    return { ok: false, error: split };
+  const conditions = [];
+  const variables = [];
+  for (const part of split.parts) {
+    const trimmed = part.trim();
+    if (!trimmed)
+      return { ok: false, error: "A condition is missing beside & or |." };
+    const comparison = splitComparison(trimmed);
+    if (!comparison) {
+      return {
+        ok: false,
+        error: `"${trimmed}" has no comparison: write @column@=value, @column@!value, > or <.`
+      };
+    }
+    const [leftRaw, token, rightRaw] = comparison;
+    const left = parseOperand(leftRaw);
+    if (typeof left === "string")
+      return { ok: false, error: left };
+    const right = parseOperand(rightRaw);
+    if (typeof right === "string")
+      return { ok: false, error: right };
+    if (left.kind !== "variable" && right.kind !== "variable") {
+      return { ok: false, error: `"${trimmed}" compares two constants: one side must be @column@.` };
+    }
+    for (const operand of [left, right]) {
+      if (operand.kind === "variable" && !variables.includes(operand.name)) {
+        variables.push(operand.name);
+      }
+    }
+    conditions.push({ left, operator: OPERATOR_ALIASES[token], right });
+  }
+  return { ok: true, logic: { conditions, joins: split.joins, variables } };
+}
+
+// language/move-facts.ts
+var SAGA = /^%%workflow\s+(\w+)\s+entity:\s*(\w+)\s+kind:\s*saga\b.*\btrigger:\s*rule\b/;
+var RULE = /^%%rule\s+(\w+)\s+on\s+(\w+)\b/;
+var STEP = /^%%step\s+\w+\s+(\w+)\b(.*)$/;
+var ACTION = /^%%action\s+\w+\s+trigger-workflow\b.*\bworkflow:\s*(\w+)\s*$/;
+var SECTION_START = /^(?:%%(?:meta\s+name:|workflow\b|rule\b|field\b|section\b|rbac\b|report\b|entity\b|enum\b|category\b|index\b|hook\b|jdm-graph\b)|%% -{2,}|erDiagram\b|stateDiagram(?:-v2)?\b)/;
+var FIELD_HELP = /^(\s*%%field\s+\w+\.\w+_at\s+help:\s*)When the move to (.+?) was recorded on this (.+?)\. Recording it moves .+?: the workflows set the status, which nobody changes by hand\.\s*$/;
+var SECTION_HELP = /help: The times that move this (.+?) along its lifecycle\. Recording one is how its status changes; the status itself is shown in the header\./;
+var HEADER = [
+  "%% ---- The state field is system-managed: each move is a rule and a saga ----",
+  "%% Nobody changes a state by hand. Recording the time a move depends on starts",
+  "%% the saga that sets the state; generated by the state-rule migration."
+];
+var HEADER_NOW = [
+  "%% ---- When each status was reached: stamped by the application ----",
+  "%% A record moves by an action button, along an edge its state diagram draws,",
+  "%% and the application writes the <state>_at time when it does."
+];
+function propsOf(rest) {
+  const props = {};
+  for (const m of rest.matchAll(/(\w+):\s*(\S+)/g))
+    props[m[1]] = m[2];
+  return props;
+}
+function blockEnd(lines, index) {
+  let end = index + 1;
+  while (end < lines.length && !SECTION_START.test(lines[end].trim()))
+    end++;
+  return end;
+}
+function blockStart(lines, index) {
+  let start = index;
+  while (start > 0 && /^%%meta\s+(?:name|kind):/.test(lines[start - 1].trim()))
+    start--;
+  return start;
+}
+function findRetiredMoves(source, stateFieldOf) {
+  const lines = source.split(`
+`);
+  const sections = [];
+  const retiredSagas = new Set;
+  for (let i = 0;i < lines.length; i++) {
+    const trimmedLine = lines[i].trim();
+    const saga = SAGA.exec(trimmedLine);
+    if (!saga)
+      continue;
+    if (/\bstatus:\s*\S/.test(trimmedLine))
+      continue;
+    const [, name = "", entity = ""] = saga;
+    const field = stateFieldOf(entity);
+    if (!field)
+      continue;
+    const end = blockEnd(lines, i);
+    let writesState = 0;
+    let other = false;
+    for (let j = i + 1;j < end; j++) {
+      const step = STEP.exec(lines[j].trim());
+      if (!step)
+        continue;
+      const [, type = "", rest = ""] = step;
+      const props = propsOf(rest);
+      const ownEntity = !props.entity || props.entity === entity;
+      if (type === "UpdateEntity" && ownEntity && props.field === field && props.value) {
+        writesState++;
+      } else if (type === "UpdateEntity" && ownEntity && /_at$/.test(props.field ?? "") && props.value === "null") {} else {
+        other = true;
+      }
+    }
+    if (writesState === 1 && !other) {
+      retiredSagas.add(name);
+      sections.push({ kind: "saga", name, entity, line: i + 1, start: blockStart(lines, i), end });
+    }
+  }
+  for (let i = 0;i < lines.length; i++) {
+    const rule = RULE.exec(lines[i].trim());
+    if (!rule)
+      continue;
+    const [, name = "", entity = ""] = rule;
+    const end = blockEnd(lines, i);
+    let actions = 0;
+    let other = false;
+    for (let j = i + 1;j < end; j++) {
+      const text = lines[j].trim();
+      if (!text.startsWith("%%action"))
+        continue;
+      actions++;
+      const action = ACTION.exec(text);
+      if (!action || !retiredSagas.has(action[1]))
+        other = true;
+    }
+    if (actions > 0 && !other) {
+      sections.push({ kind: "rule", name, entity, line: i + 1, start: blockStart(lines, i), end });
+    } else if (actions > 0) {
+      for (let j = i + 1;j < end; j++) {
+        const action = ACTION.exec(lines[j].trim());
+        if (!action || !retiredSagas.has(action[1]))
+          continue;
+        const actionName = /^%%action\s+(\w+)/.exec(lines[j].trim())?.[1] ?? action[1];
+        sections.push({ kind: "action", name: actionName, entity, line: j + 1, start: j, end: j + 1 });
+      }
+    }
+  }
+  const rewrites = [];
+  lines.forEach((text, index) => {
+    const field = FIELD_HELP.exec(text);
+    if (field) {
+      const [, head = "", state = "", noun = ""] = field;
+      rewrites.push({
+        line: index + 1,
+        replacement: `${head}When this ${noun} moved to ${state}. Stamped by the application when the move is made; nobody types it.`
+      });
+      return;
+    }
+    const section = SECTION_HELP.exec(text);
+    if (section) {
+      rewrites.push({
+        line: index + 1,
+        replacement: text.replace(SECTION_HELP, `help: When this ${section[1]} reached each status, stamped by the application as the record moves; the status itself is shown in the header.`)
+      });
+      return;
+    }
+    const header = HEADER.indexOf(text.trim());
+    if (header >= 0) {
+      rewrites.push({
+        line: index + 1,
+        replacement: text.replace(HEADER[header], HEADER_NOW[header])
+      });
+    }
+  });
+  sections.sort((a, b) => a.start - b.start);
+  return { sections, rewrites };
+}
+function sectionSpan(lines, index) {
+  const text = lines[index]?.trim() ?? "";
+  if (ACTION.test(text))
+    return { start: index, end: index + 1 };
+  if (!SAGA.test(text) && !RULE.test(text))
+    return;
+  return { start: blockStart(lines, index), end: blockEnd(lines, index) };
+}
+function rewriteStockHelp(lines) {
+  const { rewrites } = findRetiredMoves(lines.join(`
+`), () => {
+    return;
+  });
+  for (const rewrite of rewrites)
+    lines[rewrite.line - 1] = rewrite.replacement;
+  return rewrites.length;
+}
+
+// language/checker.ts
 var useColor = typeof process !== "undefined" && !process.env?.NO_COLOR && Boolean(process.stdout?.isTTY) && !hasFlag("--no-color");
 function hasFlag(name) {
   return typeof process !== "undefined" && (process.argv?.includes(name) ?? false);
@@ -21031,6 +24206,10 @@ class SourceIndex {
   lines;
   constructor(source) {
     this.lines = source.split(`
+`);
+  }
+  text() {
+    return this.lines.join(`
 `);
   }
   findLine(pattern, startLine = 1) {
@@ -21110,6 +24289,7 @@ function sagaPropsFromAutomation2(type, props) {
   }
   return out;
 }
+var RESERVED_PAGE_NAMES = new Set(["admin", "api", "auth", "dashboard", "index", "login"]);
 var PERSON_ROLE_COLUMN_NAMES = new Set([
   "assigned_to",
   "author_id",
@@ -21130,10 +24310,14 @@ function escapeRe(literal) {
 function isForeignKeyColumnName2(columnName) {
   return columnName.endsWith("_id") || columnName.endsWith("_by");
 }
+var REPORTS_PER_ROLE = 50;
+var DASHBOARDS_PER_ROLE = 10;
+var DASHBOARD_MIN_REPORTS = 3;
 
 class CheckEngine {
   model;
   issues = [];
+  sagaWrites = new Set;
   src;
   def = loadLanguageDefinition();
   validHookTypes;
@@ -21149,7 +24333,18 @@ class CheckEngine {
     "description",
     "parent"
   ]);
-  validFieldKeys = new Set(["enum", "ui", "default", "min", "max", "help", "format"]);
+  validFieldKeys = new Set([
+    "enum",
+    "ui",
+    "default",
+    "min",
+    "max",
+    "help",
+    "format",
+    "display",
+    "readonly",
+    "mandatory"
+  ]);
   validMetaKeys = new Set(["name", "kind", "version", "entity", "stack", "description"]);
   validWorkflowKinds = new Set(["hook", "state", "saga"]);
   validTriggerSources = /^(cron:|webhook:|message:)/;
@@ -21193,6 +24388,7 @@ class CheckEngine {
     this.checkCategoryDirectives();
     this.checkLineItems();
     this.checkHelpText();
+    this.checkSectionDirectives();
     this.checkHooks();
     this.checkAutomationTriggers();
     this.checkGuards();
@@ -21202,18 +24398,20 @@ class CheckEngine {
     this.checkStepDirectives();
     this.checkActionDirectives();
     this.checkReportDirectives();
+    this.checkDashboardDirectives();
+    this.checkReportingCoverage();
     this.checkRuleDirectives();
     this.checkRules();
     this.checkWorkflows();
     this.checkCrossDocument();
-    const errors2 = this.issues.filter((i) => i.severity === "error").length;
+    const errors = this.issues.filter((i) => i.severity === "error").length;
     const warnings = this.issues.filter((i) => i.severity === "warning").length;
     const infos = this.issues.filter((i) => i.severity === "info").length;
-    return { issues: this.issues, errors: errors2, warnings, infos, ok: errors2 === 0 };
+    return { issues: this.issues, errors, warnings, infos, ok: errors === 0 };
   }
   entityToFkName(entityName) {
-    const snake2 = entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase().replace(/^bus_/, "");
-    return `${snake2}_id`;
+    const snake = entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase().replace(/^bus_/, "");
+    return `${snake}_id`;
   }
   fkToEntityName(fkAttr) {
     if (isPersonRoleColumn(fkAttr))
@@ -21276,56 +24474,62 @@ class CheckEngine {
   }
   checkEntities() {
     const seenNames = new Map;
-    for (const entity2 of this.model.entities) {
-      const entityLine = this.src.findLine(new RegExp(`^\\s*${entity2.name}\\s*\\{`));
-      if (!this.identRe.test(entity2.name)) {
-        this.error("EML100", `Invalid entity name "${entity2.name}": must match ^[A-Za-z][A-Za-z0-9_]*$.`, {
+    for (const entity of this.model.entities) {
+      const entityLine = this.src.findLine(new RegExp(`^\\s*${entity.name}\\s*\\{`));
+      if (!this.identRe.test(entity.name)) {
+        this.error("EML100", `Invalid entity name "${entity.name}": must match ^[A-Za-z][A-Za-z0-9_]*$.`, {
           line: entityLine,
           hint: "Use PascalCase for entity names (e.g. CustomerOrder)."
         });
       }
-      const prev = seenNames.get(entity2.name);
+      const prev = seenNames.get(entity.name);
       if (prev !== undefined) {
-        this.error("EML101", `Duplicate entity declaration "${entity2.name}".`, {
+        this.error("EML101", `Duplicate entity declaration "${entity.name}".`, {
           line: entityLine,
           hint: `First declared on line ${prev}. Merge both blocks into one.`
         });
       } else {
-        seenNames.set(entity2.name, entityLine ?? 0);
+        seenNames.set(entity.name, entityLine ?? 0);
       }
-      if (entity2.attributes.length === 0) {
-        this.warn("EML102", `Entity "${entity2.name}" has no attributes.`, {
+      if (entity.attributes.length === 0) {
+        this.warn("EML102", `Entity "${entity.name}" has no attributes.`, {
           line: entityLine,
           hint: "The generator will auto-add  string id PK  if no id is present."
         });
       }
-      this.checkAttributes(entity2, entityLine);
+      if (RESERVED_PAGE_NAMES.has(entity.name.toLowerCase())) {
+        this.warn("EML516", `Entity "${entity.name}" is named like a page of the generated application (/${entity.name.toLowerCase()}), and its list page would replace that page.`, {
+          line: entityLine,
+          hint: `Rename it (for example Institution${entity.name}) and the columns that point at it (institution_${entity.name.toLowerCase()}_id). The reserved names are ${[...RESERVED_PAGE_NAMES].join(", ")}.`
+        });
+      }
+      this.checkAttributes(entity, entityLine);
     }
   }
-  checkAttributes(entity2, entityLine) {
-    const declaredEntityNames2 = new Set(this.model.entities.map((e) => e.name));
+  checkAttributes(entity, entityLine) {
+    const declaredEntityNames = new Set(this.model.entities.map((e) => e.name));
     const seenAttrNames = new Map;
     const lastLineByName = new Map;
     let pkCount = 0;
-    for (const attr of entity2.attributes) {
+    for (const attr of entity.attributes) {
       const searchFrom = lastLineByName.has(attr.name) ? lastLineByName.get(attr.name) + 1 : entityLine;
       const attrLine = this.src.findLine(new RegExp(`\\b${attr.name}\\b`), searchFrom) ?? this.src.findLine(new RegExp(`\\b${attr.name}\\b`), entityLine);
       if (attrLine !== undefined)
         lastLineByName.set(attr.name, attrLine);
       if (!this.identRe.test(attr.name)) {
-        this.error("EML110", `Invalid attribute name "${entity2.name}.${attr.name}": must match ^[A-Za-z][A-Za-z0-9_]*$.`, {
+        this.error("EML110", `Invalid attribute name "${entity.name}.${attr.name}": must match ^[A-Za-z][A-Za-z0-9_]*$.`, {
           line: attrLine,
           hint: "Use snake_case for attribute names (e.g. first_name, order_id)."
         });
       }
       if (this.identRe.test(attr.name) && !this.slugRe.test(attr.name) && attr.name !== attr.name.toUpperCase()) {
-        this.info("EML111", `Attribute "${entity2.name}.${attr.name}" is not snake_case.`, {
+        this.info("EML111", `Attribute "${entity.name}.${attr.name}" is not snake_case.`, {
           line: attrLine,
           hint: "snake_case is recommended for attribute names per the EML spec."
         });
       }
       if (seenAttrNames.has(attr.name)) {
-        this.warn("EML112", `Duplicate attribute "${entity2.name}.${attr.name}".`, {
+        this.warn("EML112", `Duplicate attribute "${entity.name}.${attr.name}".`, {
           line: attrLine,
           hint: `First occurrence on line ${seenAttrNames.get(attr.name)}. Remove the duplicate.`
         });
@@ -21335,7 +24539,7 @@ class CheckEngine {
       if (attr.isPrimaryKey) {
         pkCount++;
         if (pkCount > 1) {
-          this.error("EML113", `Entity "${entity2.name}" declares more than one PK (found "${attr.name}").`, {
+          this.error("EML113", `Entity "${entity.name}" declares more than one PK (found "${attr.name}").`, {
             line: attrLine,
             hint: "Each entity may have exactly one primary key. Remove the extra PK modifier."
           });
@@ -21343,22 +24547,22 @@ class CheckEngine {
       }
       if (attr.isForeignKey && !attr.name.endsWith("_id")) {
         const isPersonRole = attr.name.endsWith("_by");
-        this.warn("EML114", `Foreign key "${entity2.name}.${attr.name}" does not end with "_id".`, {
+        this.warn("EML114", `Foreign key "${entity.name}.${attr.name}" does not end with "_id".`, {
           line: attrLine,
           hint: isPersonRole ? `Rename to "${attr.name}_id" — a _by column names a person by role, so it resolves to the user entity. Run  bun language/fixer.ts  to apply this automatically.` : `Convention: rename to "${attr.name}_id" so the generator can derive the referenced table. Run  bun language/fixer.ts  to apply this automatically.`
         });
       }
       if (!attr.isForeignKey && !attr.isPrimaryKey && isForeignKeyColumnName2(attr.name)) {
         const target = this.fkToEntityName(attr.name);
-        if (declaredEntityNames2.has(target) && attr.name !== entity2.primaryKey) {
-          this.warn("EML119", `Column "${entity2.name}.${attr.name}" looks like a reference to "${target}" but is not marked FK.`, {
+        if (declaredEntityNames.has(target) && attr.name !== entity.primaryKey) {
+          this.warn("EML119", `Column "${entity.name}.${attr.name}" looks like a reference to "${target}" but is not marked FK.`, {
             line: attrLine,
             hint: `Add FK:  ${attr.rawType ?? "string"} ${attr.name} FK. Without it the Application Dictionary records the column as String and the form shows the raw id instead of a "${target}" lookup.`
           });
         }
       }
       if (MANAGED_COLUMN_NAMES2.has(attr.name.toLowerCase()) && !attr.isPrimaryKey) {
-        this.warn("EML103", `Column "${entity2.name}.${attr.name}" is added by the generator.`, {
+        this.warn("EML103", `Column "${entity.name}.${attr.name}" is added by the generator.`, {
           line: attrLine,
           hint: `Every table carries ${[...MANAGED_COLUMN_NAMES2].join(", ")} already. Delete the line: the generator's own definition is used, and yours is ignored.`
         });
@@ -21366,7 +24570,7 @@ class CheckEngine {
       const def = this.def;
       const rawBase = attr.rawType?.replace(/\(\d+\)/, "").toLowerCase();
       if (rawBase && rawBase !== "string" && !(rawBase in def.types.map)) {
-        this.warn("EML115", `Unknown type "${attr.rawType}" on "${entity2.name}.${attr.name}"; mapped to "string".`, {
+        this.warn("EML115", `Unknown type "${attr.rawType}" on "${entity.name}.${attr.name}"; mapped to "string".`, {
           line: attrLine,
           hint: `Valid types: ${def.types.canonical.join(", ")} (plus aliases listed in appwithai-language.json).`
         });
@@ -21374,7 +24578,7 @@ class CheckEngine {
       if (attr.isPrimaryKey && attrLine) {
         const rawLine = this.src.getLine(attrLine).toUpperCase();
         if (rawLine.includes("OPTIONAL") || rawLine.includes(" NULL ") || rawLine.endsWith(" NULL")) {
-          this.error("EML116", `Primary key "${entity2.name}.${attr.name}" is marked OPTIONAL.`, {
+          this.error("EML116", `Primary key "${entity.name}.${attr.name}" is marked OPTIONAL.`, {
             line: attrLine,
             hint: "Remove OPTIONAL from the PK attribute — primary keys are always required."
           });
@@ -21386,7 +24590,7 @@ class CheckEngine {
           const upper = token.toUpperCase();
           if (!upper || this.validModifiers.has(upper))
             continue;
-          this.warn("EML118", `Unknown modifier "${token}" on "${entity2.name}.${attr.name}" — it will be ignored.`, {
+          this.warn("EML118", `Unknown modifier "${token}" on "${entity.name}.${attr.name}" — it will be ignored.`, {
             line: attrLine,
             hint: `Known modifiers: ${[...this.validModifiers].join(", ")}. Use a quoted string for a description.`,
             context: raw
@@ -21394,8 +24598,8 @@ class CheckEngine {
         }
       }
     }
-    if (pkCount === 0 && entity2.attributes.length > 0) {
-      this.warn("EML117", `Entity "${entity2.name}" has no primary key (PK modifier).`, {
+    if (pkCount === 0 && entity.attributes.length > 0) {
+      this.warn("EML117", `Entity "${entity.name}" has no primary key (PK modifier).`, {
         line: entityLine,
         hint: "Add  string id PK  as the first attribute or mark one existing attribute with PK."
       });
@@ -21500,6 +24704,55 @@ class CheckEngine {
       }
     }
   }
+  checkFieldLogic(entityName, attrName, key, expression, lineNo) {
+    const parsed = parseLogic(expression);
+    if (!parsed.ok) {
+      this.error("EML156", `%%field ${entityName}.${attrName} ${key}: does not parse — ${parsed.error}`, {
+        line: lineNo,
+        hint: "Write Compiere logic: @column@=value, @column@!value (not equal), >, <, >=, <=, joined by & and | and read left to right. A Yes/No column is Y or N; an empty value is ''.",
+        context: expression
+      });
+      return;
+    }
+    const entity = this.model.entities.find((candidate) => candidate.name === entityName);
+    if (!entity)
+      return;
+    const columns = new Set(entity.attributes.map((attribute) => attribute.name));
+    for (const variable of parsed.logic.variables) {
+      if (!columns.has(variable)) {
+        this.error("EML157", `%%field ${entityName}.${attrName} ${key}: reads @${variable}@, which ${entityName} does not declare.`, {
+          line: lineNo,
+          hint: `Field logic reads the record being edited, so it can name only ${entityName}'s own columns: ${[...columns].join(", ")}.`
+        });
+      }
+    }
+    if (key === "display" && parsed.logic.variables.includes(attrName)) {
+      this.warn("EML158", `%%field ${entityName}.${attrName} display: depends on its own value.`, {
+        line: lineNo,
+        hint: "A field hidden by its own value can never be shown again from the form, because nobody can see it to change it. Make it depend on another column."
+      });
+    }
+  }
+  checkFieldLogicTargets(entityAttrMap) {
+    const stateFields = this.stateFields();
+    for (const { lineNo, text } of this.src.findAll(/^\s*%%field\b/)) {
+      const m = text.trim().match(/^%%field\s+(\w+)\.(\w+)\s+(display|readonly|mandatory)\s*:/);
+      if (!m)
+        continue;
+      const [entityName, attrName, key] = caps(m, 3);
+      if (!entityAttrMap.get(entityName)?.has(attrName))
+        continue;
+      const entity = this.model.entities.find((candidate) => candidate.name === entityName);
+      const isKey = entity?.primaryKey === attrName;
+      const isState = stateFields.get(entityName) === attrName;
+      if (!isKey && !isState)
+        continue;
+      this.warn("EML159", `%%field ${entityName}.${attrName} ${key}: is on ${isKey ? "the primary key" : "the state field"}, which is never an input.`, {
+        line: lineNo,
+        hint: isKey ? "The key is on no form. Put the logic on the column a person fills in." : "The state field is system-managed: shown read-only in the record header and written only by workflows. Logic may read it (@" + attrName + "@=…) on other fields, but cannot be placed on it."
+      });
+    }
+  }
   checkFieldDirectives() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
     const enumNames = new Set(this.model.enums.map((e) => e.name));
@@ -21507,7 +24760,7 @@ class CheckEngine {
     for (const e of this.model.entities) {
       entityAttrMap.set(e.name, new Set(e.attributes.map((a) => a.name)));
     }
-    const fieldLines = this.src.findAll(/^%%field\b/);
+    const fieldLines = this.src.findAll(/^\s*%%field\b/);
     for (const { lineNo, text } of fieldLines) {
       const m = text.trim().match(/^%%field\s+(\w+)\.(\w+)\s+([A-Za-z_]\w*)\s*:\s*(.+)$/);
       if (!m) {
@@ -21545,29 +24798,45 @@ class CheckEngine {
           hint: `Add  %%enum ${value.trim()}: value1, value2  before the erDiagram block.`
         });
       }
+      if (key === "enum" && enumNames.has(value.trim())) {
+        const entity = this.model.entities.find((e) => e.name === entityName);
+        const attr = entity?.attributes.find((a) => a.name === attrName);
+        const declared = this.model.enums.find((e) => e.name === value.trim());
+        const wordsOnly = declared?.values.some((v) => !/^-?\d+(\.\d+)?$/.test(v.trim()));
+        if (attr && wordsOnly && !["string", "text", "uuid"].includes(String(attr.type).toLowerCase())) {
+          this.warn("EML515", `Column "${entityName}.${attrName}" is ${attr.rawType} but is bound to enum "${value.trim()}", whose values are words — choosing one is refused (400).`, {
+            line: lineNo,
+            hint: `Declare the column as string, or bind an enum of numbers. If ${attrName} is a ranking, keep it string and let the enum order it.`
+          });
+        }
+      }
       if ((key === "min" || key === "max") && Number.isNaN(Number(value.trim()))) {
         this.warn("EML145", `%%field "${entityName}.${attrName}" has non-numeric ${key}: "${value.trim()}".`, {
           line: lineNo,
           hint: `${key}: should be a number, e.g.  ${key}: 0`
         });
       }
+      if (key === "display" || key === "readonly" || key === "mandatory") {
+        this.checkFieldLogic(entityName, attrName, key, value.trim(), lineNo);
+      }
     }
+    this.checkFieldLogicTargets(entityAttrMap);
     const boundFields = new Set(this.src.findAll(/^\s*%%field\s+\w+\.\w+\s+enum\s*:/).map(({ text }) => {
       const m = text.trim().match(/^%%field\s+(\w+)\.(\w+)/);
       return m ? `${m[1]}.${m[2]}` : "";
     }).filter(Boolean));
     const entitiesWithMachines = new Set(this.model.workflows.filter((w) => w.kind === "state" && w.entity).map((w) => w.entity));
-    for (const entity2 of this.model.entities) {
-      for (const attr of entity2.attributes) {
+    for (const entity of this.model.entities) {
+      for (const attr of entity.attributes) {
         if (!LIFECYCLE_COLUMN_NAMES.has(attr.name))
           continue;
-        if (attr.name !== "status" && !entitiesWithMachines.has(entity2.name))
+        if (attr.name !== "status" && !entitiesWithMachines.has(entity.name))
           continue;
-        if (boundFields.has(`${entity2.name}.${attr.name}`))
+        if (boundFields.has(`${entity.name}.${attr.name}`))
           continue;
-        this.warn("EML146", `Column "${entity2.name}.${attr.name}" has no %%field enum binding.`, {
+        this.warn("EML146", `Column "${entity.name}.${attr.name}" has no %%field enum binding.`, {
           line: this.src.findLine(new RegExp(`^\\s+\\w+\\s+${attr.name}\\b`)),
-          hint: `Declare  %%enum ${entity2.name}Status: ...  and bind it with  %%field ${entity2.name}.${attr.name} enum: ${entity2.name}Status. Unbound, the Application Dictionary records free text and the form accepts values the state machine cannot act on.`
+          hint: `Declare  %%enum ${entity.name}Status: ...  and bind it with  %%field ${entity.name}.${attr.name} enum: ${entity.name}Status. Unbound, the Application Dictionary records free text and the form accepts values the state machine cannot act on.`
         });
       }
     }
@@ -21678,9 +24947,9 @@ class CheckEngine {
     }
     return named;
   }
-  linkColumnTo(entity2, parentName) {
-    const snake2 = parentName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase();
-    return entity2.attributes.find((attribute) => attribute.isForeignKey && (attribute.name === `${snake2}_id` || attribute.name.startsWith(`${snake2}_`)));
+  linkColumnTo(entity, parentName) {
+    const snake = parentName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase();
+    return entity.attributes.find((attribute) => attribute.isForeignKey && (attribute.name === `${snake}_id` || attribute.name.startsWith(`${snake}_`)));
   }
   checkCategoryDirectives() {
     for (const { lineNo, text } of this.src.findAll(/^\s*%%category\b/)) {
@@ -21710,23 +24979,53 @@ class CheckEngine {
         hint: `A category lists what the dashboard shows, and a child has no card — it is reached by opening a ${parent}. Remove "${child}" from the entities: list.`
       });
     }
+    const effective = new Map;
+    for (const [child, parent] of parents) {
+      const entity = declared.get(child);
+      if (!entity || parent === child || !declared.has(parent))
+        continue;
+      if (this.linkColumnTo(entity, parent))
+        effective.set(child, parent);
+    }
+    const depth = (name) => {
+      let levels = 0;
+      const seen = new Set;
+      for (let current = effective.get(name);current !== undefined && !seen.has(current); current = effective.get(current)) {
+        seen.add(current);
+        levels++;
+      }
+      return levels;
+    };
+    const children = new Map(effective);
+    for (const child of [...effective.keys()].sort((a, b) => depth(a) - depth(b))) {
+      const parent = effective.get(child);
+      const grandparent = children.get(parent);
+      if (!grandparent)
+        continue;
+      children.delete(child);
+      const link = this.linkColumnTo(declared.get(child), parent);
+      this.info("EML155", `"${child}" is a line item of "${parent}", which is itself a line item of "${grandparent}", so "${child}" is generated as a top-level entity.`, {
+        line: this.src.findLine(new RegExp(`^\\s*%%entity\\s+${child}\\s+parent\\s*:`)),
+        hint: `A line item's tab sits one level inside a top-level entity's window; there is no third level. ` + `"${child}" keeps its foreign key ${link?.name} but gets a window and a dashboard card of its own, and the ${parent} page does not list it. ` + `If that is what you want, remove the \`parent:\` directive and the note goes; ` + `to list it under "${grandparent}" instead, give it a foreign key to "${grandparent}" and declare \`parent: ${grandparent}\`.`
+      });
+    }
     const LINE_ITEM_NOUNS = /(Line|LineItem|Item|Detail|Entry|Row)s?$/;
-    for (const entity2 of this.model.entities) {
-      if (parents.has(entity2.name))
+    for (const entity of this.model.entities) {
+      if (parents.has(entity.name))
         continue;
       let candidate;
       for (const other of declared.keys()) {
-        if (other === entity2.name || other.length < 3)
+        if (other === entity.name || other.length < 3)
           continue;
-        if (!entity2.name.startsWith(other) || entity2.name.length <= other.length)
+        if (!entity.name.startsWith(other) || entity.name.length <= other.length)
           continue;
-        if (!this.linkColumnTo(entity2, other))
+        if (!this.linkColumnTo(entity, other))
           continue;
         if (!candidate || other.length > candidate.length)
           candidate = other;
       }
-      if (!candidate && LINE_ITEM_NOUNS.test(entity2.name)) {
-        for (const attribute of entity2.attributes) {
+      if (!candidate && LINE_ITEM_NOUNS.test(entity.name)) {
+        for (const attribute of entity.attributes) {
           if (!attribute.isForeignKey || attribute.isPrimaryKey)
             continue;
           if (!isForeignKeyColumnName2(attribute.name))
@@ -21734,8 +25033,8 @@ class CheckEngine {
           if (isPersonRoleColumn(attribute.name))
             continue;
           const target = this.fkToEntityName(attribute.name);
-          const match = [...declared.keys()].find((name) => name !== entity2.name && (name === target || name.endsWith(target)));
-          if (match && this.linkColumnTo(entity2, match)) {
+          const match = [...declared.keys()].find((name) => name !== entity.name && (name === target || name.endsWith(target)));
+          if (match && this.linkColumnTo(entity, match)) {
             candidate = match;
             break;
           }
@@ -21743,10 +25042,10 @@ class CheckEngine {
       }
       if (!candidate)
         continue;
-      const link = this.linkColumnTo(entity2, candidate);
-      this.info("EML149", `"${entity2.name}" looks like a line item of "${candidate}" but declares no parent.`, {
-        line: this.src.findLine(new RegExp(`^\\s*${entity2.name}\\s*\\{`)),
-        hint: `If a list of every ${entity2.name} away from its ${candidate} is not a screen anyone opens, ` + `declare \`%%entity ${entity2.name} parent: ${candidate}\` — the dictionary then drops its dashboard ` + `card and gives it a tab inside the ${candidate} window, linked on ${link?.name}. ` + `If it is a thing in its own right, leave it: a reference is the opposite on all three questions (§3.5.1).`
+      const link = this.linkColumnTo(entity, candidate);
+      this.info("EML149", `"${entity.name}" looks like a line item of "${candidate}" but declares no parent.`, {
+        line: this.src.findLine(new RegExp(`^\\s*${entity.name}\\s*\\{`)),
+        hint: `If a list of every ${entity.name} away from its ${candidate} is not a screen anyone opens, ` + `declare \`%%entity ${entity.name} parent: ${candidate}\` — the dictionary then drops its dashboard ` + `card and gives it a tab inside the ${candidate} window, linked on ${link?.name}. ` + `If it is a thing in its own right, leave it: a reference is the opposite on all three questions (§3.5.1).`
       });
     }
   }
@@ -21754,10 +25053,10 @@ class CheckEngine {
     return name.replace(/[_.]+/g, " ").trim().toLowerCase();
   }
   restatedHelp(subject, text) {
-    const [entity2 = "", column = ""] = subject.split(".");
+    const [entity = "", column = ""] = subject.split(".");
     const body = text.trim().replace(/\.+$/, "").trim().toLowerCase();
-    const own = this.nameAsWords(column || entity2);
-    const of = entity2.toLowerCase();
+    const own = this.nameAsWords(column || entity);
+    const of = entity.toLowerCase();
     if (/^unique identifier( for \w+)?$/.test(body))
       return "restates the key";
     if (new RegExp(`^(the )?${escapeRe(own)}( for ${escapeRe(of)})?$`).test(body)) {
@@ -21770,7 +25069,7 @@ class CheckEngine {
   }
   checkHelpText() {
     const entityHelp = new Map;
-    const fieldHelp2 = new Map;
+    const fieldHelp = new Map;
     for (const { lineNo, text } of this.src.findAll(/^\s*%%entity\b/)) {
       const m = text.trim().match(/^%%entity\s+(\w+)\s+(?:help|description)\s*:\s*(.+)$/);
       if (m?.[1] && m[2])
@@ -21779,45 +25078,154 @@ class CheckEngine {
     for (const { lineNo, text } of this.src.findAll(/^\s*%%field\b/)) {
       const m = text.trim().match(/^%%field\s+([\w.]+)\s+help\s*:\s*(.+)$/);
       if (m?.[1] && m[2])
-        fieldHelp2.set(m[1], { text: m[2], line: lineNo });
+        fieldHelp.set(m[1], { text: m[2], line: lineNo });
     }
-    for (const entity2 of this.model.entities) {
-      const entityLine = this.src.findLine(new RegExp(`^\\s*${entity2.name}\\s*\\{`));
-      const help = entityHelp.get(entity2.name);
+    for (const entity of this.model.entities) {
+      const entityLine = this.src.findLine(new RegExp(`^\\s*${entity.name}\\s*\\{`));
+      const help = entityHelp.get(entity.name);
       if (!help) {
-        this.warn("EML152", `Entity "${entity2.name}" has no %%entity help:.`, {
+        this.warn("EML152", `Entity "${entity.name}" has no %%entity help:.`, {
           line: entityLine,
-          hint: `Add \`%%entity ${entity2.name} help: …\` — what this record is for in the business, when one is created, and what distinguishes it from the entities it sounds like. It becomes sys_table.description and opens the entity's section of the manual.`
+          hint: `Add \`%%entity ${entity.name} help: …\` — what this record is for in the business, when one is created, and what distinguishes it from the entities it sounds like. It becomes sys_table.description and opens the entity's section of the manual.`
         });
       } else {
-        const why = this.restatedHelp(entity2.name, help.text);
+        const why = this.restatedHelp(entity.name, help.text);
         if (why) {
-          this.warn("EML151", `%%entity ${entity2.name} help: ${why}.`, {
+          this.warn("EML151", `%%entity ${entity.name} help: ${why}.`, {
             line: help.line,
             hint: `"${help.text.trim().slice(0, 60)}" tells a reader nothing the entity name did not. Say what the business does with these records — the domain knowledge behind the name is the whole reason this line exists.`
           });
         }
       }
-      const undocumented = entity2.attributes.filter((attribute) => !MANAGED_COLUMN_NAMES2.has(attribute.name.toLowerCase())).filter((attribute) => !attribute.isPrimaryKey).filter((attribute) => !fieldHelp2.has(`${entity2.name}.${attribute.name}`)).map((attribute) => attribute.name);
+      const undocumented = entity.attributes.filter((attribute) => !MANAGED_COLUMN_NAMES2.has(attribute.name.toLowerCase())).filter((attribute) => !attribute.isPrimaryKey).filter((attribute) => !fieldHelp.has(`${entity.name}.${attribute.name}`)).map((attribute) => attribute.name);
       if (undocumented.length > 0) {
         const shown = undocumented.slice(0, 6).join(", ");
         const rest = undocumented.length > 6 ? `, and ${undocumented.length - 6} more` : "";
-        this.warn("EML153", `${entity2.name} has ${undocumented.length} column${undocumented.length === 1 ? "" : "s"} with no %%field help:.`, {
+        this.warn("EML153", `${entity.name} has ${undocumented.length} column${undocumented.length === 1 ? "" : "s"} with no %%field help:.`, {
           line: entityLine,
-          hint: `Add \`%%field ${entity2.name}.<column> help: …\` for ${shown}${rest}. Each becomes sys_column.description — the hint under the control and the column's row in the manual — and a column without one prints a dash.`
+          hint: `Add \`%%field ${entity.name}.<column> help: …\` for ${shown}${rest}. Each becomes sys_column.description — the hint under the control and the column's row in the manual — and a column without one prints a dash.`
         });
       }
-      for (const attribute of entity2.attributes) {
-        const field = fieldHelp2.get(`${entity2.name}.${attribute.name}`);
+      for (const attribute of entity.attributes) {
+        const field = fieldHelp.get(`${entity.name}.${attribute.name}`);
         if (!field)
           continue;
-        const why = this.restatedHelp(`${entity2.name}.${attribute.name}`, field.text);
+        const why = this.restatedHelp(`${entity.name}.${attribute.name}`, field.text);
         if (why) {
-          this.warn("EML151", `%%field ${entity2.name}.${attribute.name} help: ${why}.`, {
+          this.warn("EML151", `%%field ${entity.name}.${attribute.name} help: ${why}.`, {
             line: field.line,
             hint: `"${field.text.trim().slice(0, 60)}" repeats the column name. Say why the value matters, what is expected in it, and what happens downstream — a reference column should say what the reference is *for*, not that it is one.`
           });
         }
+      }
+    }
+  }
+  restatedSectionHelp(name, text) {
+    const own = this.nameAsWords(name);
+    const body = text.trim().replace(/\.+$/, "").trim().toLowerCase().replace(/^(the|all)\s+/, "").replace(/\s+(fields?|information|info|details|data|section|columns?)$/, "").trim();
+    return body === own || body === "";
+  }
+  checkSectionDirectives() {
+    const directives = parseSectionDirectives(this.src.text());
+    const declared = new Map(this.model.entities.map((entity) => [entity.name, entity]));
+    for (const directive of directives) {
+      if (directive.missing.length > 0) {
+        this.error("EML171", `%%section is missing ${directive.missing.map((key) => `\`${key}:\``).join(", ")}.`, {
+          line: directive.line,
+          hint: "Syntax: %%section entity: <Entity>; name: <Label>; help: <what this section is for>; rows: <column>, <column> | <column>. Rows are separated by `|`, the one or two columns of a row by `,`."
+        });
+        continue;
+      }
+      if (directive.entity && !declared.has(directive.entity)) {
+        this.error("EML173", `%%section names entity "${directive.entity}", which is not declared.`, {
+          line: directive.line,
+          hint: "Use the entity's name exactly as the erDiagram declares it — it is case-sensitive, like every other directive's."
+        });
+      }
+    }
+    const byEntity = sectionsByEntity(directives);
+    const stateFieldsByEntity = this.stateFields();
+    for (const entity of this.model.entities) {
+      const entityLine = this.src.findLine(new RegExp(`^\\s*${entity.name}\\s*\\{`));
+      const sections = byEntity.get(entity.name);
+      const stateField = stateFieldsByEntity.get(entity.name);
+      const columns = entity.attributes.filter((attribute) => !attribute.isPrimaryKey && attribute.name !== stateField);
+      if (!sections || sections.length === 0) {
+        if (columns.length === 0)
+          continue;
+        this.warn("EML170", `Entity "${entity.name}" declares no %%section, so its form is one flat list.`, {
+          line: entityLine,
+          hint: `Add \`%%section entity: ${entity.name}; name: <Label>; help: …; rows: <a>, <b> | <c>\` lines placing every column but the key — two per row, a row of one for text that needs the width. The sections are the form a person uses all day, and the model is the only place they are decided.`
+        });
+        continue;
+      }
+      const known = new Set(entity.attributes.map((attribute) => attribute.name));
+      const key = entity.attributes.find((attribute) => attribute.isPrimaryKey)?.name;
+      const placed = new Set;
+      for (const section of sections) {
+        if (!section.help) {
+          this.warn("EML177", `%%section "${entity.name}.${section.name}" has no help:.`, {
+            line: section.lines[0],
+            hint: "Add `help: …` — what this part of the form is for, and what has to be true before it is complete. It is printed under the section's heading."
+          });
+        } else if (this.restatedSectionHelp(section.name, section.help)) {
+          this.warn("EML177", `%%section "${entity.name}.${section.name}" help: restates its name.`, {
+            line: section.lines[0],
+            hint: `"${section.help.trim().slice(0, 60)}" repeats the heading. Say what the person filling it in is doing there.`
+          });
+        }
+      }
+      for (const directive of directives) {
+        if (directive.entity !== entity.name || !directive.rows)
+          continue;
+        for (const row of directive.rows) {
+          if (row.length > 2) {
+            this.error("EML174", `%%section row "${row.join(", ")}" of ${entity.name} has ${row.length} columns; a row holds one or two.`, {
+              line: directive.line,
+              hint: "The form is a two-column grid. Split the row with `|` — pair what is filled in together, and give a long column a row of its own."
+            });
+          }
+          for (const column of row) {
+            if (column === key) {
+              this.error("EML176", `%%section places "${entity.name}.${column}", the primary key.`, {
+                line: directive.line,
+                hint: "The key is a generated uuid that no form shows. Leave it out of every row."
+              });
+              continue;
+            }
+            if (!known.has(column)) {
+              const near = [...known].find((name) => name.toLowerCase() === column.toLowerCase().replace(/\s+/g, "_"));
+              this.error("EML176", `%%section places "${entity.name}.${column}", which ${entity.name} does not declare.`, {
+                line: directive.line,
+                hint: near ? `Did you mean \`${near}\`? Rows name columns exactly as the erDiagram declares them.` : `Rows name columns of ${entity.name} exactly as the erDiagram declares them: ${[...known].filter((name) => name !== key).join(", ")}.`
+              });
+              continue;
+            }
+            if (column === stateField) {
+              this.warn("EML178", `%%section places "${entity.name}.${column}", the state field, in the form body.`, {
+                line: directive.line,
+                hint: `Remove ${column} from the row. The state is shown read-only in the header of ${entity.name}'s form and as a column of its list, and only background workflows change it — a field in the body would offer a change nobody may make.`
+              });
+              continue;
+            }
+            if (placed.has(column)) {
+              this.warn("EML175", `"${entity.name}.${column}" is placed in two %%section rows.`, {
+                line: directive.line,
+                hint: "A field appears once on a form. The first placement is used; remove this one."
+              });
+              continue;
+            }
+            placed.add(column);
+          }
+        }
+      }
+      const unplaced = columns.map((attribute) => attribute.name).filter((name) => !placed.has(name));
+      if (unplaced.length > 0) {
+        const last = sections[sections.length - 1];
+        this.warn("EML172", `${entity.name} leaves ${unplaced.length} column${unplaced.length === 1 ? "" : "s"} out of every %%section: ${unplaced.join(", ")}.`, {
+          line: last?.lines[last.lines.length - 1],
+          hint: `Place ${unplaced.join(", ")} in the row ${unplaced.length === 1 ? "it belongs" : "they belong"} to. Unplaced columns are generated into a collapsed "${UNPLACED_SECTION}" section at the end of the form, which nobody designed.`
+        });
       }
     }
   }
@@ -21828,40 +25236,40 @@ class CheckEngine {
       entityAttrMap.set(e.name, new Set(e.attributes.map((a) => a.name)));
     }
     const seenHooks = new Map;
-    for (const hook2 of this.model.hooks) {
-      const hookLine = this.src.findLine(new RegExp(`%%hook\\s+${hook2.type}\\s+${hook2.handler}\\s+on\\s+${hook2.entity}`));
-      if (!this.validHookTypes.has(hook2.type)) {
-        this.error("EML200", `Unknown hook type "${hook2.type}" in %%hook.`, {
+    for (const hook of this.model.hooks) {
+      const hookLine = this.src.findLine(new RegExp(`%%hook\\s+${hook.type}\\s+${hook.handler}\\s+on\\s+${hook.entity}`));
+      if (!this.validHookTypes.has(hook.type)) {
+        this.error("EML200", `Unknown hook type "${hook.type}" in %%hook.`, {
           line: hookLine,
           hint: `Valid hook types: ${[...this.validHookTypes].join(", ")}.`
         });
       }
-      if (!this.identRe.test(hook2.handler)) {
-        this.error("EML201", `Invalid hook handler name "${hook2.handler}".`, {
+      if (!this.identRe.test(hook.handler)) {
+        this.error("EML201", `Invalid hook handler name "${hook.handler}".`, {
           line: hookLine,
           hint: "Handler names must match ^[A-Za-z_][A-Za-z0-9_]*$ (camelCase recommended)."
         });
       }
-      if (!entityNames.has(hook2.entity)) {
-        this.warn("EML202", `%%hook "${hook2.handler}" references undeclared entity "${hook2.entity}".`, {
+      if (!entityNames.has(hook.entity)) {
+        this.warn("EML202", `%%hook "${hook.handler}" references undeclared entity "${hook.entity}".`, {
           line: hookLine,
-          hint: `Declare "${hook2.entity}" in the erDiagram section.`
+          hint: `Declare "${hook.entity}" in the erDiagram section.`
         });
       }
-      if (hook2.fields.length > 0 && entityNames.has(hook2.entity)) {
-        const attrs = entityAttrMap.get(hook2.entity);
-        for (const field of hook2.fields) {
+      if (hook.fields.length > 0 && entityNames.has(hook.entity)) {
+        const attrs = entityAttrMap.get(hook.entity);
+        for (const field of hook.fields) {
           if (attrs && !attrs.has(field)) {
-            this.warn("EML203", `%%hook "${hook2.handler}" references undeclared field "${hook2.entity}.${field}".`, {
+            this.warn("EML203", `%%hook "${hook.handler}" references undeclared field "${hook.entity}.${field}".`, {
               line: hookLine,
-              hint: `Add "${field}" to "${hook2.entity}", or check for a typo.`
+              hint: `Add "${field}" to "${hook.entity}", or check for a typo.`
             });
           }
         }
       }
-      const hookKey = `${hook2.entity}|${hook2.type}|${hook2.handler}`;
+      const hookKey = `${hook.entity}|${hook.type}|${hook.handler}`;
       if (seenHooks.has(hookKey)) {
-        this.warn("EML204", `Duplicate hook: "${hook2.type} ${hook2.handler} on ${hook2.entity}".`, {
+        this.warn("EML204", `Duplicate hook: "${hook.type} ${hook.handler} on ${hook.entity}".`, {
           line: hookLine,
           hint: `Already declared on line ${seenHooks.get(hookKey)}. Remove the duplicate.`
         });
@@ -21869,6 +25277,21 @@ class CheckEngine {
         seenHooks.set(hookKey, hookLine ?? 0);
       }
     }
+  }
+  stateFields() {
+    const fields = new Map;
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity)
+        continue;
+      const entity = this.model.entities.find((candidate) => candidate.name === wf.entity);
+      const field = entity && stateFieldOf(entity.attributes.map((attribute) => attribute.name));
+      if (field)
+        fields.set(wf.entity, field);
+    }
+    return fields;
+  }
+  finalStates(entity) {
+    return this.model.workflows.filter((wf) => wf.entity === entity && wf.kind === "state").flatMap((wf) => wf.transitions.filter((t) => t.to === "[*]").map((t) => t.from));
   }
   checkRbac() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
@@ -21891,20 +25314,22 @@ class CheckEngine {
       "all",
       "any"
     ]);
-    const eventsFor = (entity2) => {
-      const events = new Set;
+    const movesOf = (entity) => {
+      const moves = [];
       for (const wf of this.model.workflows) {
-        if (wf.entity !== entity2 || wf.kind !== "state")
+        if (wf.entity !== entity || wf.kind !== "state")
           continue;
         for (const t of wf.transitions) {
-          if (t.event)
-            events.add(t.event.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+          if (t.from === "[*]" || t.to === "[*]")
+            continue;
+          moves.push({ workflow: wf.name, from: t.from, to: t.to, event: t.event });
         }
       }
-      return events;
+      return moves;
     };
+    const guarded = new Set;
     for (const { lineNo, text } of this.src.findAll(/^\s*%%rbac\b/)) {
-      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*]\w*)\s*$/);
+      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/);
       if (!m) {
         this.error("EML210", `Invalid %%rbac syntax: "${text.trim()}"`, {
           line: lineNo,
@@ -21913,10 +25338,10 @@ class CheckEngine {
         });
         continue;
       }
-      const [roleExpr, entity2, target] = caps(m, 3);
+      const [roleExpr, entity, target] = caps(m, 3);
       const roles = roleExpr.split("|").map((part) => part.trim().replace(/^role:/i, "").trim()).filter(Boolean);
       if (roles.length === 0) {
-        this.error("EML211", `%%rbac on ${entity2}.${target} names no role.`, {
+        this.error("EML211", `%%rbac on ${entity}.${target} names no role.`, {
           line: lineNo,
           hint: "A rule with no roles can never be satisfied, so it locks the operation for everyone."
         });
@@ -21928,28 +25353,54 @@ class CheckEngine {
           hint: "Format: role:<name> or role:<a>|<b> or role:<a>|role:<b>"
         });
       }
-      if (!entityNames.has(entity2)) {
-        this.error("EML213", `%%rbac references undeclared entity "${entity2}".`, {
+      if (!entityNames.has(entity)) {
+        this.error("EML213", `%%rbac references undeclared entity "${entity}".`, {
           line: lineNo,
-          hint: `Declare "${entity2}" in the erDiagram section, or check the spelling.`
+          hint: `Declare "${entity}" in the erDiagram section, or check the spelling.`
         });
         continue;
       }
       const lower = target.toLowerCase();
       if (crudOps.has(lower))
         continue;
-      const events = eventsFor(entity2);
-      if (events.has(lower))
+      const moves = movesOf(entity);
+      const arrow = /^(\w+)->(\w+)$/.exec(target);
+      const named = arrow ? moves.filter((move) => move.from === arrow[1] && move.to === arrow[2]) : moves.filter((move) => move.event && normalizeEvent(move.event) === normalizeEvent(target));
+      if (named.length > 0) {
+        for (const move of named)
+          guarded.add(`${entity}:${move.from}->${move.to}`);
         continue;
-      this.error("EML214", `%%rbac on ${entity2}.${target} names neither a CRUD operation nor a transition of ${entity2}.`, {
+      }
+      const finals = this.finalStates(entity);
+      if (arrow && finals.includes(arrow[1]) && arrow[2].toLowerCase() === LIFECYCLE_DRAFT)
+        continue;
+      if (!arrow && normalizeEvent(target) === REOPEN_EVENT && finals.length > 0)
+        continue;
+      const offered = [
+        ...new Set(moves.map((move) => move.event ? normalizeEvent(move.event) : `${move.from}->${move.to}`))
+      ];
+      this.error("EML214", `%%rbac on ${entity}.${target} names neither a CRUD operation nor a move of ${entity}.`, {
         line: lineNo,
-        hint: events.size ? `Use one of create, read, update, delete, * — or a transition of ${entity2}: ${[...events].join(", ")}.` : `Use one of create, read, update, delete, * — ${entity2} declares no state machine to take a transition from.`
+        hint: offered.length ? `Use one of create, read, update, delete, * — or a move of ${entity}: ${offered.join(", ")}, ${REOPEN_EVENT}.` : `Use one of create, read, update, delete, * — ${entity} declares no state machine to move along.`
+      });
+    }
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity || !entityNames.has(wf.entity))
+        continue;
+      const open = movesOf(wf.entity).filter((move) => move.workflow === wf.name && !guarded.has(`${wf.entity}:${move.from}->${move.to}`));
+      if (open.length === 0)
+        continue;
+      const names = open.map((move) => move.event ? normalizeEvent(move.event) : `${move.from}->${move.to}`);
+      this.info("EML511", `${open.length} move${open.length === 1 ? "" : "s"} of "${wf.name}" ${open.length === 1 ? "is" : "are"} open to anyone who may update ${wf.entity}: ${[...new Set(names)].join(", ")}.`, {
+        line: this.src.findLine(new RegExp(`^%%workflow\\s+${wf.name}\\b`)),
+        hint: `To limit a button to the roles that own it, add  %%rbac role:<role> on ${wf.entity}.<move>  — the move is its event, or from->to for an edge with no label.`
       });
     }
   }
   checkReportDirectives() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
     const seen = new Map;
+    const byTitle = new Map;
     for (const report of this.model.reports) {
       const lineNo = this.src.findLine(new RegExp(`%%report\\s+${report.name}\\b`));
       const previous = seen.get(report.name);
@@ -21960,6 +25411,16 @@ class CheckEngine {
         });
       }
       seen.set(report.name, lineNo ?? 0);
+      const titleKey = report.title.trim().toLowerCase();
+      const sameTitle = byTitle.get(titleKey);
+      if (sameTitle !== undefined && sameTitle !== report.name) {
+        this.error("EML292", `%%report "${report.name}" has the same title as "${sameTitle}" ("${report.title}").`, {
+          line: lineNo,
+          hint: "The reporting platform keeps one report per title, so these would collapse into one. Retitle one of them."
+        });
+      } else if (sameTitle === undefined) {
+        byTitle.set(titleKey, report.name);
+      }
       if (!/^\s*(select|with)\b/i.test(report.sql)) {
         this.error("EML293", `%%report "${report.name}" does not begin with SELECT or WITH.`, {
           line: lineNo,
@@ -21976,6 +25437,134 @@ class CheckEngine {
         this.warn("EML295", `%%report "${report.name}" names entity "${report.entity}", which this model does not declare.`, {
           line: lineNo,
           hint: "entity: is used to group the report with its entity. Correct the name, or drop the key if the report spans several."
+        });
+      }
+    }
+  }
+  static roleKey(role) {
+    return role.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  }
+  static tableOf(entity) {
+    const isUpper = (ch) => ch !== undefined && ch >= "A" && ch <= "Z";
+    const isLower = (ch) => ch !== undefined && ch >= "a" && ch <= "z";
+    const isDigit = (ch) => ch !== undefined && ch >= "0" && ch <= "9";
+    let out = "";
+    for (let i = 0;i < entity.length; i++) {
+      const ch = entity[i];
+      const prev = entity[i - 1];
+      const next = entity[i + 1];
+      if (isUpper(ch) && i > 0 && (isLower(prev) || isDigit(prev) || isUpper(prev) && isLower(next))) {
+        out += "_";
+      }
+      out += ch;
+    }
+    return "bus_" + out.replace(/[\s-]+/g, "_").toLowerCase();
+  }
+  rbacReaders() {
+    const roles = new Map;
+    const readers = new Map;
+    for (const { text } of this.src.findAll(/^\s*%%rbac\b/)) {
+      const m = text.trim().match(/^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/);
+      if (!m)
+        continue;
+      const [roleExpr, entity, target] = caps(m, 3);
+      const named = roleExpr.split("|").map((part) => part.trim().replace(/^role:/i, "").trim()).filter(Boolean);
+      for (const role of named)
+        roles.set(CheckEngine.roleKey(role), role);
+      if (["read", "*", "all", "any"].includes(target.toLowerCase())) {
+        const set = readers.get(entity) ?? new Set;
+        for (const role of named)
+          set.add(CheckEngine.roleKey(role));
+        readers.set(entity, set);
+      }
+    }
+    return { roles, readers };
+  }
+  checkDashboardDirectives() {
+    const { roles } = this.rbacReaders();
+    const reportNames = new Set(this.model.reports.map((r) => r.name));
+    const seen = new Set;
+    const byTitle = new Map;
+    for (const dashboard of this.model.dashboards) {
+      const lineNo = this.src.findLine(new RegExp(`%%dashboard\\s+${dashboard.name}\\b`));
+      const at = lineNo === undefined ? {} : { line: lineNo };
+      if (seen.has(dashboard.name)) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" is declared more than once.`, {
+          ...at,
+          hint: "Dashboard names are keys, as report names are. Give the second one its own name."
+        });
+      }
+      seen.add(dashboard.name);
+      const titleKey = dashboard.title.trim().toLowerCase();
+      const sameTitle = byTitle.get(titleKey);
+      if (sameTitle !== undefined && sameTitle !== dashboard.name) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" has the same title as "${sameTitle}" ("${dashboard.title}").`, {
+          ...at,
+          hint: "The reporting platform keeps one dashboard per title, so these would collapse into one. Retitle one of them."
+        });
+      } else if (sameTitle === undefined) {
+        byTitle.set(titleKey, dashboard.name);
+      }
+      if (dashboard.reports.length === 0) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" names no reports.`, {
+          ...at,
+          hint: "Add reports: <report-name>, <report-name>, … — the %%report directives it shows."
+        });
+      }
+      for (const name of dashboard.reports) {
+        if (!reportNames.has(name)) {
+          this.error("EML297", `%%dashboard "${dashboard.name}" lists "${name}", which is not a %%report.`, {
+            ...at,
+            hint: "Correct the name, or declare the %%report before listing it."
+          });
+        }
+      }
+      if (!dashboard.role) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" names no role.`, {
+          ...at,
+          hint: "Add role: <role> — a role declared by a %%rbac line. A dashboard belongs to the role that opens it."
+        });
+      } else if (roles.size > 0 && !roles.has(CheckEngine.roleKey(dashboard.role))) {
+        this.error("EML297", `%%dashboard "${dashboard.name}" is for role "${dashboard.role}", which no %%rbac line names.`, {
+          ...at,
+          hint: `Declared roles: ${[...roles.values()].join(", ")}.`
+        });
+      }
+    }
+  }
+  checkReportingCoverage() {
+    const { roles, readers } = this.rbacReaders();
+    if (roles.size === 0)
+      return;
+    const entityOfTable = new Map;
+    for (const e of this.model.entities)
+      entityOfTable.set(CheckEngine.tableOf(e.name), e.name);
+    const canRun = (roleKey, sql) => {
+      if (roleKey === "administrator")
+        return true;
+      for (const table of sql.toLowerCase().match(/\bbus_[a-z0-9_]+/g) ?? []) {
+        const entity = entityOfTable.get(table);
+        if (!entity)
+          continue;
+        const allowed = readers.get(entity);
+        if (allowed && allowed.size > 0 && !allowed.has(roleKey))
+          return false;
+      }
+      return true;
+    };
+    for (const [roleKey, role] of roles) {
+      if (roleKey === "administrator")
+        continue;
+      const charted = this.model.reports.filter((r) => r.chart && canRun(roleKey, r.sql)).length;
+      if (charted < REPORTS_PER_ROLE) {
+        this.warn("EML298", `Role "${role}" can run ${charted} charted %%report directives; the minimum is ${REPORTS_PER_ROLE} reports and ${REPORTS_PER_ROLE} charts per role.`, {
+          hint: `Write ${REPORTS_PER_ROLE - charted} more %%report … chart: … lines over tables ${role} may read — distinct business questions across the whole domain, not variants of one query (reporting section 7.2).`
+        });
+      }
+      const dashboards = this.model.dashboards.filter((d) => d.role && CheckEngine.roleKey(d.role) === roleKey && d.reports.length >= DASHBOARD_MIN_REPORTS).length;
+      if (dashboards < DASHBOARDS_PER_ROLE) {
+        this.warn("EML299", `Role "${role}" has ${dashboards} dashboards of at least ${DASHBOARD_MIN_REPORTS} reports; the minimum is ${DASHBOARDS_PER_ROLE} per role.`, {
+          hint: `Add ${DASHBOARDS_PER_ROLE - dashboards} more %%dashboard <name> title: <T> role: ${role} reports: <report>, <report>, <report> lines — one per job ${role} does (reporting section 7.2).`
         });
       }
     }
@@ -22054,17 +25643,17 @@ class CheckEngine {
       const m = text.trim().match(/^%%hook\s+(\w+)\s+on\s+(\w+)\s*$/);
       if (!m)
         continue;
-      const [event, entity2] = caps(m, 2);
+      const [event, entity] = caps(m, 2);
       if (!this.validHookTypes.has(event)) {
         this.error("EML205", `Automation trigger uses unknown event "${event}".`, {
           line: lineNo,
           hint: `Valid events: ${[...this.validHookTypes].join(", ")}.`
         });
       }
-      if (!entityNames.has(entity2)) {
-        this.warn("EML206", `Automation trigger references undeclared entity "${entity2}".`, {
+      if (!entityNames.has(entity)) {
+        this.warn("EML206", `Automation trigger references undeclared entity "${entity}".`, {
           line: lineNo,
-          hint: `Declare "${entity2}" in the erDiagram section.`
+          hint: `Declare "${entity}" in the erDiagram section.`
         });
       }
     }
@@ -22096,6 +25685,41 @@ class CheckEngine {
           hint: `Declare "${entityName}" in the erDiagram section.`
         });
       }
+      this.checkWorkflowStatus(text.trim(), lineNo, name, entityName, kind);
+    }
+  }
+  checkWorkflowStatus(text, lineNo, name, entityName, kind) {
+    const raw = text.match(/\bstatus:\s*(\S+)/)?.[1];
+    if (raw === undefined)
+      return;
+    const status = stateToken(raw);
+    const machines = this.model.workflows.filter((wf) => wf.entity === entityName && wf.kind === "state");
+    const edges = machines.flatMap((wf) => wf.transitions);
+    const states = new Set(edges.flatMap((t) => [t.from, t.to]).filter((state) => state !== "[*]"));
+    const known = [...states].map((state) => [stateToken(state), state]);
+    if (machines.length === 0 || !known.some(([token]) => token === status)) {
+      this.error("EML243", machines.length === 0 ? `%%workflow "${name}" is bound to status "${raw}", but ${entityName} has no status machine.` : `%%workflow "${name}" is bound to status "${raw}", which ${entityName}'s status machine does not draw.`, {
+        line: lineNo,
+        hint: machines.length === 0 ? `An entity with no status machine has Draft and Final only, and its workflows already run on the way to Final. Remove "status:", or draw a kind: state workflow for ${entityName}.` : `States drawn: ${known.map(([, state]) => state).join(", ")}.`,
+        context: text
+      });
+      return;
+    }
+    const updateStarted = kind === "hook" ? this.model.workflows.filter((wf) => wf.name === name && wf.kind === "hook").every((wf) => wf.hooks.every((hook) => /update/i.test(hook.type))) : kind === "saga" && /\boperation:\s*UPDATE\b/i.test(text) && !/\btrigger:\s*rule\b/.test(text);
+    if (!updateStarted) {
+      this.error("EML244", `%%workflow "${name}" is bound to status "${raw}" but is not started by an update.`, {
+        line: lineNo,
+        hint: kind === "saga" ? "A status-bound saga needs  trigger: automatic operation: UPDATE  — a move is an update." : "A status-bound hook workflow may carry beforeUpdate and afterUpdate hooks only.",
+        context: text
+      });
+    }
+    const entered = edges.some((t) => t.from !== "[*]" && stateToken(t.to) === status);
+    if (!entered) {
+      this.warn("EML245", `%%workflow "${name}" is bound to status "${raw}", which no button moves a record into.`, {
+        line: lineNo,
+        hint: `Only an arrow  <state> --> ${raw}  makes a move; the first state is entered by creating the record.`,
+        context: text
+      });
     }
   }
   checkActionDirectives() {
@@ -22147,9 +25771,9 @@ class CheckEngine {
           ...new Set((condition.match(/\b[a-z][A-Za-z0-9]*\b/g) ?? []).filter((identifier) => /[a-z][A-Z]/.test(identifier)))
         ];
         if (camel.length > 0) {
-          const snake2 = (identifier) => identifier.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+          const snake = (identifier) => identifier.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
           const tested = camel.map((c) => `"${c}"`).join(", ");
-          const meant = camel.map(snake2).join(", ");
+          const meant = camel.map(snake).join(", ");
           this.error("EML287", `%%action "${name}" tests ${tested}, which no column is named.`, {
             line: lineNo,
             hint: `A rule reads the record being written, and every column is snake_case. ` + `Write ${meant}. A camelCase name is undefined at evaluation: the rule ` + `never fires, or — against == null — fires on every write and the entity ` + `cannot be created.`
@@ -22167,11 +25791,14 @@ class CheckEngine {
       }
     }
     const triggered = new Set(this.src.findAll(/^\s*%%action\b/).map(({ text }) => text.match(/\bworkflow:\s*(\S+)/)?.[1]).filter((name) => !!name));
+    const drawnRules = this.src.findAll(/^\s*%%(?:jdm-graph|decision-table)\s/).map(({ text }) => text);
     for (const { lineNo, text } of this.src.findAll(/^%%workflow\b/)) {
       const m = text.match(/^%%workflow\s+(\w+)[^\n]*kind:\s*saga/);
       if (!m || !/\btrigger:\s*rule\b/.test(text))
         continue;
       if (triggered.has(m[1]))
+        continue;
+      if (drawnRules.some((line) => new RegExp(`\\b${m[1]}\\b`).test(line)))
         continue;
       this.warn("EML286", `Saga "${m[1]}" is rule-triggered but no %%action names it.`, {
         line: lineNo,
@@ -22183,7 +25810,7 @@ class CheckEngine {
     const stepTypes = new Map(stepNodeTypes().map((step) => [step.name, step]));
     const entitySpellings = this.entitySpellings();
     const ruleNames = new Set([
-      ...this.model.rules.map((rule2) => rule2.name),
+      ...this.model.rules.map((rule) => rule.name),
       ...this.src.findAll(/^%%rule\b/).map(({ text }) => text.match(/^%%rule\s+(\w+)/)?.[1]).filter((name) => !!name)
     ]);
     for (const section of this.sagaSections()) {
@@ -22216,6 +25843,10 @@ class CheckEngine {
           });
         }
         const has = (key) => (props[key] ?? "").trim().length > 0;
+        if (typeName === "UpdateEntity" && has("field") && has("value")) {
+          const target = (props.entity ?? section.entity).trim();
+          this.sagaWrites.add(`${target}.${props.field.trim()}=${props.value.trim()}`);
+        }
         const missing = [];
         for (const key of contract.required ?? []) {
           if (!has(key))
@@ -22280,6 +25911,31 @@ class CheckEngine {
             });
           }
         }
+        if (typeName === "CreateEntity" && has("fields") && entityProp) {
+          let named;
+          try {
+            const parsed = JSON.parse(props.fields);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              named = new Set(Object.keys(parsed).map((key) => key.trim()));
+            }
+          } catch {
+            named = undefined;
+          }
+          const wanted = entityProp.toLowerCase().replace(/^bus_/, "");
+          const target = this.model.entities.find((entity) => {
+            const snake = entity.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase();
+            return entity.name.toLowerCase() === wanted || snake === wanted;
+          });
+          if (named && target) {
+            const missing = target.attributes.filter((attribute) => attribute.required && attribute.isForeignKey && !attribute.isPrimaryKey && !named.has(attribute.name)).map((attribute) => attribute.name);
+            if (missing.length > 0) {
+              this.warn("EML514", `%%step ${nodeId} (CreateEntity ${target.name}) leaves required reference${missing.length > 1 ? "s" : ""} ${missing.join(", ")} unset, so the insert is refused.`, {
+                line: lineNo,
+                hint: `Add ${missing.map((name) => `"${name}"`).join(", ")} to fields (a column of the triggering record, or a variable an earlier CreateEntity published with as:), or mark the column OPTIONAL in the erDiagram.`
+              });
+            }
+          }
+        }
         if (typeName === "Decision" && has("decisionTable")) {
           try {
             const table = JSON.parse(props.decisionTable);
@@ -22320,6 +25976,18 @@ class CheckEngine {
             hint: "Set targetSource to a context key holding the row id, or targetField to a foreign key column. The executor refuses this rather than guessing a row."
           });
         }
+        if ((typeName === "UpdateEntity" || typeName === "DeleteEntity") && entityProp && !has("targetSource") && has("targetField") && props.targetField.trim() !== "id") {
+          const wanted = entityProp.toLowerCase().replace(/^bus_/, "");
+          const target = this.model.entities.find((candidate) => candidate.name.toLowerCase() === wanted || candidate.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() === wanted);
+          const column = props.targetField.trim();
+          if (target && !target.attributes.some((attribute) => attribute.name === column)) {
+            const ownColumn = trigger?.attributes.some((attribute) => attribute.name === column);
+            this.error("EML275", `%%step ${nodeId} (${typeName}) matches ${target.name}.${column}, which ${target.name} does not declare.`, {
+              line: lineNo,
+              hint: ownColumn ? `${column} is a column of the record that started the workflow. To reach the ${target.name} it names, write  targetSource: ${column}  (and drop targetField, which defaults to id).` : `targetField is a column of ${target.name} matched against the triggering record's id — a foreign key on ${target.name} pointing back at it. To reach a ${target.name} the triggering record names, use targetSource with that column.`
+            });
+          }
+        }
         const reference = props.targetSource?.trim();
         if (reference && !published.has(reference)) {
           this.warn("EML264", `%%step ${nodeId} reads "${reference}", which no earlier step publishes.`, {
@@ -22341,7 +26009,7 @@ class CheckEngine {
     }
   }
   sagaStepLines = new Set;
-  stepEntries(steps2) {
+  stepEntries(steps) {
     const order = [];
     const auto = new Map;
     const entryFor = (nodeId, lineNo, text) => {
@@ -22360,22 +26028,22 @@ class CheckEngine {
       order.push(created);
       return created;
     };
-    for (const { lineNo, text } of steps2) {
+    for (const { lineNo, text } of steps) {
       const line = text.trim();
       const typeLine = line.match(AUTO_TYPE_DIRECTIVE2);
       if (typeLine) {
-        const [, nodeId2 = "", typeName2 = "", rest2 = ""] = typeLine;
-        const entry = entryFor(nodeId2, lineNo, text);
-        entry.typeName = typeName2;
+        const [, nodeId = "", typeName = "", rest = ""] = typeLine;
+        const entry = entryFor(nodeId, lineNo, text);
+        entry.typeName = typeName;
         entry.lineNo = lineNo;
         entry.text = text;
-        Object.assign(entry.props, this.parseStepProps(rest2));
+        Object.assign(entry.props, this.parseStepProps(rest));
         continue;
       }
       const propLine = line.match(AUTO_PROP_DIRECTIVE2);
       if (propLine && propLine[2] !== "type") {
-        const [, nodeId2 = "", key = "", value = ""] = propLine;
-        entryFor(nodeId2, lineNo, text).props[key] = value.trim();
+        const [, nodeId = "", key = "", value = ""] = propLine;
+        entryFor(nodeId, lineNo, text).props[key] = value.trim();
         continue;
       }
       const match = line.match(/^%%step\s+([A-Za-z_]\w*)\s+([A-Za-z]\w*)\s*(.*)$/);
@@ -22469,11 +26137,11 @@ class CheckEngine {
   }
   entitySpellings() {
     const spellings = new Set;
-    for (const entity2 of this.model.entities) {
-      const snake2 = entity2.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase();
-      const bare = snake2.replace(/^bus_/, "");
-      spellings.add(entity2.name.toLowerCase());
-      spellings.add(snake2);
+    for (const entity of this.model.entities) {
+      const snake = entity.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase();
+      const bare = snake.replace(/^bus_/, "");
+      spellings.add(entity.name.toLowerCase());
+      spellings.add(snake);
       spellings.add(bare);
       spellings.add(`bus_${bare}`);
     }
@@ -22550,69 +26218,69 @@ class CheckEngine {
   }
   checkRules() {
     const entityNames = new Set(this.model.entities.map((e) => e.name));
-    for (const rule2 of this.model.rules) {
-      const inputs = rule2.nodes.filter((n) => n.jdmType === "inputNode");
+    for (const rule of this.model.rules) {
+      const inputs = rule.nodes.filter((n) => n.jdmType === "inputNode");
       if (inputs.length === 0) {
-        this.error("EML300", `Rule "${rule2.name}" has no start (input) node.`, {
+        this.error("EML300", `Rule "${rule.name}" has no start (input) node.`, {
           hint: "Add a stadium node as the start:  A([Start: description]) --> ...  as the first step."
         });
       } else if (inputs.length > 1) {
-        this.warn("EML301", `Rule "${rule2.name}" has ${inputs.length} input nodes; expected 1.`, {
+        this.warn("EML301", `Rule "${rule.name}" has ${inputs.length} input nodes; expected 1.`, {
           hint: "A well-formed rule has exactly one start stadium. Merge extra start nodes."
         });
       }
-      const outputs = rule2.nodes.filter((n) => n.jdmType === "outputNode");
+      const outputs = rule.nodes.filter((n) => n.jdmType === "outputNode");
       if (outputs.length === 0) {
-        this.error("EML302", `Rule "${rule2.name}" has no end (output) node.`, {
+        this.error("EML302", `Rule "${rule.name}" has no end (output) node.`, {
           hint: "Add a terminal stadium node with only incoming edges:  ... --> Z([End: description])"
         });
       }
       const edgeSources = new Map;
-      for (const e of rule2.edges) {
+      for (const e of rule.edges) {
         edgeSources.set(e.source, (edgeSources.get(e.source) ?? 0) + 1);
       }
-      for (const node of rule2.nodes) {
+      for (const node of rule.nodes) {
         if (node.shape === "diamond") {
           const outCount = edgeSources.get(node.id) ?? 0;
           if (outCount < 2) {
-            this.warn("EML303", `Rule "${rule2.name}": decision node "${node.id}" (${node.label}) has only ${outCount} outgoing edge(s).`, {
+            this.warn("EML303", `Rule "${rule.name}": decision node "${node.id}" (${node.label}) has only ${outCount} outgoing edge(s).`, {
               hint: "Decision (diamond) nodes should branch at least Yes/No — add a second outgoing edge."
             });
           }
         }
       }
-      for (const edge of rule2.edges) {
-        const srcNode = rule2.nodes.find((n) => n.id === edge.source);
+      for (const edge of rule.edges) {
+        const srcNode = rule.nodes.find((n) => n.id === edge.source);
         if (srcNode?.shape === "diamond" && !edge.label) {
-          this.warn("EML304", `Rule "${rule2.name}": unlabeled edge from decision node "${srcNode.id}".`, {
+          this.warn("EML304", `Rule "${rule.name}": unlabeled edge from decision node "${srcNode.id}".`, {
             hint: `Add a condition label:  ${edge.source} -->|Yes| ${edge.target}  or  ${edge.source} -->|condition| ${edge.target}`
           });
         }
       }
-      if (rule2.nodes.length > 0 && rule2.edges.length > 0) {
-        const reachable = this.reachableNodes(rule2);
-        for (const node of rule2.nodes) {
+      if (rule.nodes.length > 0 && rule.edges.length > 0) {
+        const reachable = this.reachableNodes(rule);
+        for (const node of rule.nodes) {
           if (!reachable.has(node.id) && node.jdmType !== "inputNode") {
-            this.warn("EML305", `Rule "${rule2.name}": node "${node.id}" (${node.label}) is unreachable from the start node.`, {
+            this.warn("EML305", `Rule "${rule.name}": node "${node.id}" (${node.label}) is unreachable from the start node.`, {
               hint: "Add an edge from the start or another reachable node to this node."
             });
           }
         }
       }
-      if (rule2.nodes.length === 0) {
-        this.warn("EML306", `Rule "${rule2.name}" has no nodes.`, {
+      if (rule.nodes.length === 0) {
+        this.warn("EML306", `Rule "${rule.name}" has no nodes.`, {
           hint: "Add flowchart nodes using the shapes documented in spec/02-business-rules.md."
         });
       }
-      if (rule2.entity && !entityNames.has(rule2.entity)) {
-        this.warn("EML307", `Rule "${rule2.name}" bound to undeclared entity "${rule2.entity}".`, {
-          hint: `Declare "${rule2.entity}" in the erDiagram section or check the %%rule directive.`
+      if (rule.entity && !entityNames.has(rule.entity)) {
+        this.warn("EML307", `Rule "${rule.name}" bound to undeclared entity "${rule.entity}".`, {
+          hint: `Declare "${rule.entity}" in the erDiagram section or check the %%rule directive.`
         });
       }
     }
   }
-  reachableNodes(rule2) {
-    const startNode = rule2.nodes.find((n) => n.jdmType === "inputNode");
+  reachableNodes(rule) {
+    const startNode = rule.nodes.find((n) => n.jdmType === "inputNode");
     if (!startNode)
       return new Set;
     const visited = new Set;
@@ -22622,7 +26290,7 @@ class CheckEngine {
       if (visited.has(id))
         continue;
       visited.add(id);
-      for (const e of rule2.edges) {
+      for (const e of rule.edges) {
         if (e.source === id && !visited.has(e.target))
           queue.push(e.target);
       }
@@ -22789,29 +26457,86 @@ class CheckEngine {
         }
       }
     }
-    for (const entity2 of this.model.entities) {
-      for (const attr of entity2.attributes) {
+    const stateFields = this.stateFields();
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity)
+        continue;
+      for (const state of new Set([...wf.states, ...wf.transitions.flatMap((t) => [t.from, t.to])])) {
+        if (!RESERVED_STATE_NAMES.includes(state))
+          continue;
+        this.error("EML509", `State workflow "${wf.name}" draws a state named "${state}", which the record lifecycle reserves.`, {
+          line: this.src.findLine(new RegExp(`^\\s*(?:\\w+\\s*-->\\s*)?${state}\\b`)),
+          hint: `Rename it (e.g. ${state === "final" ? "completed" : "failed"}). Every state that ends the diagram (x --> [*]) is already Final, and Error is where a record whose workflows failed goes.`
+        });
+      }
+    }
+    for (const wf of this.model.workflows) {
+      if (wf.kind !== "state" || !wf.entity)
+        continue;
+      const initial = new Set(wf.transitions.filter((t) => t.from === "[*]").map((t) => t.to));
+      for (const state of initial) {
+        if (!wf.transitions.some((t) => t.from === state && t.to === "[*]"))
+          continue;
+        this.warn("EML513", `State workflow "${wf.name}" ends the diagram at its first state "${state}" (${state} --> [*]): every ${wf.entity} is Final and locked as soon as it is saved.`, {
+          line: this.src.findLine(new RegExp(`^\\s*${state}\\s*-->\\s*\\[\\*\\]`)),
+          hint: `Remove  ${state} --> [*] . A start state a record may leave is not an end state; if a record can be discarded from it, say so with a move to a state that ends the diagram (e.g. ${state} --> discarded).`
+        });
+      }
+    }
+    for (const section of findRetiredMoves(this.src.text(), (entity) => stateFields.get(entity)).sections) {
+      this.warn("EML512", section.kind === "saga" ? `Saga "${section.name}" only moves ${section.entity} to a state; an action button makes that move now.` : section.kind === "action" ? `Action "${section.name}" only starts a move saga for ${section.entity}; an action button makes that move now.` : `Rule "${section.name}" only starts move sagas for ${section.entity}; an action button makes those moves now.`, {
+        line: section.line,
+        hint: "Remove it — the fixer does. The <state>_at columns stay: the application stamps them when the record reaches the state."
+      });
+    }
+    for (const write of this.sagaWrites) {
+      const match = write.match(/^(\w+)\.(\w+)=(.+)$/);
+      if (!match)
+        continue;
+      const [, entity = "", field = "", value = ""] = match;
+      if (stateFields.get(entity) !== field)
+        continue;
+      const drawn = new Set;
+      for (const wf of this.model.workflows) {
+        if (wf.kind !== "state" || wf.entity !== entity)
+          continue;
+        for (const state of wf.states)
+          drawn.add(state);
+        for (const t of wf.transitions) {
+          drawn.add(t.from);
+          drawn.add(t.to);
+        }
+      }
+      if (!drawn.has(value)) {
+        this.warn("EML508", `A saga writes ${entity}.${field} = ${value}, a state ${entity}'s state machine does not draw.`, {
+          line: this.src.findLine(new RegExp(`UpdateEntity\\b.*\\bfield:\\s*${field}\\b.*\\bvalue:\\s*${value}\\b`)),
+          hint: `Draw ${value} in ${entity}'s stateDiagram-v2 with an edge into it, or write one of its states.`
+        });
+      }
+    }
+    for (const entity of this.model.entities) {
+      for (const attr of entity.attributes) {
         if (attr.enumRef && !enumNames.has(attr.enumRef)) {
-          this.warn("EML501", `Attribute "${entity2.name}.${attr.name}" has enum reference "${attr.enumRef}" but no matching %%enum is declared.`, {
+          this.warn("EML501", `Attribute "${entity.name}.${attr.name}" has enum reference "${attr.enumRef}" but no matching %%enum is declared.`, {
             hint: `Add  %%enum ${attr.enumRef}: value1, value2  to the document.`
           });
         }
       }
     }
-    const declaredNames2 = new Set(this.model.entities.map((candidate) => candidate.name));
-    for (const entity2 of this.model.entities) {
-      const claimed = new Set(entity2.attributes.filter((candidate) => candidate.isForeignKey && candidate.name.endsWith("_id")).map((candidate) => this.fkToEntityName(candidate.name)).filter((name) => declaredNames2.has(name)));
-      const spareParents = this.model.relationships.filter((r) => r.target === entity2.name && r.source !== entity2.name).map((r) => r.source).filter((name) => declaredNames2.has(name) && !claimed.has(name));
-      for (const attr of entity2.attributes) {
+    const declaredNames = new Set(this.model.entities.map((candidate) => candidate.name));
+    for (const entity of this.model.entities) {
+      const claimed = new Set(entity.attributes.filter((candidate) => candidate.isForeignKey && candidate.name.endsWith("_id")).map((candidate) => this.fkToEntityName(candidate.name)).filter((name) => declaredNames.has(name)));
+      const spareParents = this.model.relationships.filter((r) => r.target === entity.name && r.source !== entity.name).map((r) => r.source).filter((name) => declaredNames.has(name) && !claimed.has(name));
+      for (const attr of entity.attributes) {
         if (attr.isForeignKey && attr.name.endsWith("_id")) {
           const parentEntityName = this.fkToEntityName(attr.name);
-          const hasRelationship = this.model.relationships.some((r) => (r.source === entity2.name || r.target === entity2.name) && (r.source === parentEntityName || r.target === parentEntityName));
-          const resolvedByRelationship = !declaredNames2.has(parentEntityName) && spareParents.length > 0;
+          const hasRelationship = this.model.relationships.some((r) => (r.source === entity.name || r.target === entity.name) && (r.source === parentEntityName || r.target === parentEntityName));
+          const resolvedByRelationship = !declaredNames.has(parentEntityName) && spareParents.length > 0;
           if (resolvedByRelationship)
             spareParents.shift();
           if (!hasRelationship && !resolvedByRelationship) {
-            this.info("EML502", `FK attribute "${entity2.name}.${attr.name}" has no relationship to "${parentEntityName}".`, {
-              hint: `Add:  ${parentEntityName} ||--o{ ${entity2.name} : "..."  (or reverse for manyToOne).`
+            this.info("EML502", `FK attribute "${entity.name}.${attr.name}" has no relationship to "${parentEntityName}".`, {
+              hint: `Add:  ${parentEntityName} ||--o{ ${entity.name} : "..."  (or reverse for manyToOne).`
             });
           }
         }
@@ -22832,13 +26557,13 @@ class CheckEngine {
       }
     }
     const ruleNames = new Set;
-    for (const rule2 of this.model.rules) {
-      if (ruleNames.has(rule2.name)) {
-        this.warn("EML504", `Duplicate rule name "${rule2.name}".`, {
+    for (const rule of this.model.rules) {
+      if (ruleNames.has(rule.name)) {
+        this.warn("EML504", `Duplicate rule name "${rule.name}".`, {
           hint: "Give each business rule a unique name in its %%rule directive."
         });
       }
-      ruleNames.add(rule2.name);
+      ruleNames.add(rule.name);
     }
     const workflowNames = new Set;
     for (const wf of this.model.workflows) {
@@ -22849,10 +26574,10 @@ class CheckEngine {
       }
       workflowNames.add(wf.name);
     }
-    for (const rule2 of this.model.rules) {
-      if (!rule2.entity) {
-        this.info("EML506", `Rule "${rule2.name}" has no entity binding.`, {
-          hint: `Add  %%rule ${rule2.name} on <Entity> event: <hookType>  to bind this rule to an entity lifecycle.`
+    for (const rule of this.model.rules) {
+      if (!rule.entity) {
+        this.info("EML506", `Rule "${rule.name}" has no entity binding.`, {
+          hint: `Add  %%rule ${rule.name} on <Entity> event: <hookType>  to bind this rule to an entity lifecycle.`
         });
       }
     }
@@ -22869,7 +26594,12 @@ var AUTO_FIXABLE_CODES = new Set([
   "EML114",
   "EML112",
   "EML103",
-  "EML287"
+  "EML287",
+  "EML172",
+  "EML174",
+  "EML175",
+  "EML178",
+  "EML512"
 ]);
 if (false) {}
 
@@ -22915,10 +26645,142 @@ function applyFix(lines, issue) {
       return fixMissingTerminalTransition(lines, issue, base);
     case "EML287":
       return fixCamelCaseRuleCondition(lines, issue, base);
+    case "EML172":
+      return fixUnplacedColumns(lines, issue, base);
+    case "EML174":
+      return fixWideRow(lines, issue, base);
+    case "EML175":
+      return fixDoublePlacement(lines, issue, base);
+    case "EML178":
+      return fixPlacedStateField(lines, issue, base);
+    case "EML512":
+      return fixRetiredMove(lines, issue, base);
     default:
       base.description = `No auto-fix strategy for ${issue.code}.`;
       return base;
   }
+}
+function rowsSpan(text) {
+  if (!/^\s*%%section\b/i.test(text))
+    return;
+  const open = text.match(/(^|;)\s*rows\s*:/i);
+  if (open?.index === undefined)
+    return;
+  const start = open.index + open[0].length;
+  const rest = text.slice(start);
+  const close = rest.match(/;\s*(entity|name|help|collapsed)\s*:/i);
+  return { start, end: close?.index === undefined ? text.length : start + close.index };
+}
+function rewriteRows(lines, issue, base, change, description) {
+  const index = (issue.line ?? 0) - 1;
+  const before = lines[index];
+  const span = before === undefined ? undefined : rowsSpan(before);
+  if (before === undefined || !span) {
+    base.description = `Line ${issue.line ?? "?"} is not a %%section with rows:; left alone.`;
+    return base;
+  }
+  const rows = change(parseRows(before.slice(span.start, span.end)));
+  if (!rows) {
+    base.description = `Nothing to change on line ${issue.line}.`;
+    return base;
+  }
+  const after = `${before.slice(0, span.start)} ${formatRows(rows)}${before.slice(span.end)}`;
+  lines[index] = after;
+  base.applied = true;
+  base.description = description;
+  base.changes = [{ lineNo: index + 1, before, after, action: "replace" }];
+  return base;
+}
+function fixUnplacedColumns(lines, issue, base) {
+  const match = issue.message.match(/^(\w+) leaves \d+ columns? out of every %%section: (.+)\.$/);
+  if (!match?.[2]) {
+    base.description = "Could not read the unplaced columns from the issue message.";
+    return base;
+  }
+  const columns = match[2].split(",").map((column) => column.trim()).filter(Boolean);
+  const added = [];
+  for (let i = 0;i < columns.length; i += 2)
+    added.push(columns.slice(i, i + 2));
+  return rewriteRows(lines, issue, base, (rows) => [...rows, ...added], `Placed ${columns.join(", ")} in ${match[1]}'s last section, two per row — move them to where they belong.`);
+}
+function fixWideRow(lines, issue, base) {
+  return rewriteRows(lines, issue, base, (rows) => {
+    if (!rows.some((row) => row.length > 2))
+      return;
+    return rows.flatMap((row) => {
+      const pairs = [];
+      for (let i = 0;i < row.length; i += 2)
+        pairs.push(row.slice(i, i + 2));
+      return pairs;
+    });
+  }, "Split a row of more than two columns into rows of two.");
+}
+function fixDoublePlacement(lines, issue, base) {
+  const match = issue.message.match(/^"\w+\.(\w+)" is placed in two %%section rows\.$/);
+  const column = match?.[1];
+  if (!column) {
+    base.description = "Could not read the column from the issue message.";
+    return base;
+  }
+  return rewriteRows(lines, issue, base, (rows) => {
+    let rowIndex = -1;
+    let colIndex = -1;
+    rows.forEach((row, r) => row.forEach((name, c) => {
+      if (name === column) {
+        rowIndex = r;
+        colIndex = c;
+      }
+    }));
+    if (rowIndex < 0)
+      return;
+    const next = rows.map((row) => [...row]);
+    next[rowIndex]?.splice(colIndex, 1);
+    return next.filter((row) => row.length > 0);
+  }, `Removed the second placement of "${column}".`);
+}
+function fixPlacedStateField(lines, issue, base) {
+  const match = issue.message.match(/^%%section places "\w+\.(\w+)", the state field/);
+  const column = match?.[1];
+  if (!column) {
+    base.description = "Could not read the state field from the issue message.";
+    return base;
+  }
+  const index = (issue.line ?? 0) - 1;
+  const before = lines[index];
+  const span = before === undefined ? undefined : rowsSpan(before);
+  if (before === undefined || !span) {
+    base.description = `Line ${issue.line ?? "?"} is not a %%section with rows:; left alone.`;
+    return base;
+  }
+  const rows = parseRows(before.slice(span.start, span.end)).map((row) => row.filter((name) => name !== column)).filter((row) => row.length > 0);
+  if (rows.length === 0) {
+    lines.splice(index, 1);
+    base.applied = true;
+    base.description = `Removed the section that placed only "${column}"; the state is shown in the form's header.`;
+    base.changes = [{ lineNo: index + 1, before, after: "", action: "delete" }];
+    return base;
+  }
+  return rewriteRows(lines, issue, base, () => rows, `Removed "${column}" from the section; the state is shown read-only in the form's header.`);
+}
+function fixRetiredMove(lines, issue, base) {
+  const index = (issue.line ?? 0) - 1;
+  const span = sectionSpan(lines, index);
+  if (!span) {
+    base.description = `Line ${issue.line ?? "?"} is not a move rule or saga; left alone.`;
+    return base;
+  }
+  const name = lines[index].trim().split(/\s+/)[1];
+  const removed = lines.splice(span.start, span.end - span.start);
+  const rewritten = rewriteStockHelp(lines);
+  base.applied = true;
+  base.description = `Removed ${name} (${removed.length} lines); an action button makes this move now.` + (rewritten ? ` Rewrote ${rewritten} help line${rewritten === 1 ? "" : "s"} on the <state>_at columns.` : "");
+  base.changes = removed.map((before, offset) => ({
+    lineNo: span.start + offset + 1,
+    before,
+    after: "",
+    action: "delete"
+  }));
+  return base;
 }
 function fixMissingMetaName(lines, _issue, base) {
   let name = "EML Model";
@@ -22972,9 +26834,9 @@ function fixCamelCaseRuleCondition(lines, issue, base) {
       return token;
     if (!/[a-z][A-Z]/.test(token))
       return token;
-    const snake2 = token.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-    renamed.push(`${token} → ${snake2}`);
-    return snake2;
+    const snake = token.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+    renamed.push(`${token} → ${snake}`);
+    return snake;
   });
   if (renamed.length === 0) {
     base.description = "No camelCase identifier found in the condition.";
@@ -23310,8 +27172,8 @@ async function generateFullStack(options) {
   report("check", "Checking the model");
   const review = reviewModel(options.source);
   if (!review.ok) {
-    const { ModelCheckError: ModelCheckError2 } = await Promise.resolve().then(() => (init_model_check_error(), exports_model_check_error));
-    throw new ModelCheckError2(review);
+    await Promise.resolve().then(() => init_model_check_error());
+    throw new ModelCheckError(review);
   }
   report("parse", "Reading the model");
   const parsed = parseModel(review.source);
@@ -23345,22 +27207,22 @@ async function generateFullStack(options) {
       log: (message) => report("overlay", message)
     });
   }
-  const files2 = snapshot(OUTPUT_ROOT);
-  report("done", `${Object.keys(files2).length} files`);
+  const files = snapshot(OUTPUT_ROOT);
+  report("done", `${Object.keys(files).length} files`);
   return {
-    files: files2,
+    files,
     review,
     overlay,
     summary: {
       project: name,
-      entities: parsed.entities.map((entity2) => entity2.name),
-      rules: parsed.rules.map((rule2) => rule2.name),
+      entities: parsed.entities.map((entity) => entity.name),
+      rules: parsed.rules.map((rule) => rule.name),
       workflows: [
         ...parsed.workflows.map((workflow) => workflow.name),
         ...parsed.sagas.map((saga) => saga.name)
       ],
-      fileCount: Object.keys(files2).length,
-      bytes: Object.values(files2).reduce((total, content) => total + content.length, 0)
+      fileCount: Object.keys(files).length,
+      bytes: Object.values(files).reduce((total, content) => total + content.length, 0)
     }
   };
 }

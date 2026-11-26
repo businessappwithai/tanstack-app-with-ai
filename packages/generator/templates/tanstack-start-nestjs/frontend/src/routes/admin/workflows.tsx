@@ -175,7 +175,7 @@ function AdminWorkflowsPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-8 py-10">
+      <div className="max-w-7xl mx-auto px-8 py-10">
         {/* Stats */}
         <section className="mb-10">
           <div className="grid grid-cols-5 gap-0 border border-foreground">
@@ -375,7 +375,7 @@ function AdminWorkflowsPage() {
             })}
           </div>
         )}
-      </main>
+      </div>
 
       <footer className="border-t-2 border-foreground mt-16">
         <div className="max-w-7xl mx-auto px-8 py-6">

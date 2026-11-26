@@ -31,7 +31,7 @@ export const Route = createFileRoute("/api/projects/$id/workflows/")({
         if (access.response) return access.response;
 
         try {
-          const { workflowDb } = await import("@appwithai/core/services");
+          const { changeWorkflow } = await import("@/lib/server/project-repository");
           const id = params.id as string;
           const body = await request.json();
           const { name, serviceName, mermaidCode, description, extensionPoints } = body;
@@ -48,8 +48,7 @@ export const Route = createFileRoute("/api/projects/$id/workflows/")({
             );
           }
 
-          const workflow = await workflowDb.create({
-            project_id: id,
+          const workflow = await changeWorkflow(id, access.user.id, `wf_${crypto.randomUUID()}`, {
             name,
             service_name: serviceName,
             mermaid_code: mermaidCode,

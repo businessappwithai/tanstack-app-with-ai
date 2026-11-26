@@ -25,7 +25,7 @@ export const Route = createFileRoute("/api/rules/validate")({
           // A decision table is a complete rule on its own — the node walk below
           // only applies to the older decision-graph shape.
           const { isDecisionTable, validateStoredRuleContent } = await import(
-            "@/lib/automation/rule-content"
+            "@appwithai/editors/lib/automation/rule-content"
           );
           if (isDecisionTable(jdm)) {
             const problems = validateStoredRuleContent(jdm);

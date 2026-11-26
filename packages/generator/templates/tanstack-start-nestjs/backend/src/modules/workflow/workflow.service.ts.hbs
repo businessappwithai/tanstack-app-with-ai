@@ -14,16 +14,38 @@
  * Project: {{project.name}}
  */
 
-import { Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+
+import { getLogger } from '../../common/logging/logger.service';
 import { Kysely, sql } from 'kysely';
 import { InjectDatabase } from '../../database/database.service.decorator';
 import { RulesEngine } from '../rules/rules-engine.service';
+import { automationGuards } from '../workflow-definitions/automation-compiler';
+import { stateFieldOf } from '../../common/state-fields';
+import { lifecycleOf, phaseOf } from '../../common/lifecycle';
 
 export interface TriggerWorkflowDto {
   entityName: string;
   entityId: string;
   operation: 'create' | 'update' | 'delete';
   userId: string;
+}
+
+/**
+ * A workflow that failed while its caller owns the transaction. The caller rolls
+ * back, so the run row it wrote dies with the rollback; carrying the workflow and
+ * the reason lets the caller put the failure back afterwards (recordFailedRun),
+ * and show a person which workflow it was.
+ */
+export class WorkflowRunError extends Error {
+  constructor(
+    readonly workflow: string,
+    readonly reason: string,
+    readonly operation: string,
+  ) {
+    super(`Workflow "${workflow}" failed: ${reason}`);
+    this.name = 'WorkflowRunError';
+  }
 }
 
 export interface WorkflowRunOptions {
@@ -109,7 +131,23 @@ interface BpmnTaskProps {
 
 @Injectable()
 export class WorkflowService {
-  private readonly logger = new Logger(WorkflowService.name);
+  private readonly log = getLogger('workflow');
+
+  /** A step that did nothing, and why. The reason is the sentence a person reads in the run. */
+  private skipped(type: string, reason: string): void {
+    this.log.event('workflow.step.skipped', { workflow: null, step: null, type, reason });
+  }
+
+  /** A step that did something. Debug: the run row already records what it produced. */
+  private performed(type: string, detail: string): void {
+    this.log.event('workflow.step.completed', {
+      workflow: null,
+      step: null,
+      type,
+      durationMs: null,
+      detail,
+    });
+  }
 
   constructor(
     @InjectDatabase() private readonly db: Kysely<any>,
@@ -127,14 +165,21 @@ export class WorkflowService {
   async runLocalWorkflows(
     entityName: string,
     entityId: string,
-    operation: 'create' | 'update' | 'delete',
+    /**
+     * A write, or a move: `transition:<event>` runs the workflows bound to one
+     * button, `enter:<state>` those bound to reaching a state. A move does not
+     * run the `ALL` ones — those belong to writes.
+     */
+    operation: 'create' | 'update' | 'delete' | `transition:${string}` | `enter:${string}`,
     entityData: Record<string, unknown>,
     decisionVars: Record<string, unknown> = {},
     options: WorkflowRunOptions = {},
   ): Promise<void> {
     const db = options.db ?? this.db;
     const normalized = entityName.toLowerCase().replace(/^bus_/, '');
-    const candidates = [normalized, `bus_${normalized}`];
+    // See EntityPromotionService.findWorkflowNames: `SupportCase` and
+    // `bus_support_case` are the same record type.
+    const flat = normalized.replace(/_/g, '');
 
     let definitions: any[];
     try {
@@ -142,13 +187,14 @@ export class WorkflowService {
         .selectFrom('sys_workflow_definitions')
         .selectAll()
         .where((eb) =>
-          eb.or(candidates.map((c) => eb(sql<string>`lower(entity_name)`, '=', c))),
+          eb(sql<string>`replace(lower(entity_name), '_', '')`, 'in', [flat, `bus${flat}`]),
         )
         .where((eb) =>
-          eb.or([
-            eb('operation', '=', operation.toUpperCase()),
-            eb('operation', '=', 'ALL'),
-          ]),
+          eb.or(
+            operation.includes(':')
+              ? [eb('operation', '=', operation.toUpperCase())]
+              : [eb('operation', '=', operation.toUpperCase()), eb('operation', '=', 'ALL')],
+          ),
         )
         .where('is_active', '=', true)
         // Rule-triggered definitions are reached only through a rule's
@@ -156,13 +202,19 @@ export class WorkflowService {
         // running them here ignored that condition entirely: a workflow gated on
         // "severity == critical" fired on every write, whatever the severity.
         .where('trigger_type', '=', 'automatic')
+        // A status machine is a diagram its edges were read from; there is nothing to run.
+        .where('kind' as any, '<>', 'state')
         .orderBy('created_at', 'asc')
         .execute();
     } catch (err: any) {
       if (options.throwOnError) {
         throw new Error(`Could not load workflow definitions for ${entityName}: ${err?.message ?? err}`);
       }
-      this.logger.warn(`Could not load workflow definitions for ${entityName}: ${err?.message}`);
+      this.log.event('workflow.definition.unavailable', {
+        workflow: null,
+        entity: entityName,
+        err,
+      });
       return;
     }
 
@@ -171,6 +223,14 @@ export class WorkflowService {
     const tableName = entityName.startsWith('bus_') ? entityName : `bus_${normalized}`;
 
     for (const def of definitions) {
+      // An automation built in the application is a flowchart first: with no
+      // steps compiled there is nothing to run, and recording a "success" for
+      // it was how an empty or hook-only definition looked busy.
+      if (!def.bpmn_xml) continue;
+      // Its conditions are `%%guard` lines on the flowchart; every one has to
+      // hold for the record as written, or the run does not start.
+      if (!this.guardsHold(def.mermaid_code, entityData)) continue;
+
       const startMs = Date.now();
       let runId: string | undefined;
 
@@ -209,17 +269,25 @@ export class WorkflowService {
           .where('id', '=', runId)
           .execute();
 
-        this.logger.log(
-          `Workflow "${def.name}" completed for ${tableName}:${entityId} (${mutations.length} mutations)`,
-        );
+        this.log.event('workflow.run.completed', {
+          workflow: def.name,
+          entity: tableName,
+          recordId: entityId,
+          mutations: mutations.length,
+          trigger: 'event',
+        });
       } catch (err: any) {
-        this.logger.error(
-          `Workflow "${def.name}" failed for ${tableName}:${entityId}: ${err?.message}`,
-        );
+        this.log.event('workflow.run.failed', {
+          workflow: def.name,
+          entity: tableName,
+          recordId: entityId,
+          trigger: 'event',
+          err,
+        });
         if (options.throwOnError) {
           // The caller owns a transaction: let it roll back rather than recording a
           // half-applied run. The run row dies with the rollback too.
-          throw new Error(`Workflow "${def.name}" failed: ${err?.message ?? err}`);
+          throw new WorkflowRunError(def.name, err?.message ?? String(err), operation.toUpperCase());
         }
         if (runId) {
           await db
@@ -239,6 +307,36 @@ export class WorkflowService {
   }
 
   /**
+   * Put a failed run back after the transaction that held it rolled back: the
+   * rollback took the run row with it, so Run History would show nothing for a
+   * press that was refused. Written on its own connection, never throws.
+   */
+  async recordFailedRun(
+    entityName: string,
+    entityId: string,
+    failure: Pick<WorkflowRunError, 'workflow' | 'reason' | 'operation'>,
+  ): Promise<void> {
+    const normalized = entityName.toLowerCase().replace(/^bus_/, '');
+    try {
+      await this.db
+        .insertInto('sys_workflow_runs')
+        .values({
+          entity_name: entityName.startsWith('bus_') ? entityName : `bus_${normalized}`,
+          entity_id: entityId,
+          workflow_name: failure.workflow,
+          operation: failure.operation,
+          status: 'error',
+          error_details: failure.reason,
+          completed_at: new Date(),
+          created_by: 'system',
+        } as any)
+        .execute();
+    } catch (err: any) {
+      this.log.event('workflow.run.unrecorded', { workflow: failure.workflow, err });
+    }
+  }
+
+  /**
    * Trigger a specific workflow by name (called by rules engine for trigger-workflow actions).
    * Fire-and-forget — logs errors but never throws.
    */
@@ -249,7 +347,7 @@ export class WorkflowService {
     operation: 'create' | 'update' | 'delete',
     entityData: Record<string, unknown>,
     options: WorkflowRunOptions = {},
-  ): Promise<void> {
+  ): Promise<Record<string, unknown>[]> {
     const db = options.db ?? this.db;
     let definition: any;
     try {
@@ -263,8 +361,12 @@ export class WorkflowService {
       if (options.throwOnError) {
         throw new Error(`Could not load workflow "${workflowName}": ${err?.message ?? err}`);
       }
-      this.logger.warn(`Could not load workflow "${workflowName}": ${err?.message}`);
-      return;
+      this.log.event('workflow.definition.unavailable', {
+        workflow: workflowName,
+        entity: entityName,
+        err,
+      });
+      return [];
     }
 
     if (!definition) {
@@ -273,10 +375,13 @@ export class WorkflowService {
       // creates until someone builds them in the Workflow Designer. That is the
       // normal state of a fresh app, so it is a debug line, not a warning on
       // every single write.
-      this.logger.debug(
-        `No active workflow named "${workflowName}" — nothing to trigger for ${entityName}:${entityId}`,
-      );
-      return;
+      this.log.event('workflow.trigger.ignored', {
+        workflow: workflowName,
+        entity: entityName,
+        recordId: entityId,
+        reason: 'no active workflow by that name',
+      });
+      return [];
     }
 
     const startMs = Date.now();
@@ -309,9 +414,22 @@ export class WorkflowService {
         .where('id', '=', runId)
         .execute();
 
-      this.logger.log(`Rule-triggered workflow "${workflowName}" completed for ${entityName}:${entityId}`);
+      this.log.event('workflow.run.completed', {
+        workflow: workflowName,
+        entity: entityName,
+        recordId: entityId,
+        mutations: mutations.length,
+        trigger: 'rule',
+      });
+      return mutations;
     } catch (err: any) {
-      this.logger.error(`Rule-triggered workflow "${workflowName}" failed: ${err?.message}`);
+      this.log.event('workflow.run.failed', {
+        workflow: workflowName,
+        entity: entityName,
+        recordId: entityId,
+        trigger: 'rule',
+        err,
+      });
       if (options.throwOnError) {
         throw new Error(`Workflow "${workflowName}" failed: ${err?.message ?? err}`);
       }
@@ -323,6 +441,7 @@ export class WorkflowService {
           .execute()
           .catch(() => {});
       }
+      return [];
     }
   }
 
@@ -403,6 +522,7 @@ export class WorkflowService {
       if (!this.checkHolds(context, field, operator, compareTo)) break;
 
       if (pass >= maxPasses) {
+        this.log.event('workflow.loop.exhausted', { workflow: null, loop: loopId, max: maxPasses });
         throw new Error(
           `Loop "${loopId}" did not finish within its limit of ${maxPasses} passes — ` +
             `"${field} ${operator} ${compareTo}" never stopped being true. ` +
@@ -445,6 +565,15 @@ export class WorkflowService {
       // state, which still terminates via the safety limit rather than hanging.
       return entityData;
     }
+  }
+
+  /** An automation's `%%guard` conditions, all of which must hold for the record. */
+  private guardsHold(mermaid: string | null | undefined, record: Record<string, unknown>): boolean {
+    if (!mermaid) return true;
+    for (const guard of automationGuards(mermaid)) {
+      if (!this.checkHolds(record, guard.field, guard.operator, guard.value)) return false;
+    }
+    return true;
   }
 
   /** The same eleven operators the automation builder offers for a check. */
@@ -583,7 +712,18 @@ export class WorkflowService {
     vars: Record<string, unknown>,
     db: Kysely<any> = this.db,
   ): Promise<Record<string, unknown> | null> {
-    const context: Record<string, unknown> = { ...vars, ...entityData };
+    // The builder offers the record's own fields as `<entity>.<field>` —
+    // `\{{feeinvoice.balance_due}}`, the form its help and its suggestions use —
+    // and saves the reference without braces. The record arrives here flat, so
+    // without these keys every such reference missed: a Formula skipped as
+    // non-numeric, and a Create wrote the text "feeinvoice.id" into a uuid
+    // column and rolled the whole run back. A check already falls back to the
+    // bare name (`checkHolds`); this gives every other step the same reading.
+    const root = triggeringTable.replace(/^bus_/, '').replace(/_/g, '').toLowerCase();
+    const qualified = Object.fromEntries(
+      Object.entries(entityData).map(([key, value]) => [`${root}.${key}`, value]),
+    );
+    const context: Record<string, unknown> = { ...qualified, ...vars, ...entityData };
 
     if (task.nodeType === 'UpdateEntity') {
       return this.executeUpdateEntity(task, triggeringTable, entityData, context, db);
@@ -610,11 +750,11 @@ export class WorkflowService {
     }
 
     if (task.nodeType === 'Agent') {
-      this.logger.warn('Agent workflow node is a placeholder — skipping');
+      this.skipped('Agent', 'Agent workflow node is a placeholder — skipping');
       return { nodeType: 'Agent', skipped: 'Agent nodes are a placeholder pending Mastra integration' };
     }
 
-    this.logger.warn(`Unknown workflow nodeType: ${task.nodeType} — skipping`);
+    this.skipped('unknown', `Unknown workflow nodeType: ${task.nodeType} — skipping`);
     return null;
   }
 
@@ -642,7 +782,7 @@ export class WorkflowService {
     const targetTable = task.entity?.trim() || triggeringTable;
     const field = task.field?.trim();
     if (!field) {
-      this.logger.warn('UpdateEntity task missing "field" — skipping');
+      this.skipped('UpdateEntity', 'UpdateEntity task missing "field" — skipping');
       return { nodeType: 'UpdateEntity', table: targetTable, skipped: 'no "field" configured' };
     }
 
@@ -655,38 +795,36 @@ export class WorkflowService {
     if (targetSource) {
       targetValue = context[targetSource];
       if (targetValue === undefined || targetValue === null) {
-        this.logger.warn(
-          `UpdateEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}.${field}`,
-        );
+        this.skipped('UpdateEntity', `UpdateEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}.${field}`);
         return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: `no value for targetSource "${targetSource}"` };
       }
     } else if (!isSelf && targetField === 'id') {
-      this.logger.warn(
-        `UpdateEntity: cannot update ${targetTable} from a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: cannot update ${targetTable} from a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`);
       return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: 'no row targeting configured for a cross-entity update' };
     } else {
       targetValue = entityId;
     }
 
     if (targetValue === undefined || targetValue === null) {
-      this.logger.warn('UpdateEntity: no value to match rows on — skipping');
+      this.skipped('UpdateEntity', 'UpdateEntity: no value to match rows on — skipping');
       return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: 'no value to match rows on' };
     }
 
     const source = task.source?.trim();
     const hasLiteral = task.value !== undefined && task.value !== '';
+    // `value: null` clears the column. A state machine's move uses it to reset
+    // the fact that would otherwise move the record straight back out of a state
+    // it has just re-entered; the string "null" is never a value a column wants.
+    const literal = task.value === 'null' ? null : task.value;
     const resolvedValue =
-      source && context[source] !== undefined ? context[source] : task.value;
+      source && context[source] !== undefined ? context[source] : literal;
 
     // A step that reads a variable nothing published used to run anyway and
     // write `undefined`, blanking the column. Silently destroying a value is
     // worse than not running: a decision that matched no row, or a create that
     // was skipped, would quietly erase the field the next step meant to set.
     if (source && context[source] === undefined && !hasLiteral) {
-      this.logger.warn(
-        `UpdateEntity: nothing published "${source}" and there is no literal fallback — skipping ${targetTable}.${field}`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: nothing published "${source}" and there is no literal fallback — skipping ${targetTable}.${field}`);
       return {
         nodeType: 'UpdateEntity',
         table: targetTable,
@@ -695,21 +833,38 @@ export class WorkflowService {
       };
     }
 
-    const result = await db
+    // A workflow writing a record's status makes a move like anyone else: only
+    // along an edge the diagram drew, from where the record is (common/lifecycle.ts).
+    // Roles are not asked — the workflow is the system — and the move stamps
+    // `<state>_at` and keeps the record's phase in step, as a button press does.
+    const lifecycle = lifecycleOf(targetTable);
+    const isMove = !!lifecycle?.hasMachine && lifecycle.column === field;
+    const fromStates = isMove
+      ? lifecycle!.edges.filter((edge) => edge.to === String(resolvedValue)).map((edge) => edge.from)
+      : [];
+    if (isMove && fromStates.length === 0) {
+      this.skipped('UpdateEntity', `UpdateEntity: no drawn edge reaches "${String(resolvedValue)}" on ${targetTable} — skipped`);
+      return { nodeType: 'UpdateEntity', table: targetTable, field, skipped: `no drawn edge reaches "${String(resolvedValue)}"` };
+    }
+    const now = new Date();
+    const changes: Record<string, unknown> = { [field]: resolvedValue, updated_at: now };
+    if (isMove) {
+      changes.doc_status = phaseOf(lifecycle!, resolvedValue);
+      const stamp = `${String(resolvedValue)}_at`;
+      if (await this.hasColumn(db, targetTable, stamp)) changes[stamp] = now;
+    }
+    let update = db
       .updateTable(targetTable as any)
-      .set({ [field]: resolvedValue, updated_at: new Date() } as any)
-      .where(targetField as any, '=', targetValue)
-      .execute();
+      .set(changes as any)
+      .where(targetField as any, '=', targetValue);
+    if (isMove) update = update.where(field as any, 'in', fromStates);
+    const result = await update.execute();
 
     const rowsAffected = Number(result?.[0]?.numUpdatedRows ?? 0);
     if (rowsAffected === 0) {
-      this.logger.warn(
-        `UpdateEntity: ${targetTable}.${field} matched no rows (${targetField}=${String(targetValue)})`,
-      );
+      this.skipped('UpdateEntity', `UpdateEntity: ${targetTable}.${field} matched no rows (${targetField}=${String(targetValue)})`);
     } else {
-      this.logger.log(
-        `UpdateEntity: ${targetTable}.${field} = ${JSON.stringify(resolvedValue)} (${targetField}=${String(targetValue)}, ${rowsAffected} row(s))`,
-      );
+      this.performed('UpdateEntity', `UpdateEntity: ${targetTable}.${field} = ${JSON.stringify(resolvedValue)} (${targetField}=${String(targetValue)}, ${rowsAffected} row(s))`);
     }
 
     return {
@@ -720,6 +875,19 @@ export class WorkflowService {
       matchedOn: `${targetField}=${String(targetValue)}`,
       rowsAffected,
     };
+  }
+
+  /** Whether a table has a column — for the `<state>_at` a move stamps when the model keeps one. */
+  private async hasColumn(db: Kysely<any>, table: string, column: string): Promise<boolean> {
+    try {
+      const { rows } = await sql<{ found: number }>`
+        SELECT 1 AS found FROM information_schema.columns
+        WHERE table_name = ${table} AND column_name = ${column} LIMIT 1
+      `.execute(db);
+      return rows.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -742,21 +910,41 @@ export class WorkflowService {
     try {
       fieldMap = JSON.parse(task.fields?.trim() || '{}') as Record<string, string>;
     } catch (err: any) {
-      this.logger.warn(`CreateEntity: "fields" is not valid JSON (${err?.message}) — skipping`);
+      this.skipped('CreateEntity', `CreateEntity: "fields" is not valid JSON (${err?.message}) — skipping`);
       return { nodeType: 'CreateEntity', table: targetTable, skipped: 'invalid fields JSON' };
     }
 
     const entries = Object.entries(fieldMap).filter(([column]) => column.trim().length > 0);
     if (entries.length === 0) {
-      this.logger.warn(`CreateEntity: no fields configured for ${targetTable} — skipping`);
+      this.skipped('CreateEntity', `CreateEntity: no fields configured for ${targetTable} — skipping`);
       return { nodeType: 'CreateEntity', table: targetTable, skipped: 'no fields configured' };
     }
 
     const now = new Date();
     const values: Record<string, unknown> = { created_at: now, updated_at: now };
     for (const [column, source] of entries) {
-      values[column.trim()] =
-        typeof source === 'string' && context[source] !== undefined ? context[source] : source;
+      // Three readings, in order: the name of a value (`opportunity.id`), one
+      // \{{reference}} (its value, typed), and text with references in it
+      // (`Commission \{{commission}}`), which a REST body already filled in and a
+      // created record wrote verbatim.
+      let value: unknown = source;
+      if (typeof source === 'string') {
+        if (context[source] !== undefined) value = context[source];
+        else if (/\{\{\s*[\w.]+\s*\}\}/.test(source)) {
+          const single = this.resolveReference(source, context);
+          value = single !== source ? single : this.interpolate(source, context);
+        }
+      }
+      values[column.trim()] = value;
+    }
+    // A record a workflow creates starts in its flow's first state, as one a
+    // person creates does, unless the step names the state itself. The flow is
+    // lifecycleOf's, so a first state an administrator redrew is the one used.
+    const state = stateFieldOf(targetTable);
+    const flow = lifecycleOf(targetTable);
+    const initial = flow?.hasMachine ? flow.afterDraft : state?.initial;
+    if (state && initial && (values[state.field] === undefined || values[state.field] === null)) {
+      values[state.field] = initial;
     }
 
     const inserted = await db
@@ -772,7 +960,7 @@ export class WorkflowService {
     const varName = task.as?.trim() || `${targetTable.replace(/^bus_/, '')}Id`;
     if (createdId !== undefined) vars[varName] = createdId;
 
-    this.logger.log(`CreateEntity: inserted into ${targetTable} (id=${createdId}, as "${varName}")`);
+    this.performed('CreateEntity', `CreateEntity: inserted into ${targetTable} (id=${createdId}, as "${varName}")`);
     return {
       nodeType: 'CreateEntity',
       table: targetTable,
@@ -810,22 +998,18 @@ export class WorkflowService {
     if (targetSource) {
       targetValue = context[targetSource];
       if (targetValue === undefined || targetValue === null) {
-        this.logger.warn(
-          `DeleteEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}`,
-        );
+        this.skipped('DeleteEntity', `DeleteEntity: targetSource "${targetSource}" is not present in the workflow context — skipping ${targetTable}`);
         return { nodeType: 'DeleteEntity', table: targetTable, skipped: `no value for targetSource "${targetSource}"` };
       }
     } else if (!isSelf && targetField === 'id') {
-      this.logger.warn(
-        `DeleteEntity: cannot delete from ${targetTable} in a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`,
-      );
+      this.skipped('DeleteEntity', `DeleteEntity: cannot delete from ${targetTable} in a ${triggeringTable} workflow without "targetSource" (or a "targetField" foreign key) — skipping`);
       return { nodeType: 'DeleteEntity', table: targetTable, skipped: 'no row targeting configured for a cross-entity delete' };
     } else {
       targetValue = entityId;
     }
 
     if (targetValue === undefined || targetValue === null) {
-      this.logger.warn('DeleteEntity: no value to match rows on — skipping');
+      this.skipped('DeleteEntity', 'DeleteEntity: no value to match rows on — skipping');
       return { nodeType: 'DeleteEntity', table: targetTable, skipped: 'no value to match rows on' };
     }
 
@@ -839,13 +1023,9 @@ export class WorkflowService {
     const rowsAffected = Number(result?.[0]?.numDeletedRows ?? 0);
 
     if (rowsAffected === 0) {
-      this.logger.warn(
-        `DeleteEntity: ${targetTable} matched no rows (${targetField}=${String(targetValue)})`,
-      );
+      this.skipped('DeleteEntity', `DeleteEntity: ${targetTable} matched no rows (${targetField}=${String(targetValue)})`);
     } else {
-      this.logger.log(
-        `DeleteEntity: ${targetTable} deleted ${rowsAffected} row(s) (${targetField}=${String(targetValue)})`,
-      );
+      this.performed('DeleteEntity', `DeleteEntity: ${targetTable} deleted ${rowsAffected} row(s) (${targetField}=${String(targetValue)})`);
     }
 
     return {
@@ -873,7 +1053,7 @@ export class WorkflowService {
   ): Record<string, unknown> | null {
     const target = task.target?.trim();
     if (!target) {
-      this.logger.warn('Formula task missing "target" variable name — skipping');
+      this.skipped('Formula', 'Formula task missing "target" variable name — skipping');
       return { nodeType: 'Formula', skipped: 'no "target" variable configured' };
     }
 
@@ -881,27 +1061,28 @@ export class WorkflowService {
 
     if (operationName === 'set') {
       vars[target] = task.value ?? '';
-      this.logger.log(`Formula(set): ${target} = ${JSON.stringify(vars[target])}`);
+      this.performed('Formula', `Formula(set): ${target} = ${JSON.stringify(vars[target])}`);
       return { nodeType: 'Formula', target, value: vars[target], operation: 'set' };
     }
 
     if (operationName === 'copy') {
       const carried = context[task.source?.trim() ?? ''];
       if (carried === undefined) {
-        this.logger.warn(`Formula(copy): "${task.source}" is not in the workflow context — skipping`);
+        this.skipped('Formula', `Formula(copy): "${task.source}" is not in the workflow context — skipping`);
         return { nodeType: 'Formula', target, skipped: `no value for source "${task.source}"` };
       }
       vars[target] = carried;
-      this.logger.log(`Formula(copy): ${target} = ${JSON.stringify(carried)}`);
+      this.performed('Formula', `Formula(copy): ${target} = ${JSON.stringify(carried)}`);
       return { nodeType: 'Formula', target, value: carried, operation: 'copy' };
     }
 
     const left = Number(context[task.source?.trim() ?? '']);
-    const right = Number(task.operand);
+    // The builder's "And this value" takes a number or a variable — `\{{commission}}`,
+    // the form every other field of a step uses. Read as a number, the reference
+    // was NaN and every formula over two variables was skipped as non-numeric.
+    const right = Number(this.resolveReference(task.operand, context));
     if (!Number.isFinite(left) || !Number.isFinite(right)) {
-      this.logger.warn(
-        `Formula: "${task.source}" (${String(context[task.source ?? ''])}) or operand "${task.operand}" is not numeric — skipping`,
-      );
+      this.skipped('Formula', `Formula: "${task.source}" (${String(context[task.source ?? ''])}) or operand "${task.operand}" is not numeric — skipping`);
       return { nodeType: 'Formula', target, skipped: 'non-numeric operand' };
     }
 
@@ -911,7 +1092,7 @@ export class WorkflowService {
       case 'multiply': value = left * right; break;
       case 'divide':
         if (right === 0) {
-          this.logger.warn('Formula: division by zero — skipping');
+          this.skipped('Formula', 'Formula: division by zero — skipping');
           return { nodeType: 'Formula', target, skipped: 'division by zero' };
         }
         value = left / right;
@@ -919,12 +1100,12 @@ export class WorkflowService {
       case 'add': value = left + right; break;
       case 'subtract': value = left - right; break;
       default:
-        this.logger.warn(`Formula: unknown operation "${operation}" — skipping`);
+        this.skipped('Formula', `Formula: unknown operation "${operation}" — skipping`);
         return { nodeType: 'Formula', target, skipped: `unknown operation "${operation}"` };
     }
 
     vars[target] = value;
-    this.logger.log(`Formula: ${target} = ${left} ${operation} ${right} = ${value}`);
+    this.performed('Formula', `Formula: ${target} = ${left} ${operation} ${right} = ${value}`);
     return { nodeType: 'Formula', target, value };
   }
 
@@ -957,7 +1138,7 @@ export class WorkflowService {
       try {
         content = JSON.parse(inline);
       } catch (err: any) {
-        this.logger.warn(`Decision: decisionTable is not valid JSON — skipping (${err?.message})`);
+        this.skipped('Decision', `Decision: decisionTable is not valid JSON — skipping (${err?.message})`);
         return { nodeType: 'Decision', skipped: 'decisionTable is not valid JSON' };
       }
       if (!content || typeof content !== 'object') {
@@ -966,7 +1147,7 @@ export class WorkflowService {
       if (!Array.isArray((content as any).rules) || (content as any).rules.length === 0) {
         return { nodeType: 'Decision', skipped: 'decision table has no rows' };
       }
-      jdm = this.wrapDecisionTable(content);
+      jdm = this.rulesEngine.prepare(JSON.stringify(content));
     } else if (ruleName) {
       let row: any;
       try {
@@ -977,16 +1158,32 @@ export class WorkflowService {
           .where('is_active', '=', true)
           .executeTakeFirst();
       } catch (err: any) {
-        this.logger.warn(`Decision: could not load rule "${ruleName}": ${err?.message}`);
+        this.skipped('Decision', `Decision: could not load rule "${ruleName}": ${err?.message}`);
         return { nodeType: 'Decision', rule: ruleName, skipped: 'could not load the rule' };
       }
       if (!row?.jdm_content) {
-        this.logger.warn(`Decision: no active rule named "${ruleName}" — skipping`);
+        this.skipped('Decision', `Decision: no active rule named "${ruleName}" — skipping`);
         return { nodeType: 'Decision', rule: ruleName, skipped: `no active rule named "${ruleName}"` };
       }
-      jdm = row.jdm_content as string;
+      const stored = typeof row.jdm_content === 'string' ? row.jdm_content : JSON.stringify(row.jdm_content);
+      // A %%rule drawn as a flowchart has nodes and no conditions. The engine
+      // refuses it with "missing field `content`", which names nothing a reader
+      // can act on; this names the rule and why it cannot answer.
+      if (this.rulesEngine.isDiagramOnly(stored)) {
+        this.skipped('Decision', `Decision: rule "${ruleName}" is a drawn flowchart with no conditions — skipping`);
+        return {
+          nodeType: 'Decision',
+          rule: ruleName,
+          skipped: `rule "${ruleName}" is a drawn flowchart: its nodes carry no conditions, so it decides nothing`,
+        };
+      }
+      // Prepared like every stored rule: a bare table is wrapped and quoted, a
+      // function node's source is put where the engine reads it.
+      jdm = this.rulesEngine.prepare(
+        typeof row.jdm_content === 'string' ? row.jdm_content : JSON.stringify(row.jdm_content),
+      );
     } else {
-      this.logger.warn('Decision task has neither a decisionTable nor a rule — skipping');
+      this.skipped('Decision', 'Decision task has neither a decisionTable nor a rule — skipping');
       return { nodeType: 'Decision', skipped: 'no decision table and no rule configured' };
     }
 
@@ -994,7 +1191,12 @@ export class WorkflowService {
     let matchedRows: number;
     try {
       const decision = this.rulesEngine.getEngine().createDecision(Buffer.from(jdm));
-      const evaluated = await decision.evaluate(context);
+      // The record comes from the database, so its date columns are Date objects,
+      // which reach zen as `{}`: a rule whose schema types `due_on` as a string
+      // refused every such record ("/due_on: {} is not of types null, string"),
+      // and no lookup on an entity with a date ever decided anything. The JSON
+      // form is what zen reads — a Date becomes its ISO string.
+      const evaluated = await decision.evaluate(JSON.parse(JSON.stringify(context)));
       const raw = (evaluated as any)?.result;
 
       if (Array.isArray(raw)) {
@@ -1011,14 +1213,14 @@ export class WorkflowService {
         outputs = {};
       }
     } catch (err: any) {
-      this.logger.error(`Decision: evaluation failed — ${err?.message ?? err}`);
+      this.log.event('workflow.step.failed', { workflow: null, step: null, type: 'Decision', err });
       return { nodeType: 'Decision', skipped: `evaluation failed: ${err?.message ?? err}` };
     }
 
     if (matchedRows === 0) {
       // Not an error: a table that matches nothing is how "leave things alone"
       // is expressed. Later steps see no new variables and skip themselves.
-      this.logger.log('Decision: no row matched — nothing published');
+      this.performed('Decision', 'Decision: no row matched — nothing published');
       return { nodeType: 'Decision', matchedRows: 0, published: {} };
     }
 
@@ -1039,36 +1241,8 @@ export class WorkflowService {
       vars[key] = value;
     }
 
-    this.logger.log(
-      `Decision: matched ${matchedRows} row(s), published ${Object.keys(published).join(', ') || '(nothing)'}`,
-    );
+    this.performed('Decision', `Decision: matched ${matchedRows} row(s), published ${Object.keys(published).join(', ') || '(nothing)'}`);
     return { nodeType: 'Decision', matchedRows, published };
-  }
-
-  /**
-   * Wrap a bare decision table in the graph zen-engine evaluates.
-   *
-   * The step stores only the table because that is all the editor asks anyone
-   * to fill in; the input and output nodes are plumbing, identical every time.
-   */
-  private wrapDecisionTable(content: unknown): string {
-    return JSON.stringify({
-      nodes: [
-        { id: 'input', type: 'inputNode', name: 'Input', position: { x: 0, y: 0 } },
-        {
-          id: 'table',
-          type: 'decisionTableNode',
-          name: 'Decision',
-          position: { x: 300, y: 0 },
-          content,
-        },
-        { id: 'output', type: 'outputNode', name: 'Output', position: { x: 600, y: 0 } },
-      ],
-      edges: [
-        { id: 'e1', sourceId: 'input', targetId: 'table' },
-        { id: 'e2', sourceId: 'table', targetId: 'output' },
-      ],
-    });
   }
 
   /** Call an external HTTP endpoint. Never blocks the workflow for more than 10s. */
@@ -1078,7 +1252,7 @@ export class WorkflowService {
   ): Promise<Record<string, unknown> | null> {
     const url = task.url?.trim();
     if (!url) {
-      this.logger.warn('REST task missing "url" — skipping');
+      this.skipped('REST', 'REST task missing "url" — skipping');
       return { nodeType: 'REST', skipped: 'no "url" configured' };
     }
 
@@ -1095,15 +1269,24 @@ export class WorkflowService {
         body,
         signal: controller.signal,
       });
-      this.logger.log(`REST: ${method} ${url} → ${response.status}`);
+      this.performed('REST', `REST: ${method} ${url} → ${response.status}`);
       return { nodeType: 'REST', url, method, status: response.status, ok: response.ok };
     } catch (err: any) {
       // A failing webhook must not fail the workflow — record it and move on.
-      this.logger.warn(`REST: ${method} ${url} failed: ${err?.message}`);
+      this.log.event('workflow.step.failed', { workflow: null, step: null, type: 'REST', err });
       return { nodeType: 'REST', url, method, error: err?.message ?? String(err) };
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  /**
+   * A field that is exactly one \{{key}} reference, as the value it names —
+   * a number stays a number, an id stays an id. Anything else is returned as is.
+   */
+  private resolveReference(text: string | undefined, context: Record<string, unknown>): unknown {
+    const match = /^\s*\{\{\s*([\w.]+)\s*\}\}\s*$/.exec(text ?? '');
+    return match ? context[match[1]!] : text;
   }
 
   /** Replace \{{key}} placeholders with values from the workflow context. */

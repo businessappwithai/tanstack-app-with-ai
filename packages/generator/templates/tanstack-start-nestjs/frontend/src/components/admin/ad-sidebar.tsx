@@ -49,8 +49,8 @@ const MENU_ITEMS = [
     icon: LayoutList,
   },
   {
-    label: "Business Rules",
-    to: "/admin/rules",
+    label: "Rules & workflows",
+    to: "/admin/automations",
     icon: Settings,
   },
   {
@@ -144,7 +144,7 @@ export function ADSidebar({ children }: ADSidebarProps) {
       </Button>
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0 overflow-auto">{children}</main>
+      <div className="flex-1 min-w-0 overflow-auto">{children}</div>
     </div>
   );
 }

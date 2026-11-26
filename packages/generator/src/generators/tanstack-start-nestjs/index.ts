@@ -2,7 +2,7 @@
  * Option 1 Generators Export
  *
  * Modern Web Stack:
- * - Backend: NestJS + Fastify + Knex.js
+ * - Backend: NestJS + Fastify + Kysely
  * - Frontend: TanStack Start + Shadcn + TanStack
  */
 

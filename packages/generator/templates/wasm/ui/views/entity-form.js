@@ -28,6 +28,7 @@
 import { el, helpToast, mount, spinner, toast, displayValue } from "../dom.js";
 import { api } from "../api.js";
 import { setActions, childEntitiesOf } from "../main.js";
+import { fieldLogicState } from "../../server/lib/field-logic.js";
 
 const referenceCache = new Map();
 const lookupCache = new Map();
@@ -112,17 +113,31 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
 
   let fields;
   let record = {};
+  /* The state field, when the entity has a state machine. It is never among
+     the form fields — no person changes it — so it is read from the grid
+     fields, which always carry it, and shown in the header. */
+  let stateField = null;
   try {
     fields = await api.get(`/bus/${entity.routeName}/fields/form`);
     if (!isNew) record = await api.get(`/bus/${entity.routeName}/${id}`);
+    try {
+      const grid = await api.get(`/bus/${entity.routeName}/fields/grid`);
+      stateField = grid.find((field) => field.is_state_field) ?? null;
+    } catch {
+      stateField = null;
+    }
   } catch (error) {
     mount(root, el("div.empty", el("h3", "Could not open this record"), el("p", error.message)));
     return;
   }
 
-  const editable = fields.filter((field) => !["id", "version"].includes(field.column_name));
-  const requiredCount = editable.filter((field) => field.is_mandatory).length;
-
+  const editable = fields.filter(
+    (field) => !["id", "version"].includes(field.column_name) && !field.is_state_field
+  );
+  // Optimistic locking: the version this form opened the record at. A save
+  // sends it as If-Match and the server refuses it with 409 if someone has
+  // saved since; "Overwrite" moves it to the version that conflict reported.
+  let openedVersion = record.version;
   const inputs = new Map();
   const violationBox = el("div.violations", { hidden: true });
 
@@ -130,11 +145,85 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     editable.map((field) => control(field, record, entity, inputs))
   );
 
+  /*
+   * Field logic — Compiere's Display, Read Only and Mandatory Logic.
+   *
+   * Each field may carry `@column@=value` conditions over the record being
+   * edited (`%%field … display: | readonly: | mandatory:`). They are evaluated
+   * against what the form holds now, not what was loaded, and again on every
+   * change, so a field appears, locks or becomes required as the record is
+   * edited — the dependency refresh Compiere's GridField does. The server
+   * judges the same logic on save (bus.routes.js `enforceFieldLogic`); this is
+   * what lets a person see the rule before they break it.
+   */
+  const requiredLabel = el("span.record__required");
+  const currentValues = () => {
+    const values = { ...record };
+    for (const [column, input] of inputs) {
+      values[column] = input.type === "checkbox" ? input.checked : input.value;
+    }
+    return values;
+  };
+  const applyLogic = () => {
+    const values = currentValues();
+    let required = 0;
+    for (const [field, node] of controls) {
+      const state = fieldLogicState(field, values);
+      const input = inputs.get(field.column_name);
+      node.hidden = !state.displayed;
+      if (input) {
+        input.disabled = input.dataset.baseDisabled === "true" || state.readOnly;
+        // `required` only on a field that is shown: a hidden required input
+        // stops the browser submitting a form nobody can see the fault in.
+        if (input.type !== "checkbox") input.required = state.mandatory && !input.disabled;
+      }
+      /* The marker exists exactly while the field is required — added and
+         removed, never hidden — so `.field:has(.field__required)` keeps
+         naming the required fields and nothing else. */
+      const marker = node.querySelector(".field__required");
+      if (state.mandatory && !marker) {
+        node.querySelector(".field__label")?.after(requiredMarker());
+      } else if (!state.mandatory && marker) {
+        marker.remove();
+      }
+      node.classList.toggle("field--logic-locked", state.readOnly && !field.is_read_only);
+      if (state.mandatory) required += 1;
+    }
+    requiredLabel.textContent = required ? `${required} required` : "";
+    requiredLabel.hidden = !required;
+  };
+  applyLogic();
+  for (const input of inputs.values()) {
+    input.addEventListener("input", applyLogic);
+    input.addEventListener("change", applyLogic);
+  }
+
+  /* Which fields the person has changed since the record opened. A button press
+     saves these first (see the transition route) — so what was typed is kept
+     even when a workflow bound to the next status refuses the move. */
+  const touched = new Set();
+  for (const [column, input] of inputs) {
+    const mark = () => touched.add(column);
+    input.addEventListener("input", mark);
+    input.addEventListener("change", mark);
+  }
+
+  /* `%%section`: the model's own headings, in its order, each a two-column
+     grid in which a field alone on its row spans both columns. A model with
+     no sections has one ungrouped "General" list, as it always did. */
   const grouped = new Map();
   for (const [field, node] of controls) {
-    const group = field.group_name || "General";
-    if (!grouped.has(group)) grouped.set(group, []);
-    grouped.get(group).push(node);
+    const name = field.group_name || "General";
+    if (!grouped.has(name)) {
+      grouped.set(name, {
+        description: field.group_name ? field.group_description : null,
+        columns: field.group_columns || 0,
+        collapsed: !!field.group_collapsed,
+        nodes: [],
+      });
+    }
+    if (field.col_span > 1) node.classList.add("field--wide");
+    grouped.get(name).nodes.push(node);
   }
 
   const submit = async () => {
@@ -149,7 +238,11 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     try {
       const saved = isNew
         ? await api.post(`/bus/${entity.routeName}`, payload)
-        : await api.put(`/bus/${entity.routeName}/${id}`, payload);
+        : await api.put(
+            `/bus/${entity.routeName}/${id}`,
+            payload,
+            openedVersion == null ? {} : { "If-Match": `"${openedVersion}"` }
+          );
       toast(isNew ? `${entity.singularName} created` : "Saved", "success");
       /* This row may be what some other entity's lookup is missing, and its
          label may be what an existing option now reads as. Neither is worth a
@@ -158,7 +251,22 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
       await onSaved(saved);
       if (isNew) navigate(`/entity/${entity.routeName}/${saved.id}`, { replace: true });
     } catch (error) {
-      showProblem(violationBox, error);
+      if (error.status === 409 && error.details?.code === "VERSION_CONFLICT") {
+        await showConflict(violationBox, {
+          entity,
+          id,
+          fields: editable,
+          base: record,
+          mine: payload,
+          onReload: () => recordPanel(root, { entity, id, onClose, onSaved, navigate }),
+          onOverwrite: (theirs) => {
+            openedVersion = theirs.version;
+            submit();
+          },
+        });
+      } else {
+        showProblem(violationBox, error);
+      }
     } finally {
       setActions({ ...currentActions, busy: false });
     }
@@ -189,20 +297,29 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     el(
       "div.record__meta",
       `${editable.length} field${editable.length === 1 ? "" : "s"}`,
-      requiredCount ? el("span.record__required", `${requiredCount} required`) : null,
+      requiredLabel,
       el("button.btn.btn--primary.btn--small", { type: "submit" }, isNew ? "Create" : "Save")
     ),
     violationBox,
     el(
       "div.record__body",
-      [...grouped.entries()].map(([group, nodes]) =>
-        el(
-          "section",
-          el("h3.group__name", group),
-          el("p.group__desc", `${group} information fields`),
-          el("div.group__fields", nodes)
-        )
-      )
+      [...grouped.entries()].map(([group, section]) => {
+        const fieldsGrid = el(
+          section.columns === 2 ? "div.group__fields.group__fields--2" : "div.group__fields",
+          section.nodes
+        );
+        const description = section.description || `${group} information fields`;
+        /* A collapsed section is a <details>: closed until opened, and a
+           browser's own control rather than one more thing to wire. */
+        return section.collapsed
+          ? el(
+              "details.group",
+              el("summary.group__name", group),
+              el("p.group__desc", description),
+              fieldsGrid
+            )
+          : el("section", el("h3.group__name", group), el("p.group__desc", description), fieldsGrid);
+      })
     ),
     el(
       "div.record__actions",
@@ -258,6 +375,15 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
     void renderAudit(auditSlot, entity, id);
   }
 
+  form.touchedValues = () => {
+    const values = {};
+    for (const column of touched) {
+      const input = inputs.get(column);
+      if (input) values[column] = input.type === "checkbox" ? input.checked : input.value;
+    }
+    return values;
+  };
+
   mount(
     root,
     el(
@@ -265,6 +391,7 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
       el(
         "header.record__head",
         el("h2.record__title", isNew ? `New ${entity.singularName}` : recordTitle(record, editable, entity)),
+        stateBadge(stateField, record, entity, isNew),
         el("button.record__close", { title: "Close", "aria-label": "Close", onclick: onClose }, "✕")
       ),
       form,
@@ -272,7 +399,7 @@ export async function recordPanel(root, { entity, id, onClose, onSaved, navigate
       notesSlot,
       auditSlot
     ),
-    isNew ? null : el("div.split", el("div"), el("aside.side", await sidePanels(entity, id, record, onSaved)))
+    isNew ? null : el("div.split", el("div"), el("aside.side", await sidePanels(entity, id, record, onSaved, form, () => recordPanel(root, { entity, id, onClose, onSaved, navigate }))))
   );
 }
 
@@ -513,46 +640,116 @@ async function renderDetails(slot, entity, id, navigate) {
   if (sections.length) mount(slot, ...sections);
 }
 
-async function sidePanels(entity, id, record, onSaved) {
+/* What the last press of a record's button came to, kept until the next press:
+   the panel is drawn again after every press, and a refusal has to survive that. */
+const pressNotices = new Map();
+
+function pressNotice(notice) {
+  return el(
+    "div.side__notice",
+    { role: "alert", "data-testid": "press-refused" },
+    el("strong", `${notice.label} did not go through`),
+    el(
+      "p",
+      `${notice.saved ? "Your changes were saved. " : ""}` +
+        `${notice.workflow ? `Workflow "${notice.workflow}" failed: ` : ""}${notice.message}. ` +
+        "The status did not change. Fix it and press the button again."
+    )
+  );
+}
+
+async function sidePanels(entity, id, record, onSaved, form, reload) {
   const panels = [];
 
   try {
     const workflow = await api.get(`/workflows/entity/${entity.routeName}/${id}/transitions`);
     if (workflow.workflow) {
+      /* The record's action buttons: the moves this person may press from
+         where it is, from the server, which judges every press again. One
+         move or several, each a button; Reopen apart, at a locked end. */
+      let actions = [];
+      try {
+        actions = await api.get(`/bus/${entity.routeName}/${id}/actions`);
+      } catch {
+        actions = [];
+      }
+      const noticeKey = `${entity.routeName}:${id}`;
+      const press = async (action, button) => {
+        button.disabled = true;
+        pressNotices.delete(noticeKey);
+        /* A move saves what was typed first, then runs the sagas bound to the
+           status it reaches; Reopen is not a save and leaves the form alone. */
+        const typed = action.kind === "move" && form?.touchedValues ? form.touchedValues() : {};
+        const data = Object.keys(typed).length ? typed : undefined;
+        try {
+          await api.post(
+            `/bus/${entity.routeName}/${id}/transition`,
+            { event: action.event || undefined, to: action.to, ...(data ? { data } : {}) },
+            record.version == null ? {} : { "If-Match": `"${record.version}"` }
+          );
+          toast(action.kind === "reopen" ? "Reopened — the record is a draft again." : `${action.label} — done.`, "success");
+        } catch (error) {
+          /* The refusal stays on the record, beside the buttons: the person has
+             to act on it, and a toast is gone before they have read it. */
+          const details = error.details || {};
+          pressNotices.set(noticeKey, {
+            label: action.label,
+            saved: details.phase === "workflow" && !!data,
+            workflow: details.workflow || null,
+            message: details.workflow ? details.reason || error.message : error.message || "The move was refused.",
+          });
+        }
+        /* The list beside it, and this panel: the record has moved (or was
+           read afresh after a refusal), so its buttons are drawn again. */
+        await onSaved(null);
+        if (reload) await reload();
+      };
+      const moves = actions.filter((action) => action.kind === "move");
+      const reopen = actions.find((action) => action.kind === "reopen");
+      const button = (action, tone) => {
+        const node = el(
+          `button.btn.btn--small${tone}`,
+          { type: "button", "data-testid": `record-action-${action.event || action.to}` },
+          action.label
+        );
+        node.onclick = () => press(action, node);
+        return node;
+      };
+
+      if (workflow.locked && form) {
+        /* The end of a flow is Final and locked: nothing on the form can be
+           changed until the record is reopened. */
+        for (const control of form.querySelectorAll("input, select, textarea, button")) control.disabled = true;
+      }
+
       panels.push(
         el(
           "div.side__card",
+          { "data-testid": "record-actions" },
           el("h3.side__title", "Process"),
-          el("p.side__meta", `${workflow.workflow} — currently ${workflow.current ?? "unset"}`),
-          workflow.transitions.length
+          el(
+            "p.side__meta",
+            { "data-testid": "record-lifecycle", "data-phase": workflow.phase ?? "" },
+            workflow.locked
+              ? `Final — ${title(workflow.current ?? "")}. Locked; reopen it to change it.`
+              : `${workflow.workflow} — currently ${title(workflow.current ?? "unset")}`
+          ),
+          pressNotices.has(noticeKey) ? pressNotice(pressNotices.get(noticeKey)) : null,
+          moves.length || reopen
             ? el(
-                "div.side__transitions",
-                workflow.transitions.map((transition) =>
-                  el(
-                    "button.btn",
-                    {
-                      disabled: !transition.permitted,
-                      title: transition.permitted
-                        ? `Move to ${transition.to}`
-                        : `Requires ${transition.requiredRoles.join(" or ")}`,
-                      onclick: async () => {
-                        try {
-                          await api.put(`/bus/${entity.routeName}/${id}`, {
-                            [workflow.column]: transition.to,
-                          });
-                          toast(`Moved to ${transition.to}`, "success");
-                          await onSaved(null);
-                          window.location.reload();
-                        } catch (error) {
-                          toast(error.message, "error");
-                        }
-                      },
-                    },
-                    transition.trigger || `→ ${transition.to}`
-                  )
-                )
+                "div.side__actions",
+                moves.length > 1 ? el("p.side__meta", "Choose where this record goes next:") : null,
+                ...moves.map((move) => button(move, ".btn--primary")),
+                reopen ? button(reopen, "") : null
               )
-            : el("p.side__empty", "No transitions available from here.")
+            : el(
+                "p.side__empty",
+                workflow.locked
+                  ? "Only an administrator, or a role allowed to reopen it, can reopen this record."
+                  : workflow.transitions.length
+                    ? "Its next moves belong to another role."
+                    : "This is a final state."
+              )
         )
       );
     }
@@ -670,6 +867,9 @@ async function control(field, record, entity, inputs) {
   }
 
   if (field.is_read_only || (record.id && field.is_updateable === false)) input.disabled = true;
+  /* What the dictionary fixes, kept apart from what read-only logic decides
+     from moment to moment — `applyLogic` re-derives `disabled` from both. */
+  input.dataset.baseDisabled = input.disabled ? "true" : "false";
   inputs.set(field.column_name, input);
 
   return [
@@ -679,7 +879,7 @@ async function control(field, record, entity, inputs) {
       el(
         "div.field__head",
         el("label.field__label", { for: id }, field.name),
-        field.is_mandatory ? el("span.field__required", { title: "Required" }, "*") : null,
+        field.is_mandatory ? requiredMarker() : null,
         el(`span.chip.chip--${chipKind}`, chipLabel),
         el(
           "button.field__help",
@@ -695,6 +895,10 @@ async function control(field, record, entity, inputs) {
       input
     ),
   ];
+}
+
+function requiredMarker() {
+  return el("span.field__required", { title: "Required" }, "*");
 }
 
 /**
@@ -715,6 +919,11 @@ function fieldHelpBody(field, attribute) {
   if (attribute.maxLength) facts.push(`Up to ${attribute.maxLength} characters`);
   if (field.is_mandatory) facts.push("Required");
   if (field.is_read_only) facts.push("Read-only");
+  /* The dictionary's logic, as written — what makes the field appear, lock or
+     become required, which is otherwise invisible from the form. */
+  if (field.display_logic) facts.push(`Shown when ${field.display_logic}`);
+  if (field.read_only_logic) facts.push(`Read-only when ${field.read_only_logic}`);
+  if (field.mandatory_logic) facts.push(`Required when ${field.mandatory_logic}`);
   if (attribute.enumValues?.length) facts.push(`One of: ${attribute.enumValues.join(", ")}`);
   if (attribute.refTable) facts.push(`References ${attribute.refTable}`);
 
@@ -735,6 +944,88 @@ function normalizeForInput(value, type) {
   return String(value);
 }
 
+/** Same value across the shapes a field takes: a NUMERIC string and a number. */
+function sameValue(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null || a === "" || b === "") return (a ?? "") === (b ?? "");
+  if (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && Number(a) === Number(b)) return true;
+  return String(a) === String(b);
+}
+
+/**
+ * Someone else saved this record after the form opened it.
+ *
+ * Inline, not a modal: this application runs in an iframe on the page that
+ * generated it, where `confirm()` is not guaranteed to appear — the same reason
+ * the delete and purge controls are two-step. Lists the fields the other save
+ * changed (marking the ones this user changed too), then offers the two ways
+ * out: reload their version, or overwrite it with this one. Overwrite is still
+ * checked, against the version just read, so a third save is caught again.
+ */
+async function showConflict(box, { entity, id, fields, base, mine, onReload, onOverwrite }) {
+  let theirs;
+  try {
+    theirs = await api.get(`/bus/${entity.routeName}/${id}`);
+  } catch (error) {
+    showProblem(box, error);
+    return;
+  }
+  const rows = fields
+    .map((field) => {
+      const column = field.column_name;
+      if (sameValue(base[column], theirs[column])) return null;
+      const mineValue = column in mine ? mine[column] : base[column];
+      const clash = !sameValue(base[column], mineValue) && !sameValue(mineValue, theirs[column]);
+      return { field, theirs: theirs[column], mine: mineValue, clash };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(b.clash) - Number(a.clash));
+  const shown = (value) => (value == null || value === "" ? "—" : displayValue(value));
+  const clashes = rows.filter((row) => row.clash).length;
+
+  mount(
+    box,
+    el("h4.violations__title", `This ${entity.singularName.toLowerCase()} was changed while you were editing`),
+    el(
+      "p",
+      `Someone else saved it first (it is now at version ${theirs.version ?? "?"}). ` +
+        (rows.length === 0
+          ? "None of the fields on this form differ."
+          : clashes
+            ? `${clashes} of the fields below were changed by both of you.`
+            : "They changed the fields below; you did not.")
+    ),
+    rows.length
+      ? el(
+          "table.conflict",
+          el("thead", el("tr", el("th", "Field"), el("th", "Their saved value"), el("th", "Your value"))),
+          el(
+            "tbody",
+            rows.map((row) =>
+              el(
+                row.clash ? "tr.conflict__clash" : "tr",
+                el("td", row.field.name || row.field.column_name, row.clash ? el("small", " · both changed") : null),
+                el("td", shown(row.theirs)),
+                el("td", shown(row.mine))
+              )
+            )
+          )
+        )
+      : null,
+    el(
+      "div.conflict__actions",
+      el("button.btn", { type: "button", "data-action": "conflict-reload", onclick: () => onReload() }, "Reload their version"),
+      el(
+        "button.btn.btn--primary",
+        { type: "button", "data-action": "conflict-overwrite", onclick: () => onOverwrite(theirs) },
+        "Overwrite with mine"
+      )
+    )
+  );
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function showProblem(box, error) {
   const items = error.violations?.length
     ? error.violations.map((violation) =>
@@ -751,6 +1042,28 @@ function showProblem(box, error) {
   );
   box.hidden = false;
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/**
+ * The record's state, read-only, in the form's header.
+ *
+ * A state field is changed only by the application's background workflows, so
+ * it is never an input: it is shown here beside the title, and as a column of
+ * the list. A new record shows the state it will start in.
+ */
+function stateBadge(field, record, entity, isNew) {
+  if (!field) return null;
+  const value = isNew ? null : record[field.column_name];
+  const label = value == null || value === "" ? null : title(value);
+  return el(
+    "span.record__state",
+    {
+      "data-testid": "record-state",
+      title: `${field.name} — changed only by the application's workflows, never by hand`,
+      "aria-label": `${field.name}: ${label ?? "set when saved"}`,
+    },
+    label ?? "Set when saved"
+  );
 }
 
 function recordTitle(record, fields, entity) {

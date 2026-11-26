@@ -170,6 +170,5 @@ diagnostics; without it (`--no-autofix`) they are reported as errors/warnings.
 ```bash
 cd language/cli
 bun install                 # dev-only: TypeScript + type packages
-bun run typecheck           # tsc --noEmit
-bun run lint                # biome check
+bun run typecheck           # bun check
 ```

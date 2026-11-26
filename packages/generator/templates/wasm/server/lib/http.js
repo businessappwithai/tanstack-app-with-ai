@@ -51,7 +51,60 @@ export function text(body, init = {}) {
  * in the user's own browser against the user's own data, so hiding the message
  * would only make the app harder to debug without protecting anyone.
  */
-export function errorResponse(error) {
+/** `Key (account_number)=(ACC-1) already exists.` → `account number` */
+function columnsFromDetail(detail) {
+  const named = /^Key \(([^)]+)\)=/.exec(detail ?? "");
+  return named ? named[1].split(/\s*,\s*/).map((column) => column.replace(/_/g, " ")).join(" and ") : null;
+}
+
+/**
+ * A database constraint violation, as the status it deserves.
+ *
+ * PGlite raises these as plain errors carrying Postgres's SQLSTATE, so without
+ * this every one was a 500 quoting the raw message: a duplicate account number
+ * told the caller the server had broken, and a malformed id leaked
+ * `invalid input syntax for type uuid`. The NestJS stack maps the same codes in
+ * its exception filter (http-exception.filter.ts.hbs), and this follows it so
+ * the two stacks answer a conflicting write the same way. Values are never
+ * echoed back — only column names — since the conflicting value can be someone
+ * else's data.
+ */
+function databaseError(error, method) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (!/^(23|22)/.test(code)) return null;
+  const columns = columnsFromDetail(error.detail);
+  const where = columns ? ` (${columns})` : "";
+  switch (code) {
+    case "23505":
+      return new HttpError(409, `A record with the same value${where} already exists.`);
+    case "23503":
+      return method === "DELETE"
+        ? new HttpError(409, "This record is still referenced by other records.")
+        : new HttpError(400, `A referenced record${where} does not exist.`);
+    case "23502": {
+      const field = error.column ? ` (${String(error.column).replace(/_/g, " ")})` : where;
+      return new HttpError(400, `A required field${field} was missing.`);
+    }
+    case "23514":
+      return new HttpError(400, `A value${where} failed a database constraint.`);
+    case "23P01":
+      return new HttpError(409, `A record with an overlapping value${where} already exists.`);
+    case "22001":
+      return new HttpError(400, "A value was too long for its column.");
+    case "22P02":
+    case "22007":
+    case "22008":
+      return new HttpError(400, "A value was not valid for its column type.");
+    default:
+      return null;
+  }
+}
+
+export function errorResponse(error, method) {
+  if (!(error instanceof HttpError)) {
+    const mapped = databaseError(error, method);
+    if (mapped) error = mapped;
+  }
   const status = error instanceof HttpError ? error.status : 500;
   const body = {
     statusCode: status,

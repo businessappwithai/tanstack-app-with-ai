@@ -156,7 +156,7 @@ export function NotificationBell() {
       >
         <Bell className="w-4 h-4" />
         {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-foreground">
             {unread > 99 ? "99+" : unread}
           </span>
         )}
@@ -188,9 +188,19 @@ export function NotificationBell() {
           </div>
 
           <div className="max-h-[26rem] overflow-y-auto">
+            {/* A refresh that fails keeps what was last loaded on screen. React
+                Query holds the previous data and sets `isError` for a failed
+                refetch, and the panel refetches every five seconds while open:
+                one dropped request used to replace a list the reader already
+                had with an error. Only a panel with nothing to show says so. */}
+            {isError && data && (
+              <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
+                Could not refresh — showing what was last loaded.
+              </p>
+            )}
             {isLoading ? (
               <p className="px-4 py-6 text-sm text-muted-foreground">Loading…</p>
-            ) : isError ? (
+            ) : isError && !data ? (
               <p className="px-4 py-6 text-sm text-destructive">
                 Your transactions could not be loaded.
               </p>

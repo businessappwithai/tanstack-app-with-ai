@@ -207,6 +207,26 @@ test.describe("writing to a project", () => {
     expect(response.headers()["content-type"] ?? "").not.toContain("text/event-stream");
   });
 
+  test("a deployment write lands on the project in the path, whatever the body names", async () => {
+    // The route builds the row from `{ project_id: <path id>, ...body }`, so a
+    // body carrying its own `project_id` replaced the one the access check had
+    // just approved: write access to your own project was a write to anyone's.
+    const mine = await createProject(stranger.request);
+    const theirs = await createProject(owner.request);
+
+    await stranger.request.post(`/api/projects/${mine}/deployment`, {
+      data: { project_id: theirs, status: "stopped", port: 4999 },
+      failOnStatusCode: false,
+    });
+
+    const response = await owner.request.get(`/api/projects/${theirs}/deployment`);
+    const { deployments } = (await response.json()) as { deployments: Array<{ port?: number }> };
+    expect(
+      deployments.filter((d) => d.port === 4999),
+      "a deployment row written through another project's id appeared on this project"
+    ).toEqual([]);
+  });
+
   test("a stranger cannot start a deployment of someone else's project", async () => {
     const projectId = await createProject(owner.request);
 

@@ -433,7 +433,7 @@ After integration and end-to-end testing, the following generator templates will
 | `@gorules/zen-engine` | ^0.31+ | Rules engine (Node.js binding) |
 | `@gorules/jdm-editor` | ^0.19+ | JDM visual editor React component |
 | PostgreSQL | 14+ | Required for Better Auth + workflow tables |
-| Bun.js | 1.3+ | Runtime (already required) |
+| Bun.js | 1.4.4+ | Runtime (already required) |
 | Trigger.dev server | v3+ | Self-hosted or Cloud (new infrastructure dep) |
 
 ---

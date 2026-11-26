@@ -24,6 +24,6 @@ export interface Hook<T = any> {
   priority: number;
   // A hook may return nothing, or a replacement value. Narrowing the union to
   // `undefined` would reject `async (ctx) => { … }` with no return — the common case.
-  // biome-ignore lint/suspicious/noConfusingVoidType: `void | T` is the contract.
+  // `void | T` is the contract.
   execute: (context: HookContext<T>) => Promise<void | T>;
 }

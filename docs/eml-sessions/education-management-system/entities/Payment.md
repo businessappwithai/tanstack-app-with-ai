@@ -25,6 +25,7 @@
 
 - `FeeInvoice ||--o{ Payment` — settled by *(this side carries the foreign key)*
 - `Staff ||--o{ Payment` — received by *(this side carries the foreign key)*
+- `Payment ||--o{ Refund` — reversed by
 
 **Indexes.** `Payment(fee_invoice_id, received_at)`
 
@@ -53,9 +54,9 @@ None. This entity has no status column and no lifecycle.
 Sagas that touch it:
 
 - **InvoiceSettlement** *(triggered on this entity)*
-  - `B UpdateEntity entity: FeeInvoice targetField: fee_invoice_id field: status value: paid`
+  - `B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: paid`
 - **PartPaymentPosting** *(triggered on this entity)*
-  - `B UpdateEntity entity: FeeInvoice targetField: fee_invoice_id field: status value: part_paid`
+  - `B UpdateEntity entity: FeeInvoice targetSource: fee_invoice_id field: status value: part_paid`
 
 ## Access
 
@@ -66,4 +67,4 @@ Sagas that touch it:
 
 ## Open questions
 
-Refunds. A negative payment is refused by `refuseNonPositivePayment`, so a refund today is a cancelled invoice and a re-issue. A real refund record was ruled out of scope at Gate B.
+Instalment plans. A negative payment is still refused by `refuseNonPositivePayment`; money going back is a `Refund` against the payment, which never edits or deletes it. When a refund is paid its hooks and sagas move the invoice back (see `Refund`), and `finance-refunds-awaiting-decision` is the queue a person works from.

@@ -41,7 +41,8 @@
 
 import type { Entity, EntityAttribute, Relationship } from "@appwithai/core/types";
 import { formatDisplayName, ReferenceType } from "@appwithai/core/types";
-import { referenceIdFor, tableNameFor } from "../generators/wasm/model-bundle";
+import { DictionaryGenerator } from "../generators/dictionary.generator";
+import { GRID_NOISE, referenceIdFor, tableNameFor } from "../generators/wasm/model-bundle";
 import type { ParsedModel } from "../pipeline/generate-application";
 import { deriveAccess } from "../rbac/roles";
 
@@ -92,7 +93,7 @@ function slug(value: string): string {
  * a reader a column "points at Kyc Record" about an entity its own dictionary
  * called KYC Record.
  */
-const title = (value: string): string => formatDisplayName(String(value));
+export const title = (value: string): string => formatDisplayName(String(value));
 
 /* ------------------------------------------------------- what a field *is* */
 
@@ -125,7 +126,7 @@ const REFERENCE_NAMES: Record<number, string> = {
  * the field is a dropdown of other records; "Text" tells them it is a box they
  * type into. `string` tells them neither.
  */
-function controlFor(attribute: EntityAttribute, referenceId: number): string {
+export function controlFor(attribute: EntityAttribute, referenceId: number): string {
   if (attribute.enumValues?.length) return "Choice";
   return REFERENCE_NAMES[referenceId] ?? "Text";
 }
@@ -140,7 +141,7 @@ function controlFor(attribute: EntityAttribute, referenceId: number): string {
  * name from the column is what had the manual telling a reader a field
  * "points at Kyc Record" about an entity its own dictionary called KYC Record.
  */
-function referenceTarget(column: string, declared: Map<string, string>): string | null {
+export function referenceTarget(column: string, declared: Map<string, string>): string | null {
   const name = column.toLowerCase();
   if (name.endsWith("_by") || name.endsWith("_by_id")) return "User";
   if (!name.endsWith("_id")) return null;
@@ -149,7 +150,7 @@ function referenceTarget(column: string, declared: Map<string, string>): string 
 }
 
 /** Every entity the model declares, by its name with separators and case removed. */
-function declaredNames(model: ParsedModel): Map<string, string> {
+export function declaredNames(model: ParsedModel): Map<string, string> {
   return new Map(
     model.entities.map((entity) => [entity.name.toLowerCase().replace(/_/g, ""), entity.name])
   );
@@ -242,6 +243,183 @@ function relationshipsFor(model: ParsedModel, entity: Entity): string {
       <ul class="plain">
           ${items}
       </ul>`;
+}
+
+/**
+ * The window, the tab and the fields on it — the layer between a column and a
+ * screen.
+ *
+ * A column is where a value is *stored*; a field is where it is *placed*. The
+ * running application does not draw the fields table above — it draws
+ * `sys_field`, joined to the `sys_tab` it sits on and the `sys_window` that tab
+ * belongs to, which is why a field can be hidden or reordered in a live
+ * application without regenerating it. A manual that stopped at the columns
+ * described the storage and left out the screen.
+ *
+ * **Derived from `DictionaryGenerator`, never re-derived here.** It is the same
+ * call `model-bundle.ts` and the NestJS dictionary generator make, so the window
+ * this page names is the window the application actually opens. Working it out
+ * again from the entity list would be a second answer to the same question, and
+ * the first time the derivation changed the manual would start describing a
+ * layout the application does not have.
+ */
+function screensFor(dictionary: ManualDictionary, entity: Entity): string {
+  const layout = dictionary.get(entity.name);
+  if (!layout) return "";
+
+  const sectioned = layout.sections.length > 0;
+  const rows = layout.fields
+    .map(
+      (field) =>
+        `          <tr>
+            <td><code>${escapeHtml(field.column)}</code></td>
+            <td>${escapeHtml(field.label)}</td>${
+              sectioned
+                ? `
+            <td>${escapeHtml(field.section ?? "—")}</td>
+            <td>${escapeHtml(field.place ?? "—")}</td>`
+                : ""
+            }
+            <td>${field.onForm ? "Yes" : "No"}</td>
+            <td>${field.inGrid ? "Yes" : "No"}</td>
+            <td>${field.formSeq}</td>
+            <td>${field.readOnly ? "Yes" : "No"}</td>
+          </tr>`
+    )
+    .join("\n");
+
+  /* `%%section`: the form's headings and what each is for, before the fields
+     placed under them. */
+  const sections = sectioned
+    ? `
+      <p>The form is laid out in ${layout.sections.length} section${layout.sections.length === 1 ? "" : "s"}, each a grid of two columns:</p>
+      <ul class="plain">
+          ${layout.sections
+            .map(
+              (section) =>
+                `<li><b>${escapeHtml(section.name)}</b>${section.help ? ` &mdash; ${escapeHtml(section.help)}` : ""}</li>`
+            )
+            .join("\n          ")}
+      </ul>`
+    : "";
+
+  return `      <h4>Where it appears</h4>
+      <p>The application opens this record in the <b>${escapeHtml(layout.window)}</b> window, on the <b>${escapeHtml(layout.tab)}</b> tab. These are its ${layout.fields.length} field${layout.fields.length === 1 ? "" : "s"} &mdash; what the screen draws, in the order it draws them. An administrator can change any of this in Application Dictionary &rarr; Fields without regenerating the application.</p>${sections}
+      <table>
+        <thead><tr><th>Column</th><th>Label</th>${sectioned ? "<th>Section</th><th>Place</th>" : ""}<th>On the form</th><th>In the list</th><th>Order</th><th>Read only</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>`;
+}
+
+/** One entity's screen layout, as the Application Dictionary records it. */
+export interface ManualLayout {
+  window: string;
+  tab: string;
+  /** The `%%section` groups on this tab, in order. Empty when there are none. */
+  sections: Array<{ name: string; help?: string; seqNo: number }>;
+  fields: Array<{
+    column: string;
+    label: string;
+    section?: string;
+    /** `row 2, left`, `row 3, full width` — where in the section's grid. */
+    place?: string;
+    onForm: boolean;
+    inGrid: boolean;
+    formSeq: number;
+    readOnly: boolean;
+  }>;
+}
+
+export type ManualDictionary = Map<string, ManualLayout>;
+
+/**
+ * Run the dictionary derivation once and index it by entity name.
+ *
+ * `DictionaryGenerator` links its rows by temporary ids rather than by name —
+ * a field names a tab, a tab names a window and a table — so this resolves
+ * those once rather than per entity.
+ */
+export function manualDictionary(model: ParsedModel): ManualDictionary {
+  const context = new DictionaryGenerator({
+    databaseType: "postgresql",
+    includeRbac: true,
+    randomizeFieldOrder: false,
+  }).generateDictionaryContext(model.entities, model.relationships);
+
+  const tableOf = new Map(context.sysTables.map((table) => [table._tempId, table.table_name]));
+  const windowOf = new Map(context.sysWindows.map((w) => [w._tempId, w.name]));
+  const columnOf = new Map(context.sysColumns.map((c) => [c._tempId, c.column_name]));
+  const tabOf = new Map(
+    context.sysTabs.map((tab) => [
+      tab._tempId,
+      {
+        name: tab.name,
+        window: windowOf.get(tab._windowRef) ?? tab.name,
+        table: tableOf.get(tab._tableRef) ?? "",
+      },
+    ])
+  );
+
+  const byTable = new Map<string, ManualLayout>();
+  for (const tab of tabOf.values()) {
+    if (tab.table && !byTable.has(tab.table)) {
+      byTable.set(tab.table, { window: tab.window, tab: tab.name, sections: [], fields: [] });
+    }
+  }
+  const groupOf = new Map(context.sysFieldGroups.map((group) => [group._tempId, group]));
+  for (const group of context.sysFieldGroups) {
+    const tab = group._tabRef ? tabOf.get(group._tabRef) : undefined;
+    const layout = tab?.table ? byTable.get(tab.table) : undefined;
+    layout?.sections.push({
+      name: group.name,
+      help: group.description,
+      seqNo: group.seq_no ?? 0,
+    });
+  }
+  for (const field of context.sysFields) {
+    const tab = tabOf.get(field._tabRef);
+    if (!tab?.table) continue;
+    const layout = byTable.get(tab.table);
+    if (!layout) continue;
+    const column = columnOf.get(field._columnRef) ?? "";
+    const group = field._groupRef ? groupOf.get(field._groupRef) : undefined;
+    layout.fields.push({
+      column,
+      label: field.name,
+      section: group?.name,
+      place: group
+        ? field.column_span === 2
+          ? "full width"
+          : field.is_same_line
+            ? "beside the field before it"
+            : "starts a row"
+        : undefined,
+      onForm: field.is_displayed !== false,
+      /* `DictionaryGenerator` marks every column grid-visible and each consumer
+         narrows it — the browser stack through `isNoise`, the NestJS seed
+         through its own `GRID_NOISE`. The manual has to narrow it the same way
+         or it reports a list with eight audit columns the application does not
+         draw. Same set, imported rather than restated. */
+      inGrid: field.is_displayed_grid !== false && !GRID_NOISE.has(column),
+      formSeq: field.seq_no ?? 0,
+      readOnly: !!field.is_read_only,
+    });
+  }
+  for (const layout of byTable.values()) {
+    layout.fields.sort((a, b) => a.formSeq - b.formSeq);
+    layout.sections.sort((a, b) => a.seqNo - b.seqNo);
+  }
+
+  /* Keyed by entity name for the caller, which holds entities rather than
+     table names. */
+  const byEntity: ManualDictionary = new Map();
+  for (const entity of model.entities) {
+    const layout = byTable.get(tableNameFor(entity));
+    if (layout) byEntity.set(entity.name, layout);
+  }
+  return byEntity;
 }
 
 function workflowFor(model: ParsedModel, entity: Entity): string {
@@ -376,6 +554,10 @@ export function renderManual(model: ParsedModel, options: ManualOptions): string
 
   const entities = [...model.entities].sort((a, b) => a.name.localeCompare(b.name));
   const declared = declaredNames(model);
+  /* One derivation for the whole page: the window/tab/field layout every entity
+     section reports, taken from the same generator the application's own
+     dictionary is built by. */
+  const dictionary = manualDictionary(model);
 
   const contents = `
       <nav class="toc" aria-label="Contents">
@@ -393,6 +575,7 @@ ${entities
   .join("\n")}
             </ul>
           </li>
+          <li><a href="#concurrent-edits">When two people change the same record</a></li>
 ${model.rules.length ? '          <li><a href="#rules">The decisions it makes</a></li>\n' : ""}${
   model.sagas.length ? '          <li><a href="#processes">The processes it runs</a></li>\n' : ""
 }          <li><a href="#how-it-was-built">How this application was built</a></li>
@@ -425,6 +608,7 @@ ${fieldRows(entity, declared)}
         </tbody>
       </table>
 ${[
+  screensFor(dictionary, entity),
   relationshipsFor(model, entity),
   workflowFor(model, entity),
   rulesFor(model, entity),
@@ -585,7 +769,7 @@ ${contents}
 
   <section id="overview">
     <h2>What this application is</h2>
-${options.description && options.description !== "A generated full-stack application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>\n` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${
+${options.description && options.description !== "Generated application" ? `    <div class="app-overview"><p>${escapeHtml(options.description)}</p></div>\n` : ""}    <p>${escapeHtml(options.name)} keeps ${model.entities.length} kinds of record${model.entities.length === 1 ? "" : "s"}${
     model.categories.length ? `, grouped into ${model.categories.length} areas of the business` : ""
   }. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
     <p>This manual is generated from the same description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
@@ -631,6 +815,24 @@ ${
     <p>One section per record type. For each: what it is, every field it has and what that field is for, the records it connects to, the states it moves through, and who may use it.</p>
 
 ${entitySections}
+  </section>
+
+  <section id="concurrent-edits">
+    <h2>When two people change the same record</h2>
+    <p>Every record carries a version number, and every save raises it by one. When you open a record to edit it, the form remembers the version you opened. Saving sends that version back, and the save goes through only if nobody has saved the record since.</p>
+    <p>If somebody has, your save is not applied &mdash; neither of you loses a change without seeing it. The ${
+      options.stack === "browser" ? "form shows a panel" : "form opens a dialog"
+    } listing the fields the other person changed, with their value and yours side by side, and marks the fields you both changed. It offers three choices:</p>
+    <table>
+      <thead><tr><th>Choice</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Reload their version</td><td>Your unsaved edits are discarded and the form shows the record as it now stands.</td></tr>
+        <tr><td>Overwrite with mine</td><td>Your values are saved over theirs. It is checked again against the version you have just been shown, so a third person saving in the meantime is caught the same way.</td></tr>
+        <tr><td>Keep editing</td><td>Nothing is saved yet; the form stays open with your edits so you can change them first.</td></tr>
+      </tbody>
+    </table>
+    <p>Two saves of the same version arriving at the same moment cannot both win: exactly one is applied and the other is offered the same three choices.</p>
+    <p class="back"><a href="#top">Back to contents</a></p>
   </section>
 
 ${rulesSection}

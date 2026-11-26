@@ -19,7 +19,10 @@ import {
   type FullStackGeneratorOptions,
 } from "../generators/full-stack.generator";
 import { renderManual } from "../manual";
+import { renderSkills, SKILLS_DIRECTORY } from "../manual/skills";
 import { buildReportingPack } from "../reporting/pack";
+import { buildModelLogic, renderModelLogic } from "../rules/model-logic";
+import { buildRuleModel, renderRuleModel } from "../rules/rule-model";
 import { NO_LOG, type PipelineLogger } from "./logger-port";
 import {
   GENERATION_DEFAULTS,
@@ -279,6 +282,9 @@ export async function generateApplication(
     stage = "artifacts";
     await writeModelSource(options.outputDir, options.sources, log);
     await writeManual(options.outputDir, model, options, log);
+    await writeSkills(options.outputDir, model, options, log);
+    await writeRuleModel(options.outputDir, model, log);
+    await writeModelLogic(options.outputDir, options.sources, log);
 
     if (options.writeManifestFile !== false) {
       await writeManifest(options.outputDir, model, options, options.manifest ?? {}, log);
@@ -294,6 +300,60 @@ export async function generateApplication(
   } catch (err) {
     log.event("pipeline.generation.failed", { project: options.projectName, stage, err });
     throw err;
+  }
+}
+
+/**
+ * Write what a rule may name into the front end, for the rule editor.
+ *
+ * Skipped when there is no front end (`skipFrontend`): the file has no reader
+ * there, and creating `frontend/src/lib` would leave a stray tree behind.
+ */
+async function writeRuleModel(
+  outputDir: string,
+  model: ParsedModel,
+  log: PipelineLogger = NO_LOG
+): Promise<void> {
+  const directory = path.join(outputDir, "frontend", "src", "lib");
+  try {
+    await fs.access(directory);
+  } catch {
+    return;
+  }
+  try {
+    await fs.writeFile(
+      path.join(directory, "rule-model.ts"),
+      renderRuleModel(buildRuleModel(model)),
+      "utf-8"
+    );
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: "rule-model.ts", err });
+  }
+}
+
+/**
+ * Write the workflows the model declares into the front end, for the Rules & workflows screen.
+ * Skipped without a front end, for the same reason as `writeRuleModel`.
+ */
+async function writeModelLogic(
+  outputDir: string,
+  sources: string | string[],
+  log: PipelineLogger = NO_LOG
+): Promise<void> {
+  const directory = path.join(outputDir, "frontend", "src", "lib");
+  try {
+    await fs.access(directory);
+  } catch {
+    return;
+  }
+  try {
+    await fs.writeFile(
+      path.join(directory, "model-logic.ts"),
+      renderModelLogic(buildModelLogic(sources)),
+      "utf-8"
+    );
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: "model-logic.ts", err });
   }
 }
 
@@ -333,6 +393,37 @@ async function writeManual(
     // silent. This ran for a year as a bare `catch {}`, so a manual that failed
     // to render was indistinguishable from one nobody opened.
     log.event("pipeline.artifact.write_failed", { artifact: "manual.html", err });
+  }
+}
+
+/**
+ * The application described for a chat assistant: one Markdown skill per entity
+ * and an index, in `assistant-skills/` at the project root.
+ *
+ * Beside the manual and from the same derivations (`manual/skills.ts`), so the
+ * two cannot disagree about a form or a button. At the root rather than in the
+ * front end's public directory: they are context for a server-side assistant,
+ * not pages for a browser, and nothing serves them. An orchestrator mounts the
+ * directory into its assistant; the browser (WASM) stack has no assistant and
+ * does not write them.
+ *
+ * Non-fatal, like the manual.
+ */
+async function writeSkills(
+  outputDir: string,
+  model: ParsedModel,
+  options: GenerateApplicationOptions,
+  log: PipelineLogger = NO_LOG
+): Promise<void> {
+  try {
+    const directory = path.join(outputDir, SKILLS_DIRECTORY);
+    await fs.mkdir(directory, { recursive: true });
+    const files = renderSkills(model, { name: options.projectName });
+    for (const [name, content] of Object.entries(files)) {
+      await fs.writeFile(path.join(directory, name), content, "utf-8");
+    }
+  } catch (err) {
+    log.event("pipeline.artifact.write_failed", { artifact: SKILLS_DIRECTORY, err });
   }
 }
 

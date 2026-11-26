@@ -234,8 +234,6 @@ export interface SysField {
   seq_no: number; // Field order in form (runtime modifiable!)
   seq_no_grid: number; // Column order in grid/table view
   display_length?: number; // Display width
-  x_position?: number; // X position in grid layout
-  y_position?: number; // Y position in grid layout
   column_span?: number; // Columns to span
   num_lines?: number; // Lines for text areas
 
@@ -506,8 +504,6 @@ export const SysFieldSchema = z.object({
   seq_no: z.number(),
   seq_no_grid: z.number(),
   display_length: z.number().optional(),
-  x_position: z.number().optional(),
-  y_position: z.number().optional(),
   column_span: z.number().optional(),
   num_lines: z.number().optional(),
   is_displayed: z.boolean(),

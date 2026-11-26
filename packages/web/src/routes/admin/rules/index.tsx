@@ -147,7 +147,7 @@ function RulesListPage() {
               <button
                 type="button"
                 onClick={() => navigate({ to: "/admin/rules/new" })}
-                className="flex items-center gap-2 px-4 py-2.5 bg-[#FF8400] text-white rounded-lg hover:bg-[#E67300] transition-all duration-200 font-medium shadow-md hover:shadow-lg"
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#FF8400] text-slate-900 rounded-lg hover:bg-[#E67300] transition-all duration-200 font-medium shadow-md hover:shadow-lg"
               >
                 <PlusIcon className="h-5 w-5" />
                 New Rule
@@ -240,7 +240,7 @@ function RulesListPage() {
                 <button
                   type="button"
                   onClick={() => navigate({ to: "/admin/rules/new" })}
-                  className="w-full px-3 py-2 bg-[#FF8400] text-white text-xs font-medium rounded-lg hover:bg-[#E67300] transition-all duration-200"
+                  className="w-full px-3 py-2 bg-[#FF8400] text-slate-900 text-xs font-medium rounded-lg hover:bg-[#E67300] transition-all duration-200"
                 >
                   Create Rule
                 </button>

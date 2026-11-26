@@ -1,8 +1,7 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Check, Info, Loader2, Settings, User } from "lucide-react";
+import { Check, Info, Loader2, Settings, User } from "lucide-react";
 import { useEffect, useState } from "react";
 import { JourneyArc } from "@/components/JourneyArc";
-import { ProgressStepper } from "@/components/ProgressStepper";
 import { WizardStepHeader } from "@/components/WizardStepHeader";
 import { requestContext } from "@/lib/request-context";
 import { useProjectStore } from "@/store/projectStore";
@@ -92,7 +91,7 @@ function InitPage() {
   };
 
   const handleContinue = () => {
-    navigate({ to: "/projects/$id/design", params: { id: projectId } });
+    navigate({ to: "/projects/$id/design", params: { id: projectId }, search: { view: "mermaid" } });
   };
 
   if (isLoading) {
@@ -115,19 +114,12 @@ function InitPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div role="main" className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate({ to: "/projects" })}
-              className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-secondary transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="font-bold text-xl tracking-tight">Project Configuration</h1>
+<h1 className="font-bold text-xl tracking-tight">Project Configuration</h1>
           </div>
           <button
             type="button"
@@ -139,30 +131,10 @@ function InitPage() {
         </div>
       </header>
 
-      {/* Progress Stepper */}
-      <ProgressStepper
-        currentStep="init"
-        completedSteps={["init"]}
-        onStepClick={(step) => {
-          if (step === "init") {
-            // Already on init, do nothing
-          } else if (step === "design") {
-            navigate({ to: "/projects/$id/design", params: { id: projectId } });
-          } else if (step === "logic") {
-            navigate({ to: "/projects/$id/logic", params: { id: projectId } });
-          } else if (step === "generate") {
-            navigate({ to: "/projects/$id/generate", params: { id: projectId } });
-          } else if (step === "enhance") {
-            navigate({ to: "/projects/$id/enhance", params: { id: projectId } });
-          } else if (step === "deploy") {
-            navigate({ to: "/projects/$id/deploy", params: { id: projectId } });
-          }
-        }}
-      />
 
       {/* Journey Arc */}
       <div className="max-w-screen-md mx-auto px-6 mt-6">
-        <JourneyArc currentStep="init" />
+        <JourneyArc currentStep="init" projectId={projectId} />
       </div>
 
       {/* Error Display */}
@@ -336,7 +308,7 @@ function InitPage() {
                   </div>
                 ) : (
                   <div className="bg-muted border border-border text-foreground rounded-xl px-4 py-3">
-                    Full Stack: TanStack Start + NestJS + Knex.js
+                    Full Stack: TanStack Start + NestJS + Kysely
                   </div>
                 )}
                 {!isNewProject && (
@@ -409,17 +381,30 @@ function InitPage() {
                 "Save Changes"
               )}
             </button>
-            <button
-              type="button"
-              onClick={handleContinue}
-              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-4 rounded-xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
-              style={{ backgroundColor: "#FF8400" }}
-            >
-              Continue to Design
-            </button>
+
           </div>
         </div>
       </main>
+
+      <footer className="border-t border-border bg-background/80 backdrop-blur-md sticky bottom-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/projects" })}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-secondary text-foreground font-medium transition-all"
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            onClick={handleContinue}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all"
+            style={{ backgroundColor: "#FF8400" }}
+          >
+            Continue →
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

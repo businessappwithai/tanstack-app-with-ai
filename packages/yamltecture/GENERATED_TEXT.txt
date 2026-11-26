@@ -1,0 +1,32 @@
+The TypeScript port keeps the existing AppWithAI generator unchanged. Mermaid/EML and template files remain the generator inputs.
+
+The intended model is:
+
+  Mermaid/EML = canonical application model
+  model.ai.yaml = persistent, deterministic, Git-versioned AI semantic projection
+  Git history = long-term modelling memory
+  selected historical YAML/diffs = retrieved AI context
+  typed JSON/tool operations + Zod = AI modification protocol
+  EMLModelGateway = safe application of changes
+  existing AppWithAI generator = unchanged
+
+The important architectural rule is not to make YAML a second independent source of truth. The agent can read YAML because it is compact and structured, but accepted changes should be applied through typed operations to the canonical EML. After the EML checker passes, regenerate the YAML projection and commit both files together.
+
+YAMLtecture is valuable here because of its graph-oriented YAML model, hierarchy, query engine and deterministic Mermaid ideas. A TypeScript port integrates those directly into the AppWithAI TypeScript stack. The port intentionally changes random upstream link UUIDs into stable deterministic IDs and supports recursive structured attributes, which are important for Git history and AI context.
+
+The six worked models referenced by https://www.appwithai.org/try-it-yourself.html were used as compatibility targets: CRM, dance studio, hospital management, drug discovery, investment/wealth management and education management. Entity counts matched all six advertised counts in the compatibility analysis, and all directive families used by those files were recognized.
+
+For local testing, run:
+
+  bun install
+  bun run test
+  bun run typecheck
+  bun run test:website
+
+To inspect an EML model:
+
+  bun run inspect -- /path/to/model.eml.mmd
+
+To create its deterministic AI projection:
+
+  bun run project -- /path/to/model.eml.mmd /path/to/model.ai.yaml

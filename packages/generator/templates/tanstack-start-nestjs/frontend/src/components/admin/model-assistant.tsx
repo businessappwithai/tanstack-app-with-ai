@@ -17,6 +17,7 @@
 
 import { CopilotKit } from '@copilotkit/react-core';
 import { CopilotSidebar } from '@copilotkit/react-ui';
+import { useEffect } from 'react';
 import { useModelAssistant } from '../../hooks/useModelAssistant';
 import '@copilotkit/react-ui/styles.css';
 import { APP_NAME } from '@/lib/app-meta';
@@ -29,6 +30,30 @@ import { APP_NAME } from '@/lib/app-meta';
 function AssistantActions() {
   useModelAssistant();
   return null;
+}
+
+/**
+ * Gives the chat's message box an accessible name. CopilotKit draws its own
+ * `<textarea>` and exposes only a placeholder, which is not a name and vanishes
+ * once something is typed. The box appears when the sidebar opens, so this
+ * watches for it. A name the library sets for itself is left alone.
+ */
+function useMessageBoxLabel(label: string) {
+  useEffect(() => {
+    const apply = () => {
+      document
+        .querySelectorAll<HTMLTextAreaElement>('.copilotKitInput textarea')
+        .forEach((box) => {
+          if (!box.hasAttribute('aria-label') && !box.hasAttribute('aria-labelledby')) {
+            box.setAttribute('aria-label', label);
+          }
+        });
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [label]);
 }
 
 const ASSISTANT_LABELS = {
@@ -45,6 +70,7 @@ const ASSISTANT_LABELS = {
  * asking for the assistant, so starting closed would ask them twice.
  */
 export default function ModelAssistant() {
+  useMessageBoxLabel(`Message the ${APP_NAME} assistant`);
   return (
     <CopilotKit
       runtimeUrl="/api/copilotkit"

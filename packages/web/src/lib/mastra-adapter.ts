@@ -6,7 +6,7 @@ import type { MastraClient } from "@mastra/client-js";
  */
 // Mirrors the adapter shape CopilotKit expects; kept as a class so the integration
 // point stays recognisable.
-// biome-ignore lint/complexity/noStaticOnlyClass: deliberate adapter shape.
+// deliberate adapter shape.
 export class MastraAgent {
   /**
    * Get remote agents from Mastra client

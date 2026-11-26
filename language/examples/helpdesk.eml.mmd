@@ -37,6 +37,9 @@ erDiagram
         integer impact_score
         string  priority OPTIONAL
         string  status OPTIONAL
+        datetime in_progress_at OPTIONAL
+        datetime closed_at OPTIONAL
+        datetime resolved_at OPTIONAL
     }
 
     Comment {
@@ -84,6 +87,14 @@ erDiagram
     %%field Comment.body help: What was said. This is the substance of the ticket's history, so it is written to be read months later by somebody who was not there.
     %%field Comment.is_internal help: Whether this entry is for the team only. Internal comments are never shown to the customer, which is what makes them safe for diagnosis, escalation notes and anything not yet confirmed — set it before saving, because a comment cannot be unsent.
 
+    %% Form layout: headed sections of two-column rows (`|` between rows,
+    %% `,` within one; a row of one spans the full width).
+    %%section entity: Customer; name: Customer; help: Who raises tickets, how to reach them, and the support tier their contract buys.; rows: name, email | tier, is_active
+    %%section entity: Agent; name: Agent; help: Who answers tickets and whether they can still be assigned new ones.; rows: name, email | is_active
+    %%section entity: Ticket; name: Ticket; help: What is wrong, in the customer's words, and whose problem it is.; rows: subject | customer_id, agent_id | description
+    %%section entity: Ticket; name: Triage; help: How badly the customer is affected and so how soon it must be answered; rules set the priority from the impact.; rows: impact_score, priority
+    %%section entity: Comment; name: Comment; help: One reply on the ticket, who wrote it, and whether the customer can see it.; rows: ticket_id, author | is_internal | body
+
 %% ---- Section 2: Business rule — ticket prioritization ----------------------
 %% Decision reads the ticket's own impact_score, so it evaluates on real data.
 %%meta name: Ticket Prioritization
@@ -130,3 +141,11 @@ flowchart TD
     %%hook beforeCreate stampReference on Ticket
     %%hook afterCreate notifyCustomer on Ticket
     %%hook afterUpdate logStatusChange on Ticket
+
+%% ---- When each status was reached: stamped by the application ----
+%% A record moves by an action button, along an edge its state diagram draws,
+%% and the application writes the <state>_at time when it does.
+%%field Ticket.in_progress_at help: When this ticket moved to in progress. Stamped by the application when the move is made; nobody types it.
+%%field Ticket.closed_at help: When this ticket moved to closed. Stamped by the application when the move is made; nobody types it.
+%%field Ticket.resolved_at help: When this ticket moved to resolved. Stamped by the application when the move is made; nobody types it.
+%%section entity: Ticket; name: Progress; help: When this ticket reached each status, stamped by the application as the record moves; the status itself is shown in the header.; rows: in_progress_at, closed_at | resolved_at

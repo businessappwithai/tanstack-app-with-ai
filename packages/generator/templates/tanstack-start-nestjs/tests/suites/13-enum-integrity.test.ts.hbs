@@ -18,7 +18,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
-import { entities, harness, modelEnums, writableFields } from "../harness/index.ts";
+import { entities, harness, modelEnums, stateMachines, writableFields } from "../harness/index.ts";
 
 interface FormField {
   column_name: string;
@@ -60,13 +60,21 @@ describe("enum integrity", () => {
     await harness.setup();
 
     for (const entity of entities) {
-      const response = await harness.client.get<FormField[]>(
-        `/bus/${entity.route}/fields/form?includeHidden=true`,
-        { allowFailure: true }
-      );
+      // The grid as well as the form: a state field is never a form input (it
+      // is shown read-only in the record's header) but is always a grid column.
+      const [response, grid] = await Promise.all([
+        harness.client.get<FormField[]>(`/bus/${entity.route}/fields/form?includeHidden=true`, {
+          allowFailure: true,
+        }),
+        harness.client.get<FormField[]>(`/bus/${entity.route}/fields/grid`, { allowFailure: true }),
+      ]);
       if (!response.ok) continue;
 
-      for (const field of response.data ?? []) {
+      const fields = [...(response.data ?? [])];
+      for (const field of grid.ok ? (grid.data ?? []) : []) {
+        if (!fields.some((known) => known.column_name === field.column_name)) fields.push(field);
+      }
+      for (const field of fields) {
         const declared = modelEnums.find(
           (item) => item.referenceId === field.sys_reference_id
         );
@@ -128,6 +136,16 @@ describe("enum integrity", () => {
           const offenders: string[] = [];
 
           for (const column of columns) {
+            // The lifecycle owns a state machine's status column and writes its
+            // own phases into it: a save is Draft, a refused save is Error, and
+            // Reopen goes back to Draft. They are not the model's vocabulary and
+            // are not meant to be.
+            const tableName = entities.find((entity) => entity.route === column.route)?.tableName;
+            const lifecycleOwned = stateMachines.some(
+              (machine) => machine.tableName === tableName && machine.statusField === column.column
+            );
+            const accepts = (value: string) =>
+              allowed.has(value) || (lifecycleOwned && (value === "draft" || value === "error"));
             const response = await harness.client.get(
               `/bus/${column.route}?limit=200`,
               { allowFailure: true }
@@ -137,7 +155,7 @@ describe("enum integrity", () => {
             for (const row of rows<Row>(response.data)) {
               const value = row[column.column];
               if (value === null || value === undefined || value === "") continue;
-              if (!allowed.has(String(value))) {
+              if (!accepts(String(value))) {
                 offenders.push(`${column.route}.${column.column} = ${JSON.stringify(value)}`);
               }
             }

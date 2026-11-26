@@ -23,7 +23,7 @@
  *     log aggregator and a failure a user is describing can be joined up.
  */
 
-import { getLogger } from "@appwithai/core/logging";
+import { categoryForStatus, getLogger } from "@appwithai/core/logging";
 
 /** Anything slower than this is worth a warning of its own. */
 const LATENCY_BUDGET_MS = 1_000;
@@ -84,6 +84,8 @@ export function withRequestLogging<Context extends RequestBearing>(
           status: response.status,
           durationMs,
           err: null,
+          errorCategory: categoryForStatus(response.status).name,
+          errorCode: null,
         });
       } else if (response.status >= 400) {
         log.event("http.request.client_error", {
@@ -91,6 +93,8 @@ export function withRequestLogging<Context extends RequestBearing>(
           status: response.status,
           durationMs,
           reason: response.statusText || `HTTP ${response.status}`,
+          errorCategory: categoryForStatus(response.status).name,
+          errorCode: null,
         });
       } else {
         log.event("http.request.completed", { ...base, status: response.status, durationMs });
@@ -106,7 +110,14 @@ export function withRequestLogging<Context extends RequestBearing>(
       return withRequestId(response, requestId);
     } catch (err) {
       const durationMs = Date.now() - startedAt;
-      log.event("http.request.failed", { ...base, status: 500, durationMs, err });
+      log.event("http.request.failed", {
+        ...base,
+        status: 500,
+        durationMs,
+        err,
+        errorCategory: "internal",
+        errorCode: "INTERNAL_ERROR",
+      });
 
       // The handler threw, so it produced nothing to return. Answering with
       // JSON keeps the failure the same shape as every other error this API

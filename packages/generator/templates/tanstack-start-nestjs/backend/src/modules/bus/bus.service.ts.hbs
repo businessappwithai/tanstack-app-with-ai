@@ -7,7 +7,7 @@
  * Generated: {{now}}
  */
 
-import { Injectable, NotFoundException, BadRequestException, ConflictException, Inject, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, UnprocessableEntityException, Inject, } from '@nestjs/common';
 import type { Kysely } from 'kysely';
 import { randomUUID } from 'crypto';
 import { KYSELY_CONNECTION } from '../../database/database.constants';
@@ -16,9 +16,16 @@ import type { PaginationOptions, PaginatedResult } from '../../database/database
 import { executeBeforeCreateHooks, executeAfterCreateHooks, executeBeforeUpdateHooks, executeAfterUpdateHooks, executeBeforeDeleteHooks, executeAfterDeleteHooks, executeBeforeReadHooks, executeAfterReadHooks, executeBeforeListHooks, executeAfterListHooks, executeCustomValidateHooks } from '../hooks/hooks';
 import { RulesService } from '../rules/rules.service';
 import { PromotionDispatcher } from './promotion-dispatcher.service';
+import { EntityPromotionService } from './entity-promotion.service';
 import type { PromotionActor, PromotionResult } from './entity-promotion.service';
 import { WorkflowService } from '../workflow/workflow.service';
+import { breakCascadeCycles } from '../../common/cascade-lookups';
 import { currentRequestContext, getLogger } from '../../common/logging/logger.service';
+import { stateFieldOf } from '../../common/state-fields';
+import { lifecycleOf, phaseOf, saveMode, type Lifecycle } from '../../common/lifecycle';
+import { createCache } from '../../common/ttl-cache';
+import { logicViolations, sameValue } from '../../common/field-logic';
+import { resolveDefaultValue } from '../../common/field-values';
 import {
   DEFAULT_ORDER_BY_CLAUSE,
   parseOrderByClause,
@@ -53,6 +60,45 @@ export interface FieldMetadata {
   ref_label_fields?: string[];
   /** Populated for enum columns: the allowed values from sys_ref_list. */
   options?: { value: string; label: string }[];
+  /**
+   * The column the entity's state machine drives. System-managed: shown
+   * read-only in the record header and always in the list grid, never as an
+   * input — only the application's workflows change it.
+   */
+  is_state_field?: boolean;
+  /**
+   * Compiere's field logic — `@column@=value` conditions over the record being
+   * edited (common/field-logic.ts). The field's own logic wins over the
+   * column's. The form re-evaluates them as the record changes, and `create`
+   * and `update` below refuse what mandatory and read-only logic forbid.
+   */
+  display_logic?: string | null;
+  read_only_logic?: string | null;
+  mandatory_logic?: string | null;
+  /*
+   * The rest of the Field window (sys_field), each served because the form or
+   * the grid acts on it. Reference Type Override and Active are applied here,
+   * to sys_reference_id and is_displayed / is_displayed_grid, so no reader can
+   * forget them.
+   */
+  /** Description — the label's tooltip. The field's, else the column's. */
+  description?: string | null;
+  /** Display Length — the input's width and the grid column's, in characters. */
+  display_length?: number | null;
+  /** Num Lines — a text field with more than one is drawn as that many rows. */
+  num_lines?: number | null;
+  /** Heading — the field is drawn as a heading across its section, with no input. */
+  is_heading?: boolean;
+  /** Field Only — the input is drawn with no label. */
+  is_field_only?: boolean;
+  /** Encrypted — displayed masked and typed into a password input. */
+  is_encrypted?: boolean;
+  /** Obscure Type — 904 / 944 / A04 / A44; masks the displayed value (common/field-values.ts). */
+  obscure_type?: string | null;
+  /** Sort Number — the list's default order: smallest magnitude first, negative = descending. */
+  sort_no?: number | null;
+  /** Included Tab — another tab drawn inside the form at this field's place. */
+  included_tab?: { sys_tab_id: string; name: string; table_name: string; link_column: string } | null;
   /** Query param name for cascading filter (e.g. 'filter.country_id') */
   ref_filter_param?: string;
   /** Form field whose value feeds the cascading filter (e.g. 'country_id') */
@@ -65,6 +111,14 @@ export interface EntityMetadata {
     table_name: string;
     name: string;
     description?: string;
+    /** The state field, when the entity has a state machine. See FieldMetadata.is_state_field. */
+    state_field?: string | null;
+    /**
+     * The record lifecycle (common/lifecycle.ts): the column it is stored in,
+     * Draft, the Final values and the drawn moves, so the form can draw a
+     * record's action buttons and lock a Final one without asking per record.
+     */
+    lifecycle?: Lifecycle | null;
   };
   columns: FieldMetadata[];
   window?: {
@@ -79,9 +133,11 @@ export interface EntityMetadata {
 
 @Injectable()
 export class BusService {
-  private readonly logger = new Logger(BusService.name);
-  private metadataCache: Map<string, EntityMetadata> = new Map();
-  private readonly identifierFieldsCache = new Map<string, string[]>();
+  private readonly log = getLogger('entity');
+  // Each expires after CACHE_TTL_<NAME>_MS (common/ttl-cache.ts) and is dropped
+  // at once when the dictionary is changed through this application.
+  private readonly metadataCache = createCache<string, EntityMetadata>('entityMetadata');
+  private readonly identifierFieldsCache = createCache<string, string[]>('identifierFields');
   private static readonly AUTO_MANAGED_COLUMNS = new Set(['id', 'created_at', 'updated_at', 'deleted_at', 'version']);
 
   constructor(
@@ -90,8 +146,8 @@ export class BusService {
     private readonly rulesService: RulesService,
     private readonly workflowService: WorkflowService,
     private readonly promotionDispatcher: PromotionDispatcher,
+    private readonly promotionService: EntityPromotionService,
   ) {
-    this.logger.log('BusService initialized');
   }
 
   /**
@@ -102,24 +158,65 @@ export class BusService {
    */
   private async enforceBusinessRules(
     tableName: string,
-    data: Record<string, any>,
+    record: Record<string, any>,
     action: 'create' | 'update' | 'delete',
   ): Promise<void> {
+    const data = await this.withNumericValues(tableName, record);
     let result: { valid: boolean; errors: string[]; warnings: string[] };
     try {
       result = await this.rulesService.validate(tableName, data, action);
     } catch (error: any) {
-      this.logger.warn(`Business rule evaluation unavailable for ${tableName}:${action}: ${error?.message ?? error}`);
+      getLogger('rules').event('rules.evaluation.failed', { entity: tableName, rule: null, err: error });
       return;
     }
 
     for (const warning of result.warnings) {
-      this.logger.warn(`Business rule warning for ${tableName}:${action}: ${warning}`);
+      getLogger('rules').event('rules.warning.raised', {
+        entity: tableName,
+        event: action,
+        warning,
+      });
     }
 
     if (!result.valid) {
       throw new BadRequestException({ message: 'Business rule validation failed', errors: result.errors });
     }
+  }
+
+  /**
+   * The record as rules compare it: numbers as numbers.
+   *
+   * PostgreSQL hands NUMERIC and BIGINT columns back as strings — "1.500000" —
+   * and an update is checked against the stored row merged with the change. A
+   * rule's `> 0` never fits a string, so every rule over an existing amount,
+   * score or count stopped matching the moment the record was saved once: a
+   * refusal that held on create quietly let the same write through on update.
+   * Only columns the dictionary declares as numbers (references 11 and 12) are
+   * converted, so a code like "0042" in a text column stays text.
+   */
+  async withNumericValues(
+    tableName: string,
+    record: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    let numeric: Set<string>;
+    try {
+      const metadata = await this.getEntityMetadata(tableName);
+      numeric = new Set(
+        metadata.columns
+          .filter((column) => column.sys_reference_id === 11 || column.sys_reference_id === 12)
+          .map((column) => column.column_name),
+      );
+    } catch {
+      return record;
+    }
+    const out: Record<string, any> = { ...record };
+    for (const name of numeric) {
+      const value = out[name];
+      if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+        out[name] = Number(value);
+      }
+    }
+    return out;
   }
 
   private singularize(word: string): string {
@@ -145,9 +242,22 @@ export class BusService {
     return context?.id ? { ...context, requestId: currentRequestContext().requestId } : undefined;
   }
 
-  private getTableName(entity: string): string {
+  /**
+   * The tables the model declares. A bare name that is already one of them is
+   * not a plural: `dangerous_goods` is a table, and singularizing it to
+   * `dangerous_good` pointed the list, the form and the access check at a table
+   * that does not exist.
+   */
+  private static readonly MODEL_TABLES = new Set<string>([
+{{#each entities}}
+    '{{tableName}}',
+{{/each}}
+  ]);
+
+  getTableName(entity: string): string {
     const normalized = entity.toLowerCase().replace(/-/g, '_');
     if (normalized.startsWith('bus_')) return normalized;
+    if (BusService.MODEL_TABLES.has(`bus_${normalized}`)) return `bus_${normalized}`;
     const singular = this.singularize(normalized);
     return `bus_${singular}`;
   }
@@ -169,8 +279,8 @@ export class BusService {
     });
     const result = await this.db.findAll(tableName, processedOptions.options, processedOptions.filters);
     await executeAfterListHooks(entity, result.data);
+    await this.withLabels(tableName, result.data);
 
-    this.logger.log(`findAll: entity=${entity}, returned ${result.data.length} records`);
     return result;
   }
 
@@ -235,13 +345,35 @@ export class BusService {
 
     const nextOptions: PaginationOptions = { ...options };
 
+    // Sort Number: with no ordering asked for and none declared on the window,
+    // the field with the smallest non-zero Sort Number orders the list — a
+    // negative one descending. Below the window's clause, above updated_at.
+    // The seed writes the default (`updated_at DESC`) into every window so the
+    // Window record shows what the list does; that is the fallback, not a
+    // declaration, and must not stop Sort Number from applying.
+    const declaredOrder = metadata.window?.order_by_clause?.trim() ?? '';
+    const windowOrders =
+      declaredOrder !== '' &&
+      declaredOrder.replace(/\s+/g, ' ').toLowerCase() !== DEFAULT_ORDER_BY_CLAUSE.toLowerCase();
+    const sortField = windowOrders
+      ? undefined
+      : metadata.columns
+          .filter((column) => column.sort_no && queryable.has(column.column_name))
+          .sort((a, b) => Math.abs(a.sort_no!) - Math.abs(b.sort_no!))[0];
+    if (!nextOptions.orderBy && sortField) {
+      nextOptions.orderBy = sortField.column_name;
+      nextOptions.orderDir = sortField.sort_no! < 0 ? 'desc' : 'asc';
+    }
+
     if (!nextOptions.orderBy) {
       const clause = metadata.window?.order_by_clause?.trim() || DEFAULT_ORDER_BY_CLAUSE;
       const { terms, warnings } = parseOrderByClause(clause, queryable);
       for (const warning of warnings) {
-        this.logger.warn(
-          `window order_by_clause on '${entity}': dropped '${warning.clause}' — ${warning.reason}`,
-        );
+        this.log.event('entity.window.clause_dropped', {
+          entity,
+          clause: warning.clause,
+          reason: warning.reason,
+        });
       }
       // PaginationOptions carries one column, so the first term is the one that
       // reaches the query; the rest are dropped rather than silently reordered.
@@ -250,11 +382,11 @@ export class BusService {
         nextOptions.orderBy = first.column;
         nextOptions.orderDir = first.direction;
         if (rest.length > 0) {
-          this.logger.warn(
-            `window order_by_clause on '${entity}': only the first term is applied, ignored ${rest
-              .map((t) => t.column)
-              .join(', ')}`,
-          );
+          this.log.event('entity.window.clause_dropped', {
+            entity,
+            clause: rest.map((t) => t.column).join(', '),
+            reason: 'only the first order-by term is applied',
+          });
         }
       } else if (queryable.has('updated_at')) {
         nextOptions.orderBy = 'updated_at';
@@ -267,9 +399,11 @@ export class BusService {
 
     const { filters: windowFilters, warnings } = parseWhereClause(declared, queryable, columnTypes);
     for (const warning of warnings) {
-      this.logger.warn(
-        `window where_clause on '${entity}': dropped '${warning.clause}' — ${warning.reason}`,
-      );
+      this.log.event('entity.window.clause_dropped', {
+        entity,
+        clause: warning.clause,
+        reason: warning.reason,
+      });
     }
 
     // The caller's filters go last, so a column both of them name keeps the
@@ -284,6 +418,7 @@ export class BusService {
     const processedId = await executeBeforeReadHooks(entity, { id });
     const result = await this.db.findByIdOrFail(tableName, processedId.id || id);
     await executeAfterReadHooks(entity, result);
+    await this.withLabels(tableName, [result]);
 
     return result;
   }
@@ -293,11 +428,29 @@ export class BusService {
     await this.verifyEntity(entity);
 
     const metadata = await this.getEntityMetadata(entity);
-    const dataWithDefaults = { ...data };
+    // `_label` is served, never stored: a form hands back whatever it was given.
+    const { _label: _servedLabel, ...writable } = data;
+    const dataWithDefaults = { ...writable };
 
+    // A new record starts in Draft (common/lifecycle.ts); the save pipeline
+    // moves it on — to the first status of its flow, or to Final. A person's
+    // request never carries the state (the guard drops it); a workflow creating
+    // a record may name one, and a hook may still set it below.
+    const lifecycle = lifecycleOf(tableName);
+    if (lifecycle && dataWithDefaults[lifecycle.column] === undefined) {
+      dataWithDefaults[lifecycle.column] = lifecycle.draft;
+    }
+    if (lifecycle?.hasMachine) {
+      dataWithDefaults.doc_status = phaseOf(lifecycle, dataWithDefaults[lifecycle.column]);
+    }
+
+    // Default Value — the field's, else the column's, read as the form reads it
+    // (common/field-values.ts). A default that gives no value (a context
+    // variable, a database function) leaves the column to the database.
     for (const column of metadata.columns) {
       if (column.default_value && dataWithDefaults[column.column_name] === undefined) {
-        dataWithDefaults[column.column_name] = this.parseDefaultValue(column.default_value, column.sys_reference_id);
+        const value = resolveDefaultValue(column.default_value, column.sys_reference_id);
+        if (value !== undefined) dataWithDefaults[column.column_name] = value;
       }
     }
 
@@ -305,14 +458,19 @@ export class BusService {
     if (!processedData.id) {
       processedData = { ...processedData, id: randomUUID() };
     }
-    // Strip entity-specific PK field (e.g. compound_id) — the table uses 'id'
+    // Strip entity-specific PK field (e.g. compound_id) — the table uses 'id'.
+    // Not when the table really has that column: a self-referencing hierarchy
+    // (asset_class.asset_class_id) is data, and stripping it makes the record
+    // unwriteable once a rule requires the reference.
     const entityPkField = tableName.replace(/^bus_/, '') + '_id';
-    if (entityPkField in processedData) {
+    const hasOwnColumn = metadata.columns.some((c: any) => c.column_name === entityPkField);
+    if (!hasOwnColumn && entityPkField in processedData) {
       const { [entityPkField]: _pk, ...rest } = processedData;
       processedData = rest;
     }
 
     await executeCustomValidateHooks(entity, processedData);
+    this.enforceFieldLogic(metadata, processedData, processedData, null);
     await this.enforceBusinessRules(tableName, processedData, 'create');
 
     let result: any;
@@ -347,11 +505,11 @@ export class BusService {
       tableName,
       result.id,
       'create',
-      result,
+      // The rules judge numbers as numbers, as they did before the write.
+      await this.withNumericValues(tableName, result),
       this.actor(),
     );
 
-    this.logger.log(`create: entity=${entity}, id=${result?.id}, doc_status=${promotion.docStatus}`);
     // `userId` and `requestId` come from the request context the auth guard
     // filled in — this service has no user in scope and should not pretend to.
     getLogger('entity').event('entity.created', {
@@ -378,9 +536,24 @@ export class BusService {
       const fresh = await this.db.findById<Record<string, any>>(tableName, id);
       if (fresh) row = fresh;
     } catch (err: any) {
-      this.logger.warn(`Could not re-read ${tableName}:${id} after promotion: ${err?.message}`);
+      this.log.event('entity.reread.failed', { entity: tableName, recordId: id, err });
     }
     return { ...row, promotion };
+  }
+
+  /**
+   * The 409 a stale save receives. `details.code` is what the form keys its
+   * reload-or-overwrite dialog on, and the two versions let it say how far the
+   * record moved. The record itself is deliberately not included: the form
+   * re-reads it through GET, which applies the caller's field-level access —
+   * echoing the row here would hand back columns that route would withhold.
+   */
+  private versionConflict(entity: string, id: string, expectedVersion: number, currentVersion: number) {
+    return new ConflictException({
+      message: 'This record was changed by someone else after you opened it.',
+      error: 'Conflict',
+      details: { code: 'VERSION_CONFLICT', entity, id, expectedVersion, currentVersion },
+    });
   }
 
   async update(
@@ -392,29 +565,68 @@ export class BusService {
     const tableName = this.getTableName(entity);
     await this.verifyEntity(entity);
 
-    const processedData = await executeBeforeUpdateHooks(entity, data);
+    const { _label: _servedLabel, ...writable } = data;
+    const processedData = await executeBeforeUpdateHooks(entity, writable);
 
     // Validate business rules against the record as it would look after the
     // update, so rules over fields absent from a partial payload still hold.
     const current = await this.db.findById<Record<string, any>>(tableName, id);
+
+    // Where the record is decides what a save does (common/lifecycle.ts): from
+    // Draft or Error it runs the save pipeline again; part-way along its flow
+    // it is an edit whose workflows are one transaction with it; Final refuses.
+    const lifecycle = lifecycleOf(tableName);
+    const mode = lifecycle && current ? saveMode(lifecycle, current[lifecycle.column]) : 'pipeline';
+    if (mode === 'locked') {
+      throw new ConflictException({
+        message: 'This record is Final and cannot be changed. Reopen it to make changes.',
+        error: 'Conflict',
+        details: { code: 'RECORD_FINAL', entity, id, state: current?.[lifecycle!.column] ?? null },
+      });
+    }
+    // Back to Draft for the pipeline: the state field for a flow, else doc_status.
+    const lifecycleWrite: Record<string, unknown> =
+      mode === 'pipeline'
+        ? {
+            ...(lifecycle?.hasMachine ? { [lifecycle.column]: lifecycle.draft } : {}),
+            doc_status: 'draft',
+            doc_status_message: null,
+          }
+        : {};
     if (current) {
       const merged = { ...current, ...processedData };
       await executeCustomValidateHooks(entity, merged);
+      const metadata = await this.getEntityMetadata(entity);
+      this.enforceReadOnlyFields(metadata, processedData, current);
+      this.enforceFieldLogic(metadata, merged, processedData, current);
       await this.enforceBusinessRules(tableName, merged, 'update');
     }
 
+    // Optimistic locking. The form sends the version it loaded the record at
+    // (If-Match), and the write is refused with 409 if anyone has saved since.
+    //
+    // Comparing and then updating is not enough on its own: two saves that both
+    // read version 3 both pass the comparison and the second silently replaces
+    // the first. So the row is locked for the length of this transaction
+    // (`FOR UPDATE` — a parallel save waits here, then reads the version the
+    // first one wrote), and the UPDATE itself is conditioned on the version it
+    // checked. Either alone closes the race; both are kept so neither a change
+    // of isolation level nor a removed lock reopens it.
+    let inPlace: { ranRules: string[]; ranWorkflows: string[] } | undefined;
     const result = await this.db.transaction(async (trx) => {
       const existing = await trx
         .selectFrom(tableName as any)
         .selectAll()
         .where('id' as any, '=', id)
         .where('deleted_at' as any, 'is', null)
+        .forUpdate()
         .executeTakeFirst();
 
       if (!existing) return null;
 
-      if (expectedVersion !== undefined && (existing as any).version !== expectedVersion) {
-        throw new ConflictException('Record was modified by another user. Please reload and try again.');
+      const currentVersion = Number((existing as any).version ?? 0);
+      if (expectedVersion !== undefined && currentVersion !== expectedVersion) {
+        throw this.versionConflict(entity, id, expectedVersion, currentVersion);
       }
 
       const rows = await trx
@@ -422,20 +634,49 @@ export class BusService {
         .set({
           ...processedData,
           updated_at: new Date(),
-          version: ((existing as any).version || 0) + 1,
-          // An edited record is a draft again until its rules and workflows
-          // have been re-run against the new values. Left `final`, a record
-          // that was finalised once would keep that badge through every later
-          // edit — including one a rule would have refused — and the second
-          // transaction would have nothing to change. The stale explanation
-          // from a previous failed finalisation goes with it.
-          doc_status: 'draft',
-          doc_status_message: null,
+          version: currentVersion + 1,
+          // A record saved from Draft or Error is a draft again until its rules
+          // and workflows have been re-run against the new values, and the stale
+          // explanation from a previous failure goes with it. A record part-way
+          // along its flow keeps its state: only its moves change that.
+          ...lifecycleWrite,
         } as any)
         .where('id' as any, '=', id)
+        .where((eb: any) =>
+          (existing as any).version == null
+            ? eb('version' as any, 'is', null)
+            : eb('version' as any, '=', currentVersion),
+        )
         .returningAll()
         .execute();
-      return rows[0] ?? null;
+      // The row is locked, so this only happens if the lock was not honoured;
+      // it is still a conflict rather than a missing record.
+      if (rows.length === 0) {
+        throw this.versionConflict(entity, id, expectedVersion ?? currentVersion, currentVersion + 1);
+      }
+      const saved = rows[0] ?? null;
+      if (saved && mode === 'in-place') {
+        // The edit and its workflows commit together or not at all: a failure
+        // refuses the save and the record keeps the state and values it had.
+        try {
+          inPlace = await this.promotionService.runInTransaction(
+            trx,
+            tableName,
+            id,
+            'update',
+            await this.withNumericValues(tableName, saved),
+          );
+        } catch (error: any) {
+          throw new UnprocessableEntityException({
+            message:
+              `This change was not saved: ${error?.message ?? error}. ` +
+              'The record keeps its status and its previous values.',
+            error: 'Unprocessable Entity',
+            details: { code: 'WORKFLOW_FAILED', entity, id },
+          });
+        }
+      }
+      return saved;
     });
 
     if (!result) {
@@ -444,15 +685,33 @@ export class BusService {
 
     await executeAfterUpdateHooks(entity, result);
 
-    const promotion = await this.promotionDispatcher.dispatch(
-      tableName,
-      id,
-      'update',
-      result,
-      this.actor(),
-    );
+    const promotion: PromotionResult =
+      mode === 'in-place'
+        ? {
+            entityName: tableName,
+            entityId: id,
+            operation: 'update',
+            docStatus: 'active',
+            lifecycle: {
+              column: lifecycle!.column,
+              value: String(result[lifecycle!.column] ?? ''),
+              phase: 'active',
+            },
+            promoted: true,
+            message: 'Saved. The record keeps its status; its moves are its action buttons.',
+            ranRules: inPlace?.ranRules ?? [],
+            ranWorkflows: inPlace?.ranWorkflows ?? [],
+            durationMs: 0,
+            state: 'completed',
+          }
+        : await this.promotionDispatcher.dispatch(
+            tableName,
+            id,
+            'update',
+            await this.withNumericValues(tableName, result),
+            this.actor(),
+          );
 
-    this.logger.log(`update: entity=${entity}, id=${id}, doc_status=${promotion.docStatus}`);
     getLogger('entity').event('entity.updated', {
       entity,
       recordId: id,
@@ -481,7 +740,7 @@ export class BusService {
       tableName,
       id,
       'update',
-      current,
+      await this.withNumericValues(tableName, current),
       this.actor(),
     );
     return this.withPromotion(tableName, id, current, promotion);
@@ -524,7 +783,7 @@ export class BusService {
       tableName,
       id,
       'delete',
-      current,
+      await this.withNumericValues(tableName, current),
       this.actor(),
     );
     await executeAfterDeleteHooks(entity, promotion.promoted);
@@ -564,8 +823,9 @@ export class BusService {
   async getEntityMetadata(entity: string): Promise<EntityMetadata> {
     const tableName = this.getTableName(entity);
 
-    if (this.metadataCache.has(tableName)) {
-      return this.metadataCache.get(tableName)!;
+    const cachedMetadata = this.metadataCache.get(tableName);
+    if (cachedMetadata) {
+      return cachedMetadata;
     }
 
     const normalizedEntity = entity.toLowerCase().replace(/-/g, '_');
@@ -617,6 +877,7 @@ export class BusService {
         'sys_column.is_key',
         'sys_column.field_length',
         'sys_column.default_value',
+        'sys_column.description as column_description',
         'sys_column.seq_no',
         'sys_field.sys_field_id',
         'sys_field.seq_no as field_seq_no',
@@ -627,6 +888,26 @@ export class BusService {
         'sys_field.name as field_name',
         'sys_field.help as field_help',
         'sys_field.sys_field_group_id',
+        // `%%section`: a field alone on its row spans the group's two columns.
+        'sys_field.column_span as col_span',
+        'sys_field.is_same_line',
+        'sys_field.display_logic',
+        'sys_field.read_only_logic as field_read_only_logic',
+        'sys_field.mandatory_logic as field_mandatory_logic',
+        'sys_field.description as field_description',
+        'sys_field.display_length',
+        'sys_field.num_lines',
+        'sys_field.is_heading',
+        'sys_field.is_field_only',
+        'sys_field.is_encrypted',
+        'sys_field.obscure_type',
+        'sys_field.sort_no',
+        'sys_field.included_tab_id',
+        'sys_field.default_value as field_default_value',
+        'sys_field.sys_reference_id as field_reference_id',
+        'sys_field.is_active as field_is_active',
+        'sys_column.read_only_logic as column_read_only_logic',
+        'sys_column.mandatory_logic as column_mandatory_logic',
         'sys_field_group.name as group_name',
         'sys_field_group.columns as group_columns',
         'sys_field_group.description as group_description',
@@ -644,11 +925,78 @@ export class BusService {
       .orderBy('sys_column.seq_no', 'asc')
       .execute();
 
+    // Reference Type Override: the field is drawn, validated and filtered as the
+    // reference it names. Applied before anything below reads the reference.
+    for (const col of columns as any[]) {
+      if (col.field_reference_id) col.sys_reference_id = col.field_reference_id;
+    }
+
+    // Included Tab: the tab, its table, and the column linking its rows to the
+    // record this form is showing — the tab's link column, else the child's
+    // reference to this table by name.
+    const includedTabIds = [
+      ...new Set((columns as any[]).map((c) => c.included_tab_id).filter(Boolean) as string[]),
+    ];
+    const includedTabs = new Map<string, NonNullable<FieldMetadata['included_tab']>>();
+    if (includedTabIds.length > 0) {
+      const tabs = await this.kysely
+        .selectFrom('sys_tab')
+        .innerJoin('sys_table', 'sys_table.sys_table_id', 'sys_tab.sys_table_id')
+        .leftJoin('sys_column as link', 'link.sys_column_id', 'sys_tab.link_column_id')
+        .select([
+          'sys_tab.sys_tab_id',
+          'sys_tab.name',
+          'sys_table.table_name',
+          'sys_table.sys_table_id',
+          'link.column_name as link_column',
+        ])
+        .where('sys_tab.sys_tab_id', 'in', includedTabIds)
+        .execute();
+      const parentRef = `${table.table_name.replace(/^bus_/, '')}_id`;
+      for (const tab of tabs as any[]) {
+        let link: string | null = tab.link_column ?? null;
+        if (!link) {
+          const ref = await this.kysely
+            .selectFrom('sys_column')
+            .select('column_name')
+            .where('sys_table_id', '=', tab.sys_table_id)
+            .where('column_name', '=', parentRef)
+            .executeTakeFirst();
+          link = (ref as any)?.column_name ?? null;
+        }
+        // A tab with nothing linking it to this record would list every row of
+        // its table inside this one, which is not what the field asks for.
+        if (link) {
+          includedTabs.set(tab.sys_tab_id, {
+            sys_tab_id: tab.sys_tab_id,
+            name: tab.name,
+            table_name: tab.table_name,
+            link_column: link,
+          });
+        }
+      }
+    }
+
+    // A reference is only a lookup if the table it names exists. The name comes
+    // from the column (`document_type_id` -> `bus_document_type`), and a model
+    // may mark a column FK without declaring the entity behind it — the checker's
+    // EML502. Served as a lookup it asks the API to search a table that is not
+    // there; served as the plain field it really is, the user can still fill it.
+    const registeredTables = new Set<string>(
+      (await this.kysely.selectFrom('sys_table').select('table_name').execute()).map(
+        (row: any) => row.table_name as string
+      )
+    );
+    const resolveRef = (col: any): string | undefined => {
+      const name = this.resolveRefTableName(col.column_name, col.sys_reference_id);
+      return name && registeredTables.has(name) ? name : undefined;
+    };
+    const isDanglingRef = (col: any): boolean =>
+      !!this.resolveRefTableName(col.column_name, col.sys_reference_id) && !resolveRef(col);
+
     // Pre-resolve identifier fields for all referenced tables in this entity
     const refTableNames = [...new Set(
-      columns
-        .map((col: any) => this.resolveRefTableName(col.column_name, col.sys_reference_id))
-        .filter(Boolean) as string[]
+      columns.map((col: any) => resolveRef(col)).filter(Boolean) as string[]
     )];
     const refLabelFieldsMap: Record<string, string[]> = {};
     await Promise.all(refTableNames.map(async (t) => {
@@ -680,15 +1028,27 @@ export class BusService {
       }
     }
 
+    // The state field is system-managed (common/state-fields.ts): never an
+    // input on the form, never hidden from the list, whatever the dictionary's
+    // field rows say — an administrator's toggle cannot make it editable or
+    // take it out of the grid.
+    const stateField = stateFieldOf(table.table_name)?.field ?? null;
+
     const metadata: EntityMetadata = {
       table: {
         sys_table_id: table.sys_table_id,
         table_name: table.table_name,
         name: table.name,
         description: table.description,
+        state_field: stateField,
+        lifecycle: lifecycleOf(table.table_name) ?? null,
       },
       columns: columns.map((col: any) => {
-        const refTableName = this.resolveRefTableName(col.column_name, col.sys_reference_id);
+        const isStateField = stateField !== null && col.column_name === stateField;
+        // Active: an inactive field is on no screen. Its column still holds data
+        // and is still validated; it is simply not drawn.
+        const fieldActive = col.sys_field_id ? col.field_is_active !== false : true;
+        const refTableName = resolveRef(col);
         const options = !refTableName && enumOptionsMap[col.sys_reference_id]?.length
           ? enumOptionsMap[col.sys_reference_id]
           : undefined;
@@ -696,27 +1056,51 @@ export class BusService {
           sys_field_id: col.sys_field_id,
           name: col.field_name || col.name,
           column_name: col.column_name,
-          sys_reference_id: col.sys_reference_id,
+          // 10 = plain string: a reference to a table that does not exist is not a lookup.
+          sys_reference_id: isDanglingRef(col) ? 10 : col.sys_reference_id,
           is_mandatory: col.is_mandatory,
-          is_updateable: col.is_updateable,
-          is_identifier: col.is_identifier === true,
+          is_updateable: isStateField ? false : col.is_updateable,
+          // A reference degraded to a plain value holds an id with no table to
+          // resolve it, so it cannot name the record.
+          is_identifier: col.is_identifier === true && !isDanglingRef(col),
           is_key: col.is_key === true,
           field_length: col.field_length,
-          default_value: col.default_value,
+          // The field's own Default Value wins over its column's.
+          default_value: col.field_default_value || col.default_value,
           ref_table_name: refTableName,
           ref_label_fields: refTableName ? (refLabelFieldsMap[refTableName] ?? []) : undefined,
           options,
           seq_no: col.field_seq_no || col.seq_no || 0,
           seq_no_grid: col.seq_no_grid || 0,
-          is_displayed: col.is_displayed !== false,
-          is_displayed_grid: col.is_displayed_grid !== false,
-          is_read_only: col.field_is_read_only || false,
+          is_displayed: isStateField ? false : fieldActive && col.is_displayed !== false,
+          is_displayed_grid: isStateField ? true : fieldActive && col.is_displayed_grid !== false,
+          is_read_only: isStateField ? true : col.field_is_read_only || false,
+          is_state_field: isStateField,
           help: col.field_help || undefined,
           field_group_id: col.sys_field_group_id || null,
           group_name: col.group_name || null,
           group_columns: col.group_columns || null,
           group_description: col.group_description || null,
           group_layout_type: col.group_layout_type || null,
+          col_span: col.col_span || null,
+          is_same_line: col.is_same_line === true,
+          // The state field carries no logic: it is never an input.
+          display_logic: isStateField ? null : col.display_logic || null,
+          read_only_logic: isStateField
+            ? null
+            : col.field_read_only_logic || col.column_read_only_logic || null,
+          mandatory_logic: isStateField
+            ? null
+            : col.field_mandatory_logic || col.column_mandatory_logic || null,
+          description: col.field_description || col.column_description || null,
+          display_length: col.display_length ?? null,
+          num_lines: col.num_lines ?? null,
+          is_heading: col.is_heading === true,
+          is_field_only: col.is_field_only === true,
+          is_encrypted: col.is_encrypted === true,
+          obscure_type: col.obscure_type || null,
+          sort_no: col.sort_no ?? null,
+          included_tab: col.included_tab_id ? includedTabs.get(col.included_tab_id) ?? null : null,
         };
       }),
       window: window
@@ -761,7 +1145,7 @@ export class BusService {
             const fkColName = refFkCol.column_name as string;
             if (ownFkColumnNames.has(fkColName)) {
               const childCol = columns.find((c: any) => {
-                const t = this.resolveRefTableName(c.column_name, c.sys_reference_id);
+                const t = resolveRef(c);
                 return t === refTable;
               });
               if (childCol && childCol.column_name !== fkColName) {
@@ -777,8 +1161,14 @@ export class BusService {
         }
       }));
 
+      // Two lookups that each name the other as their parent would both wait forever.
+      const startable = breakCascadeCycles(
+        cascadeMap,
+        metadata.columns.map((c: any) => c.column_name as string),
+      );
+
       for (const col of metadata.columns) {
-        const cascade = cascadeMap[col.column_name];
+        const cascade = startable[col.column_name];
         if (cascade) {
           col.ref_filter_param = cascade.ref_filter_param;
           col.ref_filter_source = cascade.ref_filter_source;
@@ -790,8 +1180,59 @@ export class BusService {
     return metadata;
   }
 
+  /**
+   * Field logic, enforced. The form shows, locks and requires fields as the
+   * record is edited; this is the control behind it, so an API client, an
+   * import or a stale form gets the same answer: a displayed field whose
+   * mandatory logic holds for the record as it will be saved must have a value,
+   * and a field whose read-only logic holds for the record as it is stored
+   * cannot be changed. Read from the dictionary, so an administrator's edit
+   * under Windows, Tabs & Fields applies on the next write.
+   */
+  private enforceFieldLogic(
+    metadata: EntityMetadata,
+    record: Record<string, any>,
+    changes: Record<string, any>,
+    stored: Record<string, any> | null,
+  ): void {
+    const fields = metadata.columns.filter((col) => col.mandatory_logic || col.read_only_logic);
+    if (fields.length === 0) return;
+    const errors = logicViolations(fields, record, changes, stored);
+    if (errors.length > 0) {
+      throw new BadRequestException({ message: 'Validation failed', errors });
+    }
+  }
+
+  /**
+   * Read Only, enforced. A field marked Read Only in the Field window can be
+   * filled in when a record is created — the form offers it then — and never
+   * changed afterwards, whoever asks. A request that sends the value back
+   * unchanged is not a change (`sameValue`: `12.50` = `12.5`, a Date = its ISO
+   * text), so a full-record save still works. The key and the state field have
+   * their own rules and are not judged here.
+   */
+  private enforceReadOnlyFields(
+    metadata: EntityMetadata,
+    changes: Record<string, any>,
+    stored: Record<string, any>,
+  ): void {
+    const errors: string[] = [];
+    for (const column of metadata.columns) {
+      if (!column.is_read_only || column.is_state_field || column.is_key) continue;
+      if (BusService.AUTO_MANAGED_COLUMNS.has(column.column_name)) continue;
+      if (!(column.column_name in changes)) continue;
+      if (sameValue(stored[column.column_name], changes[column.column_name])) continue;
+      errors.push(`${column.name} is read-only and cannot be changed.`);
+    }
+    if (errors.length > 0) {
+      throw new BadRequestException({ message: 'Validation failed', errors });
+    }
+  }
+
   async getFormFields(entity: string): Promise<FieldMetadata[]> {
     const metadata = await this.getEntityMetadata(entity);
+    // The state field is never here: it is not an input. The record header
+    // reads it from the grid fields, which always carry it.
     return metadata.columns.filter((col) => col.is_displayed).sort((a, b) => a.seq_no - b.seq_no);
   }
 
@@ -800,11 +1241,33 @@ export class BusService {
     return metadata.columns.filter((col) => col.is_displayed_grid).sort((a, b) => a.seq_no_grid - b.seq_no_grid);
   }
 
+  /** Reference types whose column cannot hold '' — numbers, dates, booleans, ids, JSON. */
+  private static readonly NON_TEXT_REFERENCES = new Set([11, 12, 13, 15, 16, 18, 19, 20, 22, 28, 29, 37]);
+
   async validateData(entity: string, data: Record<string, any>, mode: 'create' | 'update' | 'patch'): Promise<void> {
     const metadata = await this.getEntityMetadata(entity);
     const errors: string[] = [];
 
+    /*
+     * An emptied input is "no value", not a value. A browser's date, number and
+     * lookup inputs report a cleared field as '', which no non-text column can
+     * hold: the type check refused it ("must be a valid date") and nobody could
+     * clear an optional date once it was set. The form sends what the input
+     * holds, so the API reads '' as null for every column that is not text —
+     * on `data` itself, because the caller writes the object it validated.
+     */
     for (const column of metadata.columns) {
+      if (data[column.column_name] === '' && BusService.NON_TEXT_REFERENCES.has(column.sys_reference_id)) {
+        data[column.column_name] = null;
+      }
+    }
+
+    for (const column of metadata.columns) {
+      // The state field is the application's to write, never a request's: the
+      // guard has already dropped or refused it, and on create the service
+      // fills in the initial state, so neither "required" nor "not updateable"
+      // is the caller's fault.
+      if (column.is_state_field) continue;
       // Skip auto-managed system columns in create mode
       if (mode === 'create' && BusService.AUTO_MANAGED_COLUMNS.has(column.column_name)) continue;
       const value = data[column.column_name];
@@ -860,6 +1323,8 @@ export class BusService {
     }
 
     if (errors.length > 0) {
+      // Counted, not listed: the messages quote the offending values.
+      this.log.event('entity.validation.failed', { entity, mode, count: errors.length });
       throw new BadRequestException({ message: 'Validation failed', errors });
     }
   }
@@ -890,20 +1355,13 @@ export class BusService {
         if (typeof value !== 'string' || !uuidRegex.test(value)) return `Field '${fieldName}' must be a valid UUID`;
         break;
       case 28:
-        if (typeof value !== 'object') return `Field '${fieldName}' must be a JSON object`;
+        // A JSON column is stored as text (the bus tables emit VARCHAR for it), so the API
+        // answers with a string and a client that reads a record and writes it back sends that
+        // string. Refusing it made every record carrying one impossible to update unchanged.
+        if (typeof value !== 'object' && typeof value !== 'string') return `Field '${fieldName}' must be a JSON object`;
         break;
     }
     return null;
-  }
-
-  private parseDefaultValue(defaultValue: string, referenceId: number): any {
-    switch (referenceId) {
-      case 11: return parseInt(defaultValue, 10);
-      case 12: return parseFloat(defaultValue);
-      case 20: return defaultValue.toLowerCase() === 'true' || defaultValue === 'Y';
-      case 28: try { return JSON.parse(defaultValue); } catch { return {}; }
-      default: return defaultValue;
-    }
   }
 
   private static readonly COLUMN_TABLE_ALIASES: Record<string, string> = {
@@ -912,9 +1370,110 @@ export class BusService {
 {{/each}}
   };
 
+  /**
+   * Serve each record's display label beside its columns, as `_label`.
+   *
+   * The dictionary names which columns say what a record *is* (`is_identifier`). Some
+   * of those are references — a class session is its offering and its room, a class
+   * pack is its member and the day it was bought — and a reference holds a uuid. Drawn
+   * as it is stored, a booking's Class Session read "1ad4ba31-… · ef22358c-…". So the
+   * server resolves each reference part through the parent's own identifier columns
+   * (one level deep, one query per reference column for the whole page) and sends the
+   * finished text. Every lookup, grid cell and record header reads this one answer.
+   */
+  private async withLabels(tableName: string, rows: any[]): Promise<void> {
+    if (!rows.length) return;
+    try {
+      const labels = await this.buildLabels(tableName, rows, 2);
+      rows.forEach((row, index) => {
+        const label = labels[index];
+        if (label) row._label = label;
+      });
+    } catch (error) {
+      // A label is a courtesy: never fail a read for want of one.
+      this.log.event('entity.labels.unresolved', { entity: tableName, err: error });
+    }
+  }
+
+  /**
+   * The label of each row, in order. `hops` is how many references may be followed:
+   * a booking is its session and its member, and the session is its offering and its
+   * room — two hops reach the names, and a model that chains further reads as far as
+   * that and no more.
+   */
+  private async buildLabels(
+    tableName: string,
+    rows: Array<Record<string, any>>,
+    hops: number
+  ): Promise<Array<string | undefined>> {
+    const fields = await this.resolveRefLabelFields(tableName);
+    if (!fields.length) return rows.map(() => undefined);
+    const registered = await this.registeredTableNames();
+
+    const resolved = new Map<string, Map<string, string>>();
+    for (const field of fields) {
+      const parent = this.resolveRefTableName(field, 18);
+      if (!parent || !registered.has(parent) || hops < 1) continue;
+      const ids = [...new Set(rows.map((row) => row[field]).filter((v) => v != null && v !== ''))];
+      if (!ids.length) continue;
+      const parentFields = await this.resolveRefLabelFields(parent);
+      if (!parentFields.length) continue;
+      const found = await (this.kysely as any)
+        .selectFrom(parent)
+        .select(['id', ...parentFields])
+        .where('id', 'in', ids)
+        .execute();
+      const text = await this.buildLabels(parent, found, hops - 1);
+      const labels = new Map<string, string>();
+      found.forEach((record: any, index: number) => {
+        const label = text[index];
+        if (label) labels.set(String(record.id), label);
+      });
+      resolved.set(field, labels);
+    }
+
+    const names = fields.every((f) => /(^|_)name$/.test(f));
+    return rows.map((row) => {
+      const parts = fields
+        .map((field) => {
+          const value = row[field];
+          if (value == null || value === '') return undefined;
+          // A reference that could not be followed is left out, never shown as its uuid.
+          if (this.resolveRefTableName(field, 18)) return resolved.get(field)?.get(String(value));
+          return BusService.formatLabelPart(value);
+        })
+        .filter((part): part is string => !!part);
+      return parts.length ? parts.join(names ? ' ' : ' · ') : undefined;
+    });
+  }
+
+  private registeredTables?: { at: number; names: Set<string> };
+
+  private async registeredTableNames(): Promise<Set<string>> {
+    if (this.registeredTables && Date.now() - this.registeredTables.at < 30_000) {
+      return this.registeredTables.names;
+    }
+    const names = new Set<string>(
+      (await this.kysely.selectFrom('sys_table').select('table_name').execute()).map(
+        (row: any) => row.table_name as string
+      )
+    );
+    this.registeredTables = { at: Date.now(), names };
+    return names;
+  }
+
+  private static formatLabelPart(value: unknown): string {
+    if (value instanceof Date) {
+      const iso = value.toISOString();
+      return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso.slice(0, 16).replace('T', ' ');
+    }
+    return String(value);
+  }
+
   private async resolveRefLabelFields(refTableName: string): Promise<string[]> {
-    if (this.identifierFieldsCache.has(refTableName)) {
-      return this.identifierFieldsCache.get(refTableName)!;
+    const cachedFields = this.identifierFieldsCache.get(refTableName);
+    if (cachedFields) {
+      return cachedFields;
     }
     try {
       const sysTable = await this.kysely
@@ -954,6 +1513,550 @@ export class BusService {
   }
 
   /**
+   * Build the application manual as self-contained HTML from live dictionary data.
+   *
+   * Queries sys_table, sys_column, sys_field, sys_field_group, sys_window, sys_tab,
+   * sys_workflow_transitions, sys_rule_definitions and sys_access_grant so the
+   * manual always reflects what the database actually contains rather than the
+   * model snapshot written at generation time.
+   *
+   * The CSS and page structure are identical to the static `renderManual()` used
+   * at generation time — only the data source changes.
+   */
+  async renderManualHtml(): Promise<string> {
+    const esc = (v: unknown) =>
+      String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const slugify = (v: string) =>
+      String(v).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    const titleFmt = (v: string) =>
+      String(v).replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const NOISE = new Set(['id', 'created_by', 'updated_by', 'deleted_by', 'deleted_at', 'version']);
+
+    const REF_NAMES: Record<number, string> = {
+      10: 'Text', 11: 'Whole number', 12: 'Amount', 13: 'Identifier',
+      14: 'Long text', 15: 'Date', 16: 'Date and time', 17: 'List',
+      18: 'Table reference', 19: 'Lookup', 20: 'Yes / No', 24: 'Web address',
+      28: 'JSON', 30: 'Password', 31: 'Email address', 32: 'Telephone',
+    };
+
+    // Baked in at generation time so the manual header names the application.
+    const appName = '{{project.name}}';
+    const appVersion = '{{project.version}}';
+    const appDescription: string = '{{project.description}}';
+    const generatedAt = new Date().toISOString();
+
+    // ── Load data ──────────────────────────────────────────────────────────
+    const tables = (await this.kysely
+      .selectFrom('sys_table as t')
+      .leftJoin('sys_window as w', 'w.sys_window_id', 't.sys_window_id')
+      .select([
+        't.sys_table_id', 't.table_name', 't.name as entity_name',
+        't.description as entity_desc', 'w.name as window_name',
+      ])
+      .where('t.is_active', '=', true)
+      .where('t.table_name', 'like', 'bus_%')
+      .orderBy('t.name', 'asc')
+      .execute()) as any[];
+
+    if (tables.length === 0) {
+      return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(appName)} &mdash; Manual</title></head><body><p style="font-family:sans-serif;padding:2rem">No entities found in the application dictionary.</p></body></html>`;
+    }
+
+    const tableIds = tables.map((t: any) => t.sys_table_id as string);
+    const tableNames = tables.map((t: any) => t.table_name as string);
+
+    const allColumns = (await this.kysely
+      .selectFrom('sys_column')
+      .selectAll()
+      .where('sys_table_id', 'in', tableIds)
+      .where('is_active', '=', true)
+      .orderBy('seq_no', 'asc')
+      .execute()) as any[];
+
+    const allTabs = (await this.kysely
+      .selectFrom('sys_tab')
+      .select(['sys_tab_id', 'sys_table_id', 'name'])
+      .where('sys_table_id', 'in', tableIds)
+      .orderBy('seq_no', 'asc')
+      .execute()) as any[];
+
+    const tabIds = allTabs.map((t: any) => t.sys_tab_id as string);
+
+    const allFields = tabIds.length > 0 ? (await this.kysely
+      .selectFrom('sys_field as f')
+      .leftJoin('sys_field_group as g', 'g.sys_field_group_id', 'f.sys_field_group_id')
+      .select([
+        'f.sys_field_id', 'f.sys_tab_id', 'f.sys_column_id',
+        'f.name as field_name', 'f.seq_no', 'f.seq_no_grid',
+        'f.is_displayed', 'f.is_displayed_grid', 'f.is_read_only',
+        'f.is_active', 'f.help', 'f.column_span', 'f.is_same_line',
+        'f.sys_field_group_id',
+        'g.name as group_name', 'g.description as group_desc',
+      ])
+      .where('f.sys_tab_id', 'in', tabIds)
+      .orderBy('f.seq_no', 'asc')
+      .execute()) as any[] : [];
+
+    const allGroups = tabIds.length > 0 ? (await this.kysely
+      .selectFrom('sys_field_group')
+      .select(['sys_field_group_id', 'sys_tab_id', 'name', 'description', 'seq_no'])
+      .where('sys_tab_id', 'in', tabIds)
+      .orderBy('seq_no', 'asc')
+      .execute()) as any[] : [];
+
+    // Enum values for columns referencing sys_ref_list
+    const SCALAR_IDS = new Set([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 24, 28, 30, 31, 32]);
+    const enumRefIds = [...new Set(
+      allColumns.map((c: any) => c.sys_reference_id as number)
+        .filter((id: number) => id && !SCALAR_IDS.has(id)),
+    )];
+    const enumMap = new Map<number, string[]>();
+    if (enumRefIds.length > 0) {
+      const rows = (await this.kysely
+        .selectFrom('sys_ref_list')
+        .select(['sys_reference_id', 'value'])
+        .where('sys_reference_id', 'in', enumRefIds)
+        .where('is_active', '=', true)
+        .orderBy('value', 'asc')
+        .execute()) as any[];
+      for (const r of rows) {
+        const arr = enumMap.get(r.sys_reference_id) ?? [];
+        arr.push(r.value);
+        enumMap.set(r.sys_reference_id, arr);
+      }
+    }
+
+    // State machine transitions
+    const allTransitions = tableNames.length > 0 ? (await this.kysely
+      .selectFrom('sys_workflow_transitions')
+      .select(['table_name', 'status_field', 'from_state', 'to_state', 'transition_name'])
+      .where('table_name', 'in', tableNames)
+      .where('is_active', '=', true)
+      .execute()) as any[] : [];
+
+    // Rules (entity_name in sys_rule_definitions holds the table name, e.g. 'bus_invoice')
+    const allRules = tableNames.length > 0 ? (await this.kysely
+      .selectFrom('sys_rule_definitions')
+      .select(['entity_name', 'rule_name', 'title', 'operation'])
+      .where('entity_name', 'in', tableNames)
+      .where('is_active', '=', true)
+      .orderBy('rule_name', 'asc')
+      .execute()) as any[] : [];
+
+    // Access grants
+    const allGrants = tableNames.length > 0 ? (await this.kysely
+      .selectFrom('sys_access_grant')
+      .select(['kind', 'table_name', 'action', 'role_name'])
+      .where('table_name', 'in', tableNames)
+      .where('is_active', '=', true)
+      .execute()) as any[] : [];
+
+    // ── Build lookup maps ──────────────────────────────────────────────────
+    const colsByTable = new Map<string, any[]>();
+    for (const col of allColumns) {
+      const arr = colsByTable.get(col.sys_table_id) ?? [];
+      arr.push(col);
+      colsByTable.set(col.sys_table_id, arr);
+    }
+
+    const tabByTable = new Map<string, any>();
+    for (const tab of allTabs) {
+      if (!tabByTable.has(tab.sys_table_id)) tabByTable.set(tab.sys_table_id, tab);
+    }
+
+    const fieldsByTab = new Map<string, any[]>();
+    for (const f of allFields) {
+      const arr = fieldsByTab.get(f.sys_tab_id) ?? [];
+      arr.push(f);
+      fieldsByTab.set(f.sys_tab_id, arr);
+    }
+
+    const groupsByTab = new Map<string, any[]>();
+    for (const g of allGroups) {
+      const arr = groupsByTab.get(g.sys_tab_id) ?? [];
+      arr.push(g);
+      groupsByTab.set(g.sys_tab_id, arr);
+    }
+
+    const transByTable = new Map<string, any[]>();
+    for (const t of allTransitions) {
+      const arr = transByTable.get(t.table_name) ?? [];
+      arr.push(t);
+      transByTable.set(t.table_name, arr);
+    }
+
+    const rulesByTable = new Map<string, any[]>();
+    for (const r of allRules) {
+      const arr = rulesByTable.get(r.entity_name) ?? [];
+      arr.push(r);
+      rulesByTable.set(r.entity_name, arr);
+    }
+
+    // read restrictions: table_name -> roles[] (empty set = everyone can read)
+    const readRolesByTable = new Map<string, Set<string>>();
+    // write grants: table_name -> operation -> roles[]
+    const writeGrantsByTable = new Map<string, Map<string, string[]>>();
+    for (const g of allGrants) {
+      if (g.kind === 'op') {
+        if (g.action === 'read') {
+          const s = readRolesByTable.get(g.table_name) ?? new Set<string>();
+          s.add(g.role_name);
+          readRolesByTable.set(g.table_name, s);
+        } else {
+          let opMap = writeGrantsByTable.get(g.table_name);
+          if (!opMap) { opMap = new Map(); writeGrantsByTable.set(g.table_name, opMap); }
+          const arr = opMap.get(g.action) ?? [];
+          arr.push(g.role_name);
+          opMap.set(g.action, arr);
+        }
+      }
+    }
+
+    // ── Build HTML sections ────────────────────────────────────────────────
+    const buildEntitySection = (table: any): string => {
+      const cols = colsByTable.get(table.sys_table_id) ?? [];
+      const tab = tabByTable.get(table.sys_table_id);
+      const tabFields = tab ? (fieldsByTab.get(tab.sys_tab_id) ?? []) : [];
+      const tabGroups = tab ? (groupsByTab.get(tab.sys_tab_id) ?? []) : [];
+      const tableTrans = transByTable.get(table.table_name) ?? [];
+      const tableRules = rulesByTable.get(table.table_name) ?? [];
+      const readRoles = readRolesByTable.get(table.table_name);
+      const writeGrants = writeGrantsByTable.get(table.table_name);
+
+      // Field rows table
+      const fieldRows = cols.map((col: any) => {
+        const enumVals = enumMap.get(col.sys_reference_id) ?? [];
+        const control = enumVals.length ? 'Choice' : (REF_NAMES[col.sys_reference_id as number] ?? 'Text');
+        const constraints: string[] = [];
+        if (col.is_key) constraints.push('key');
+        else if (col.is_mandatory) constraints.push('required');
+        const helpHtml = col.description
+          ? esc(col.description)
+          : '<span class="unset">&mdash;</span>';
+        let detail = '';
+        if (enumVals.length) {
+          detail = `One of: ${enumVals.map((v: string) => `<code>${esc(v)}</code>`).join(', ')}`;
+        } else if ((col.sys_reference_id === 18 || col.sys_reference_id === 19) &&
+            String(col.column_name).endsWith('_id') && col.column_name !== 'id' &&
+            !String(col.column_name).endsWith('_by_id')) {
+          const target = titleFmt(String(col.column_name).slice(0, -3));
+          detail = `Points at <b>${esc(target)}</b>`;
+        }
+        return `        <tr>
+          <td><code>${esc(col.column_name)}</code></td>
+          <td>${esc(control)}</td>
+          <td>${constraints.length ? constraints.map((c: string) => `<span class="tag">${esc(c)}</span>`).join(' ') : '&mdash;'}</td>
+          <td>${helpHtml}${detail ? `<div class="detail">${detail}</div>` : ''}</td>
+        </tr>`;
+      }).join('\n');
+
+      // Screen layout ("Where it appears")
+      let screenSection = '';
+      if (tab && tabFields.length > 0) {
+        const hasSections = tabGroups.length > 0;
+        const displayed = [...tabFields]
+          .filter((f: any) => f.is_active !== false)
+          .sort((a: any, b: any) => (a.seq_no ?? 0) - (b.seq_no ?? 0));
+
+        const fieldTableRows = displayed.map((f: any) => {
+          const col = cols.find((c: any) => c.sys_column_id === f.sys_column_id);
+          const colName = col?.column_name ?? '';
+          const group = hasSections
+            ? tabGroups.find((g: any) => g.sys_field_group_id === f.sys_field_group_id)
+            : null;
+          const place = group
+            ? (f.column_span === 2 ? 'full width' : f.is_same_line ? 'beside the field before it' : 'starts a row')
+            : '';
+          const inGrid = f.is_displayed_grid !== false && !NOISE.has(colName);
+          return `          <tr>
+            <td><code>${esc(colName)}</code></td>
+            <td>${esc(f.field_name || colName)}</td>${hasSections ? `
+            <td>${esc(group?.name ?? '—')}</td>
+            <td>${esc(place || '—')}</td>` : ''}
+            <td>${f.is_displayed !== false ? 'Yes' : 'No'}</td>
+            <td>${inGrid ? 'Yes' : 'No'}</td>
+            <td>${f.seq_no ?? 0}</td>
+            <td>${f.is_read_only ? 'Yes' : 'No'}</td>
+          </tr>`;
+        }).join('\n');
+
+        const sortedGroups = [...tabGroups].sort((a: any, b: any) => (a.seq_no ?? 0) - (b.seq_no ?? 0));
+        const sectionsList = hasSections
+          ? `\n      <p>The form is laid out in ${sortedGroups.length} section${sortedGroups.length === 1 ? '' : 's'}, each a grid of two columns:</p>
+      <ul class="plain">
+          ${sortedGroups.map((g: any) => `<li><b>${esc(g.name)}</b>${g.description ? ` &mdash; ${esc(g.description)}` : ''}</li>`).join('\n          ')}
+      </ul>`
+          : '';
+
+        screenSection = `      <h4>Where it appears</h4>
+      <p>The application opens this record in the <b>${esc(table.window_name || table.entity_name)}</b> window, on the <b>${esc(tab.name)}</b> tab. These are its ${displayed.length} field${displayed.length === 1 ? '' : 's'} &mdash; what the screen draws, in the order it draws them. An administrator can change any of this in Application Dictionary &rarr; Fields without regenerating the application.</p>${sectionsList}
+      <table>
+        <thead><tr><th>Column</th><th>Label</th>${hasSections ? '<th>Section</th><th>Place</th>' : ''}<th>On the form</th><th>In the list</th><th>Order</th><th>Read only</th></tr></thead>
+        <tbody>
+${fieldTableRows}
+        </tbody>
+      </table>`;
+      }
+
+      // Lifecycle (state machine transitions)
+      let lifecycleSection = '';
+      if (tableTrans.length > 0) {
+        const byField = new Map<string, any[]>();
+        for (const t of tableTrans) {
+          const arr = byField.get(t.status_field) ?? [];
+          arr.push(t);
+          byField.set(t.status_field, arr);
+        }
+        lifecycleSection = [...byField.entries()].map(([field, transitions]) => {
+          const rows = transitions.map((t: any) =>
+            `          <tr><td><code>${esc(t.from_state)}</code></td><td><code>${esc(t.to_state)}</code></td><td>${t.transition_name ? `<code>${esc(t.transition_name)}</code>` : '&mdash;'}</td></tr>`
+          ).join('\n');
+          return `      <h4>Lifecycle &mdash; ${esc(titleFmt(field))}</h4>
+      <p>These are the moves a record may make along its <code>${esc(field)}</code> field, and no others:</p>
+      <table>
+        <thead><tr><th>From</th><th>To</th><th>Event</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>`;
+        }).join('\n');
+      }
+
+      // Rules
+      let rulesSection = '';
+      if (tableRules.length > 0) {
+        const rows = tableRules.map((r: any) =>
+          `          <tr><td><code>${esc(r.rule_name)}</code></td><td>${esc(r.title || r.rule_name)}</td><td>${esc(r.operation)}</td></tr>`
+        ).join('\n');
+        rulesSection = `      <h4>What happens when it is written</h4>
+      <table>
+        <thead><tr><th>Rule</th><th>Title</th><th>Runs on</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>`;
+      }
+
+      // Access
+      let accessSection = '';
+      if (readRoles !== undefined || (writeGrants && writeGrants.size > 0)) {
+        const readPart = readRoles && readRoles.size > 0
+          ? `      <p>Visible to ${[...readRoles].map((r: string) => `<b>${esc(titleFmt(r))}</b>`).join(', ')}, and to the Administrator. Nobody else sees it at all &mdash; it is absent from their menu rather than refused when opened.</p>`
+          : '      <p>Visible to every signed-in user; the model places no restriction on reading it.</p>';
+        let writePart = '';
+        if (writeGrants && writeGrants.size > 0) {
+          const writeRows = [...writeGrants.entries()].map(([op, roles]) =>
+            `          <tr><td>${esc(titleFmt(op))}</td><td>${roles.map((r: string) => esc(titleFmt(r))).join(', ')}</td></tr>`
+          ).join('\n');
+          writePart = `      <table>
+        <thead><tr><th>Action</th><th>Permitted to</th></tr></thead>
+        <tbody>
+${writeRows}
+        </tbody>
+      </table>`;
+        }
+        accessSection = `      <h4>Who may use it</h4>
+${readPart}
+${writePart}`;
+      }
+
+      const noHelp = cols.every((c: any) => !c.description);
+
+      return `    <section id="entity-${slugify(table.entity_name)}" class="entity">
+      <h3>${esc(table.entity_name)}</h3>
+      <p class="lede">${table.entity_desc ? esc(table.entity_desc) : '<span class="missing">The model gives this entity no description. Add one with <code>%%entity help: …</code>.</span>'}</p>
+      <p class="meta">Stored as <code>${esc(table.table_name)}</code>.</p>
+
+      <h4>Its fields</h4>
+${noHelp ? `      <p class="missing">No field here carries help text. Add it with <code>%%field ${esc(table.entity_name)}.&lt;field&gt; help: …</code> and it appears here and in the application itself.</p>\n` : ''}      <table>
+        <thead><tr><th>Field</th><th>Shown as</th><th></th><th>What it is for</th></tr></thead>
+        <tbody>
+${fieldRows}
+        </tbody>
+      </table>
+${[screenSection, lifecycleSection, rulesSection, accessSection].filter(Boolean).join('\n')}
+      <p class="back"><a href="#top">Back to contents</a></p>
+    </section>`;
+    };
+
+    const entitySections = tables.map(buildEntitySection).join('\n\n');
+
+    const hasRules = allRules.length > 0;
+    const allRulesSection = hasRules
+      ? `  <section id="rules">
+    <h2>The decisions it makes</h2>
+    <p>Each of these is a decision table the application evaluates when a record is written. A rule that refuses a write refuses it for everyone, including an administrator &mdash; it is a statement about the business, not about permissions.</p>
+    <table>
+      <thead><tr><th>Rule</th><th>Applies to</th><th>Runs on</th></tr></thead>
+      <tbody>
+${allRules.map((r: any) => {
+  const t = tables.find((tbl: any) => tbl.table_name === r.entity_name);
+  const entityLabel = t?.entity_name ?? r.entity_name;
+  return `        <tr><td><code>${esc(r.rule_name)}</code></td><td><a href="#entity-${slugify(entityLabel)}">${esc(entityLabel)}</a></td><td>${esc(r.operation)}</td></tr>`;
+}).join('\n')}
+      </tbody>
+    </table>
+    <p class="back"><a href="#top">Back to contents</a></p>
+  </section>`
+      : '';
+
+    // Inline CSS — identical to the static manual's stylesheet so both look the same.
+    const css = `
+:root {
+  --bg: #ffffff; --surface: #f7f7f6; --border: #e3e3e0; --text: #17171a;
+  --soft: #5f6066; --faint: #8a8b91; --accent: #0d6e6e; --accent-soft: #e6f2f2;
+  --warn: #b45309;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a; --surface: #1f1f23; --border: #33333a; --text: #ececee;
+    --soft: #a9aab0; --faint: #7e7f86; --accent: #4bb3b3; --accent-soft: #14312f;
+    --warn: #e0a355;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 60rem; margin: 0 auto; padding: 40px 24px 96px; }
+header.title { border-bottom: 2px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+header.title h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -0.02em; }
+header.title p { margin: 0; color: var(--soft); }
+header.title .stamp { margin-top: 10px; font-size: 12.5px; color: var(--faint); }
+h2 { font-size: 21px; margin: 44px 0 10px; letter-spacing: -0.01em; }
+h3 { font-size: 18px; margin: 34px 0 6px; }
+h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em;
+     color: var(--soft); margin: 24px 0 8px; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.5px 4px;
+}
+.toc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+       padding: 18px 22px; margin: 26px 0 8px; }
+.toc h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase;
+          letter-spacing: 0.07em; color: var(--soft); }
+.toc ol { margin: 0; padding-left: 20px; }
+.toc ul { margin: 4px 0 8px; padding-left: 18px; list-style: none; }
+.toc ul li { font-size: 14px; }
+.toc li { margin: 3px 0; }
+section { scroll-margin-top: 16px; }
+.entity { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 34px; }
+.entity .lede { color: var(--text); }
+.meta { font-size: 13px; color: var(--faint); }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 4px; font-size: 14.5px; display: block; overflow-x: auto; }
+thead th { text-align: left; background: var(--surface); color: var(--soft);
+           font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+           padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tbody tr:last-child td { border-bottom: none; }
+.tag { display: inline-block; font-size: 11.5px; color: var(--soft);
+       background: var(--surface); border: 1px solid var(--border);
+       border-radius: 4px; padding: 1px 6px; margin-right: 3px; }
+.missing { color: var(--warn); font-style: italic; }
+.unset { color: var(--faint); }
+.detail { margin-top: 5px; font-size: 13px; color: var(--soft); }
+.app-overview { margin: 18px 0; padding: 16px 20px; background: var(--surface); border-left: 4px solid var(--accent); border-radius: 4px; font-size: 15px; line-height: 1.7; }
+ul.plain { margin: 4px 0 12px; padding-left: 20px; }
+.back { margin-top: 18px; font-size: 13px; }
+footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--border);
+         color: var(--faint); font-size: 13px; }
+@media print {
+  .toc, .back { break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+}`;
+
+    const toc = `
+      <nav class="toc" aria-label="Contents">
+        <h2>Contents</h2>
+        <ol>
+          <li><a href="#overview">What this application is</a></li>
+          <li><a href="#entities">The records it keeps</a>
+            <ul>
+${tables.map((t: any) => `              <li><a href="#entity-${slugify(t.entity_name)}">${esc(t.entity_name)}</a></li>`).join('\n')}
+            </ul>
+          </li>
+          <li><a href="#concurrent-edits">When two people change the same record</a></li>
+${hasRules ? '          <li><a href="#rules">The decisions it makes</a></li>\n' : ''}          <li><a href="#how-it-was-built">How this application was built</a></li>
+        </ol>
+      </nav>`;
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(appName)} &mdash; Manual</title>
+<style>${css}
+</style>
+</head>
+<body>
+<div class="wrap" id="top">
+
+  <header class="title">
+    <h1>${esc(appName)}</h1>
+    <p>${esc(appDescription)}</p>
+    <div class="stamp">Manual for version ${esc(appVersion)} &middot; generated <time datetime="${esc(generatedAt)}">${esc(generatedAt)}</time> &middot; <em>built from live dictionary data</em></div>
+  </header>
+${toc}
+
+  <section id="overview">
+    <h2>What this application is</h2>
+${appDescription && appDescription !== 'Generated application' ? `    <div class="app-overview"><p>${esc(appDescription)}</p></div>\n` : ''}    <p>${esc(appName)} keeps ${tables.length} kind${tables.length === 1 ? '' : 's'} of record. Every screen in it &mdash; every list, every form, every field label and every dropdown &mdash; is drawn from a description of those records held in the application itself, so the application can be changed by changing that description rather than by editing code.</p>
+    <p>This manual is generated dynamically from that live description. It cannot describe a record type the application does not have, and it cannot miss one it does.</p>
+    <p class="back"><a href="#top">Back to contents</a></p>
+  </section>
+
+  <section id="entities">
+    <h2>The records it keeps</h2>
+    <p>One section per record type. For each: what it is, every field it has and what that field is for, the states it moves through, and who may use it.</p>
+
+${entitySections}
+  </section>
+
+  <section id="concurrent-edits">
+    <h2>When two people change the same record</h2>
+    <p>Every record carries a version number, and every save raises it by one. When you open a record to edit it, the form remembers the version you opened. Saving sends that version back, and the save goes through only if nobody has saved the record since.</p>
+    <p>If somebody has, your save is not applied &mdash; neither of you loses a change without seeing it. The form opens a dialog listing the fields the other person changed, with their value and yours side by side, and marks the fields you both changed. It offers three choices:</p>
+    <table>
+      <thead><tr><th>Choice</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Reload their version</td><td>Your unsaved edits are discarded and the form shows the record as it now stands.</td></tr>
+        <tr><td>Overwrite with mine</td><td>Your values are saved over theirs.</td></tr>
+        <tr><td>Keep editing</td><td>Nothing is saved yet; the form stays open with your edits so you can change them first.</td></tr>
+      </tbody>
+    </table>
+    <p class="back"><a href="#top">Back to contents</a></p>
+  </section>
+
+${allRulesSection}
+
+  <section id="how-it-was-built">
+    <h2>How this application was built</h2>
+    <p>It was generated from a single model file &mdash; a Mermaid document describing the records, the rules and the processes above. The generator read that file and wrote the database schema, the API, the screens and this manual from it.</p>
+    <p>This manual is served dynamically: every time you open it, it is built fresh from the application dictionary tables in the database. Fields added or renamed by an administrator appear here on the next request.</p>
+    <p class="back"><a href="#top">Back to contents</a></p>
+  </section>
+
+  <footer>
+    ${esc(appName)} ${esc(appVersion)} &middot; ${tables.length} record type${tables.length === 1 ? '' : 's'} &middot; ${allRules.length} rule${allRules.length === 1 ? '' : 's'}
+  </footer>
+</div>
+</body>
+</html>
+`;
+  }
+
+  /**
    * Auto-creates sys_window, sys_tab, and sys_field records from existing
    * sys_column records for a given entity. This allows a newly registered
    * table/column (added via the admin Tables UI) to immediately appear in the
@@ -968,8 +2071,6 @@ export class BusService {
    */
   async setupEntityDictionary(entity: string): Promise<{ created: string[] }> {
     const tableName = this.getTableName(entity);
-    const methodName = 'setupEntityDictionary';
-    this.logger.log(`[${methodName}] Setting up dictionary for entity: ${entity} (table: ${tableName})`);
 
     const created: string[] = [];
     const systemUser = 'system';
@@ -1001,7 +2102,6 @@ export class BusService {
     let windowId: string;
     if (sysTable.sys_window_id) {
       windowId = sysTable.sys_window_id;
-      this.logger.log(`[${methodName}] sys_window already exists: ${windowId}`);
     } else {
       windowId = randomUUID();
       await this.kysely.insertInto('sys_window').values({
@@ -1022,7 +2122,6 @@ export class BusService {
         .execute();
 
       created.push(`sys_window: ${windowId}`);
-      this.logger.log(`[${methodName}] Created sys_window ${windowId} for ${tableName}`);
     }
 
     // 3. Ensure sys_tab exists
@@ -1049,10 +2148,8 @@ export class BusService {
         updated_by: systemUser,
       } as any).execute();
       created.push(`sys_tab: ${tabId}`);
-      this.logger.log(`[${methodName}] Created sys_tab ${tabId} for ${tableName}`);
     } else {
       tabId = existingTab.sys_tab_id;
-      this.logger.log(`[${methodName}] sys_tab already exists: ${tabId}`);
     }
 
     // 4. Get all sys_column records for this table
@@ -1063,7 +2160,6 @@ export class BusService {
       .orderBy('seq_no', 'asc')
       .execute();
 
-    this.logger.log(`[${methodName}] Found ${columns.length} columns for ${tableName}`);
 
     // 5. For each column, ensure a sys_field record exists
     const SKIP_COLUMNS = new Set(['id', 'created_at', 'updated_at', 'deleted_at', 'version', 'is_active']);
@@ -1098,11 +2194,9 @@ export class BusService {
           updated_by: systemUser,
         } as any).execute();
         created.push(`sys_field: ${col.column_name}`);
-        this.logger.log(`[${methodName}] Created sys_field for column ${col.column_name}`);
         seqNo += 10;
         seqNoGrid += 10;
       } else {
-        this.logger.debug(`[${methodName}] sys_field already exists for column ${col.column_name}`);
       }
     }
 
@@ -1110,7 +2204,7 @@ export class BusService {
     this.metadataCache.delete(entity);
     this.metadataCache.delete(tableName);
 
-    this.logger.log(`[${methodName}] Complete. Created: ${created.join(', ') || 'nothing (all already existed)'}`);
+    this.log.event('entity.dictionary.provisioned', { entity, created: created.join(', ') });
     return { created };
   }
 }

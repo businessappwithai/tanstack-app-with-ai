@@ -31,7 +31,7 @@ import {
   Download,
   Search,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,7 @@ import {
 import { type FieldMetadata, useGridFields } from "@/hooks/use-entities";
 import { apiClient, type PaginatedResponse } from "@/lib/api-client";
 import { CSV_EXPORT_LIMIT, csvFileName, downloadCsv, toCsv } from "@/lib/csv";
+import { obscureValue } from "@/lib/field-values";
 import { useTranslations } from "@/lib/translations";
 import { referenceLabel } from "@/lib/utils";
 
@@ -195,7 +196,7 @@ function generateColumns(
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           className="-ml-4 h-8"
         >
-          {field.name}
+          <span title={field.description ?? undefined}>{field.name}</span>
           {column.getIsSorted() === "asc" ? (
             <ArrowUp className="ml-2 h-4 w-4" />
           ) : column.getIsSorted() === "desc" ? (
@@ -208,6 +209,21 @@ function generateColumns(
     },
     cell: ({ row }) => {
       const value = row.getValue(field.column_name);
+      // Display Length: the column is that many characters wide at most.
+      const widthStyle = field.display_length
+        ? { maxWidth: `${Math.max(field.display_length, 4) + 1}ch` }
+        : undefined;
+      // Encrypted and Obscure Type mask the value in the list as on the form.
+      if (field.is_encrypted && value !== null && value !== undefined && value !== "") {
+        return <span className="block truncate">••••••••</span>;
+      }
+      if (field.obscure_type && value !== null && value !== undefined && value !== "") {
+        return (
+          <span className="block truncate max-w-[200px]" style={widthStyle}>
+            {obscureValue(value, field.obscure_type)}
+          </span>
+        );
+      }
       const isLookup =
         field.sys_reference_id === REFERENCE_TYPE.TABLE ||
         field.sys_reference_id === REFERENCE_TYPE.TABLE_DIRECT;
@@ -218,19 +234,23 @@ function generateColumns(
       if (isLookup && value != null && (field.ref_table_name || field.ref_endpoint)) {
         const tableMap = lookupMap[lookupKey(field)];
         const displayName = tableMap?.[String(value)];
-        return <span className="block truncate max-w-[200px]">{displayName ?? String(value)}</span>;
+        return (
+          <span className="block truncate max-w-[200px]" style={widthStyle}>
+            {displayName ?? String(value)}
+          </span>
+        );
       }
       // Enum — look up the label so "female" displays as "Female"
       if (field.options && field.options.length > 0 && value != null) {
         const matched = field.options.find((o) => o.value === String(value));
         return (
-          <span className="block truncate max-w-[200px]">
+          <span className="block truncate max-w-[200px]" style={widthStyle}>
             {matched ? matched.label : formatCellValue(value, field.sys_reference_id)}
           </span>
         );
       }
       return (
-        <span className="block truncate max-w-[200px]">
+        <span className="block truncate max-w-[200px]" style={widthStyle}>
           {formatCellValue(value, field.sys_reference_id)}
         </span>
       );
@@ -399,6 +419,16 @@ export function DynamicTable({
   }, [lookupSources, lookupResults]);
 
   const [sorting, setSorting] = useState<SortingState>([]);
+  // Sort Number: the list arrives ordered by it (the API's default order), and
+  // the heading shows it — the field with the smallest magnitude, negative for
+  // descending — until somebody clicks another heading.
+  useEffect(() => {
+    if (sorting.length > 0 || !fields) return;
+    const first = fields
+      .filter((field) => field.sort_no)
+      .sort((a, b) => Math.abs(a.sort_no!) - Math.abs(b.sort_no!))[0];
+    if (first) setSorting([{ id: first.column_name, desc: first.sort_no! < 0 }]);
+  }, [fields]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -613,6 +643,7 @@ export function DynamicTable({
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search..."
+            aria-label="Search rows"
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
             className="pl-8"
@@ -704,6 +735,7 @@ export function DynamicTable({
             size="sm"
             onClick={() => onPageChange?.(1)}
             disabled={page === 1}
+            aria-label="First page"
           >
             <ChevronsLeft className="h-4 w-4" />
           </Button>
@@ -712,6 +744,7 @@ export function DynamicTable({
             size="sm"
             onClick={() => onPageChange?.(page - 1)}
             disabled={page === 1}
+            aria-label="Previous page"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -723,6 +756,7 @@ export function DynamicTable({
             size="sm"
             onClick={() => onPageChange?.(page + 1)}
             disabled={page === totalPages}
+            aria-label="Next page"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -731,6 +765,7 @@ export function DynamicTable({
             size="sm"
             onClick={() => onPageChange?.(totalPages)}
             disabled={page === totalPages}
+            aria-label="Last page"
           >
             <ChevronsRight className="h-4 w-4" />
           </Button>

@@ -24,9 +24,10 @@
  * assertion the generated suite makes about promotion holds on it.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, } from '@nestjs/common';
 import { EntityPromotionService } from './entity-promotion.service';
 import type { PromotionActor, PromotionResult } from './entity-promotion.service';
+import { getLogger } from '../../common/logging/logger.service';
 
 /** Trigger.dev only dispatches when it has somewhere to dispatch to. */
 export function isTriggerDevConfigured(): boolean {
@@ -44,7 +45,7 @@ export interface EntityPromotionPayload {
 
 @Injectable()
 export class PromotionDispatcher {
-  private readonly logger = new Logger(PromotionDispatcher.name);
+  private readonly log = getLogger('entity');
 
   constructor(private readonly promotionService: EntityPromotionService) {}
 
@@ -86,9 +87,12 @@ export class PromotionDispatcher {
       // open until it finishes would collapse the two back into one.
       const handle = await tasks.trigger('entity-promotion', payload);
 
-      this.logger.log(
-        `Queued promotion of ${entityName}:${entityId} (${operation}) as Trigger.dev run ${handle.id}`,
-      );
+      this.log.event('entity.promotion.queued', {
+        entity: entityName,
+        recordId: entityId,
+        operation,
+        runId: handle.id,
+      });
 
       return {
         entityName,
@@ -112,7 +116,7 @@ export class PromotionDispatcher {
       // Falling back would hide a broken Trigger.dev deployment behind green saves,
       // so surface it as a promotion failure: the record stays draft and the user
       // is told the job runner is the problem, not their data.
-      this.logger.error(`Trigger.dev dispatch failed for ${entityName}:${entityId}: ${err?.message ?? err}`);
+      this.log.event('entity.promotion.dispatch_failed', { entity: entityName, recordId: entityId, err });
       return this.promotionService.recordDispatchFailure(
         entityName,
         entityId,

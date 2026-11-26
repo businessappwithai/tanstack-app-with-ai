@@ -1,0 +1,64 @@
+/**
+ * The Enterprise Reporting platform, in a browser: the pack's overview dashboard
+ * drawn with its widgets and no render failure, and a scoped role seeing the
+ * platform as that role.
+ *
+ * Skips, loudly, when the application was generated without a reporting pack.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { expect, test } from "@playwright/test";
+
+import { reportAccount } from "../harness/index.ts";
+import { dashboardIdByName, renderFailures, reportUrl, reportingPack, signInToPlatform } from "./helpers.ts";
+
+const pack = reportingPack;
+
+test.describe("the reporting platform", () => {
+  test.skip(!pack, "no reporting pack was generated");
+
+  test("draws the overview dashboard's widgets without a render failure", async ({ page }) => {
+    const adminRole = pack!.access.roles.find((role) => role.isAdmin) ?? pack!.access.roles[0]!;
+    const account = reportAccount(adminRole);
+    await signInToPlatform(page, account.email, account.password);
+
+    await page.goto(`${reportUrl}/dashboards`);
+    await expect(page.getByRole("heading", { name: "Dashboards", exact: true })).toBeVisible();
+
+    const dashboard = pack!.dashboards[0]!;
+    const id = await dashboardIdByName(page, dashboard.name);
+    await page.goto(`${reportUrl}/dashboards/${id}`);
+    await expect(page.getByRole("heading", { name: dashboard.name })).toBeVisible({ timeout: 60_000 });
+
+    // Charts are drawn on a canvas, reports as tables: the widgets the pack lists.
+    await expect(page.locator("canvas, table").first()).toBeVisible({ timeout: 120_000 });
+    for (const failure of renderFailures) {
+      await expect(page.getByText(failure)).toHaveCount(0);
+    }
+  });
+
+  test("lists the pack's reports and charts", async ({ page }) => {
+    const adminRole = pack!.access.roles.find((role) => role.isAdmin) ?? pack!.access.roles[0]!;
+    const account = reportAccount(adminRole);
+    await signInToPlatform(page, account.email, account.password);
+
+    await page.goto(`${reportUrl}/reports`);
+    await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
+    await expect(page.getByText("All Reports")).toBeVisible();
+
+    await page.goto(`${reportUrl}/charts`);
+    await expect(page.getByRole("heading", { name: "Charts", exact: true })).toBeVisible();
+    await expect(page.getByText("All Charts")).toBeVisible();
+  });
+
+  test("lets a scoped role sign in and see the dashboards it may view", async ({ page }) => {
+    const scoped = pack!.access.roles.find((role) => !role.isAdmin && role.tables.length > 0);
+    test.skip(!scoped, "the model declares no scoped role");
+    const account = reportAccount(scoped!);
+    await signInToPlatform(page, account.email, account.password);
+    await page.goto(`${reportUrl}/dashboards`);
+    await expect(page.getByRole("heading", { name: "Dashboards", exact: true })).toBeVisible();
+  });
+});

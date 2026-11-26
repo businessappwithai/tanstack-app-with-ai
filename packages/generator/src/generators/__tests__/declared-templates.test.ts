@@ -61,10 +61,37 @@ const TEMPLATE_ROOTS = [
  * to disk rather than rendered — deliberately, so the two cannot drift. The
  * string in the generator is where it is *written*, not where it is read from.
  *
+ * `state-fields.ts` is the table → state field map the guard and the bus
+ * service read. It is rendered from the compiled state machines by
+ * `renderStateFields`, not from a template, because the initial state is not
+ * stored anywhere a template could read it.
+ *
+ * `src/common/field-logic.ts` (backend) and `src/lib/field-logic.ts` (front
+ * end) are where the field-logic evaluator is *written*: both are copies of one
+ * template, `templates/common/field-logic.ts`, itself held byte-identical to
+ * `language/field-logic.ts` by `field-logic.test.ts`. One source, two outputs.
+ *
  * An addition here needs a reason written beside it. That is the point of the
  * allowlist being short: a new entry is a review conversation, not a habit.
  */
-const OUTPUT_ONLY_PATHS = new Set(["src/common/logging/log-spec.json"]);
+const OUTPUT_ONLY_PATHS = new Set([
+  "src/common/logging/log-spec.json",
+  "src/common/state-fields.ts",
+  "src/common/field-logic.ts",
+  "src/lib/field-logic.ts",
+  // `templates/common/field-values.ts`, copied the same way: Default Value and
+  // Obscure Type for the bus service and for the form and grid.
+  "src/common/field-values.ts",
+  "src/lib/field-values.ts",
+  // `templates/common/cascade-lookups.ts`: which lookups wait for another, with a circular
+  // wait broken; the bus service applies it to the metadata the form is drawn from.
+  "src/common/cascade-lookups.ts",
+  // Every table's lifecycle, rendered by `renderLifecycle` from the compiled
+  // state machines like `state-fields.ts`, around the fixed half in
+  // `lifecycle-module.ts`; the front end's copy comes from the same call.
+  "src/common/lifecycle.ts",
+  "src/lib/lifecycle.ts",
+]);
 
 /** Generator sources, excluding tests and generated bundles. */
 function generatorSources(dir: string, found: string[] = []): string[] {

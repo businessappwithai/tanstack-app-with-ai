@@ -1,0 +1,25 @@
+Packaging-time verification
+===========================
+
+Environment:
+- Node.js v22.16.0
+
+Local unit tests:
+- 7 tests
+- 7 passed
+- 0 failed
+
+Local fixture inspection:
+- 3 entities
+- 13 fields
+- 2 relationships
+- 1 erDiagram
+- recognized meta, enum, entity, field and rbac directives
+
+Local AI projection:
+- Successfully generated deterministic YAML from test/fixtures/field-service.eml.mmd
+
+Website compatibility:
+- The six exact models referenced by the current Try It Yourself page were previously retrieved through the GitHub connector and structurally checked; all six matched their advertised entity counts and all directive families were recognized. See WEBSITE_COMPATIBILITY.md.
+- A repeatable live script is included as `bun run test:website`.
+- This packaging container could not directly re-fetch www.appwithai.org because outbound DNS from the shell returned EAI_AGAIN. This does not affect local unit tests; run `bun run test:website` on a machine with internet access.

@@ -37,7 +37,19 @@ const FK_COLUMN_TABLE_MAP: Record<string, string> = {
   {{/each}}
 };
 
-function fk(column: string, index: number): string | null {
+/*
+ * Ids for a reference whose parent the model never declared. A column marked FK
+ * whose entity is missing (the checker reports it as EML502 — `Document.
+ * document_type_id` with no `DocumentType`) has no table to draw an id from and,
+ * with no relationship drawn, no foreign key constraint to satisfy. Left null it
+ * fails the NOT NULL the model asked for, one insert takes the whole seed down,
+ * and the backend restarts until it gives up. A uuid no row has is the smaller
+ * problem — only for a *required* column, and only when nothing declared could
+ * have supplied one.
+ */
+const orphanIds: Record<string, string[]> = {};
+
+function fk(column: string, index: number, required = false): string | null {
   if (FK_COLUMN_TABLE_MAP[column]) {
     const pool = ids[FK_COLUMN_TABLE_MAP[column]];
     if (pool && pool.length > 0) return pool[index % pool.length];
@@ -62,10 +74,13 @@ function fk(column: string, index: number): string | null {
     const userPool = ids['bus_user'] || ids['bus_staff'];
     if (userPool && userPool.length > 0) return userPool[index % userPool.length];
   }
-  // Nothing to point at. A null reference is honest; a fabricated code like
-  // 'CAM-0001' is not — it matches no row, so every join through it silently
-  // returned nothing while looking like real data.
-  return null;
+  // Nothing to point at. An optional column stays null: that is honest, and a
+  // fabricated code like 'CAM-0001' is not — it matches no row, so every join
+  // through it silently returned nothing while looking like real data.
+  if (!required) return null;
+  // A required one cannot be null (see orphanIds), so it takes a stable uuid.
+  const orphans = (orphanIds[column] ??= Array.from({ length: SAMPLE_COUNT }, () => uuidv4()));
+  return orphans[index % orphans.length];
 }
 
 export async function seed(db: Kysely<any>): Promise<void> {
@@ -89,20 +104,25 @@ export async function seed(db: Kysely<any>): Promise<void> {
       {{#unless (eq name 'updated_at')}}
       {{#unless (eq name 'deleted_at')}}
       {{#unless (eq name 'version')}}
+      {{#if isMoveFact}}
+        {{!-- A state machine's move fact (`<state>_at`): left empty, so the first edit of a seeded row starts no move nobody recorded. --}}
+        {{name}}: null,
+      {{else}}
       {{#switch (typeToReferenceId type)}}
-        {{#case 10}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}){{else}}'{{#if (eq name "email")}}test{{@../index}}@example.com{{else}}{{seedValue name @../index ../../displayName enumValues}}{{/if}}'{{/if}},{{/case}}
+        {{#case 10}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}, {{#if required}}true{{else}}false{{/if}}){{else}}'{{#if (eq name "email")}}test{{@../index}}@example.com{{else}}{{seedValue name @../index ../../displayName enumValues}}{{/if}}'{{/if}},{{/case}}
         {{#case 30}}{{name}}: 'test{{@../index}}@example.com',{{/case}}
         {{#case 31}}{{name}}: '555-{{@../index}}101',{{/case}}
-        {{#case 11}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}){{else}}{{seedNumber name @../index}}{{/if}},{{/case}}
+        {{#case 11}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}, {{#if required}}true{{else}}false{{/if}}){{else}}{{seedNumber name @../index}}{{/if}},{{/case}}
         {{#case 12}}{{name}}: {{@../index}}.50,{{/case}}
         {{! Numeric args, not a string: '200X-0X-15' produced month 00 for the first record, which Postgres rejects. Month is 0-based here, so % 12 is always valid. }}
         {{#case 15}}{{name}}: new Date(2000 + {{@../index}}, {{@../index}} % 12, 15),{{/case}}
         {{#case 16}}{{name}}: new Date(Date.now() + {{@../index}} * 3600000),{{/case}}
         {{#case 20}}{{name}}: {{#if (eq @../index 2)}}false{{else}}true{{/if}},{{/case}}
-        {{#case 13}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}){{else}}uuidv4(){{/if}},{{/case}}
-        {{#case 14}}{{name}}: 'Sample {{name}} text {{@../index}}',{{/case}}
+        {{#case 13}}{{name}}: {{#if (or isForeignKey (endsWith name '_id'))}}fk('{{name}}', {{@../index}}, {{#if required}}true{{else}}false{{/if}}){{else}}uuidv4(){{/if}},{{/case}}
+        {{#case 14}}{{name}}: '{{#if enumValues}}{{seedValue name @../index ../../displayName enumValues}}{{else}}Sample {{name}} text {{@../index}}{{/if}}',{{/case}}
         {{#default}}{{name}}: '{{seedValue name @../index ../../displayName enumValues}}',{{/default}}
       {{/switch}}
+      {{/if}}
       {{/unless}}
       {{/unless}}
       {{/unless}}

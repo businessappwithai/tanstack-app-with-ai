@@ -28,6 +28,14 @@
  *   EML117  No primary key → prepend  string id PK  to entity block
  *   EML421  State workflow: no [*] → FirstState → insert initial transition
  *   EML422  State workflow: no terminal state → append LastState --> [*]
+ *   EML172  Columns no %%section row places → append them to the entity's last
+ *           section, two per row
+ *   EML174  A %%section row of three or more columns → split it into rows of two
+ *   EML175  A column placed in two %%section rows → remove the later placement
+ *   EML178  The state field placed in a %%section row → remove it (the state is
+ *           shown read-only in the form's header); a section left empty goes too
+ *   EML512  A move rule or saga an action button replaces → remove the section,
+ *           and rewrite the stock help on the <state>_at columns it left behind
  *
  * All other codes are reported but left for the developer to fix manually.
  */
@@ -35,6 +43,8 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isPersonRoleColumn } from "./checker";
+import { rewriteStockHelp, sectionSpan } from "./move-facts";
+import { formatRows, parseRows } from "./sections";
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -149,10 +159,205 @@ function applyFix(lines: string[], issue: Issue): FixResult {
       return fixMissingTerminalTransition(lines, issue, base);
     case "EML287":
       return fixCamelCaseRuleCondition(lines, issue, base);
+    case "EML172":
+      return fixUnplacedColumns(lines, issue, base);
+    case "EML174":
+      return fixWideRow(lines, issue, base);
+    case "EML175":
+      return fixDoublePlacement(lines, issue, base);
+    case "EML178":
+      return fixPlacedStateField(lines, issue, base);
+    case "EML512":
+      return fixRetiredMove(lines, issue, base);
     default:
       base.description = `No auto-fix strategy for ${issue.code}.`;
       return base;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Fix: EML172, EML174, EML175 — %%section rows
+//
+// All three rewrite the `rows:` value of one %%section line and nothing else,
+// so no line is inserted or removed and the line numbers of every other fix in
+// the same run stay true. The rows are read and written by language/sections.ts
+// — the same reading the checker and the generator use.
+// ---------------------------------------------------------------------------
+
+/** The `rows:` value of a %%section line: where it starts and ends in the text. */
+function rowsSpan(text: string): { start: number; end: number } | undefined {
+  if (!/^\s*%%section\b/i.test(text)) return undefined;
+  const open = text.match(/(^|;)\s*rows\s*:/i);
+  if (open?.index === undefined) return undefined;
+  const start = open.index + open[0].length;
+  const rest = text.slice(start);
+  const close = rest.match(/;\s*(entity|name|help|collapsed)\s*:/i);
+  return { start, end: close?.index === undefined ? text.length : start + close.index };
+}
+
+/** Replace the rows of a %%section line, keeping everything around them. */
+function rewriteRows(
+  lines: string[],
+  issue: Issue,
+  base: FixResult,
+  change: (rows: string[][]) => string[][] | undefined,
+  description: string
+): FixResult {
+  const index = (issue.line ?? 0) - 1;
+  const before = lines[index];
+  const span = before === undefined ? undefined : rowsSpan(before);
+  if (before === undefined || !span) {
+    base.description = `Line ${issue.line ?? "?"} is not a %%section with rows:; left alone.`;
+    return base;
+  }
+  const rows = change(parseRows(before.slice(span.start, span.end)));
+  if (!rows) {
+    base.description = `Nothing to change on line ${issue.line}.`;
+    return base;
+  }
+  const after = `${before.slice(0, span.start)} ${formatRows(rows)}${before.slice(span.end)}`;
+  lines[index] = after;
+  base.applied = true;
+  base.description = description;
+  base.changes = [{ lineNo: index + 1, before, after, action: "replace" }];
+  return base;
+}
+
+function fixUnplacedColumns(lines: string[], issue: Issue, base: FixResult): FixResult {
+  const match = issue.message.match(/^(\w+) leaves \d+ columns? out of every %%section: (.+)\.$/);
+  if (!match?.[2]) {
+    base.description = "Could not read the unplaced columns from the issue message.";
+    return base;
+  }
+  const columns = match[2].split(",").map((column) => column.trim()).filter(Boolean);
+  const added: string[][] = [];
+  for (let i = 0; i < columns.length; i += 2) added.push(columns.slice(i, i + 2));
+  return rewriteRows(
+    lines,
+    issue,
+    base,
+    (rows) => [...rows, ...added],
+    `Placed ${columns.join(", ")} in ${match[1]}'s last section, two per row — move them to where they belong.`
+  );
+}
+
+function fixWideRow(lines: string[], issue: Issue, base: FixResult): FixResult {
+  return rewriteRows(
+    lines,
+    issue,
+    base,
+    (rows) => {
+      if (!rows.some((row) => row.length > 2)) return undefined;
+      return rows.flatMap((row) => {
+        const pairs: string[][] = [];
+        for (let i = 0; i < row.length; i += 2) pairs.push(row.slice(i, i + 2));
+        return pairs;
+      });
+    },
+    "Split a row of more than two columns into rows of two."
+  );
+}
+
+function fixDoublePlacement(lines: string[], issue: Issue, base: FixResult): FixResult {
+  const match = issue.message.match(/^"\w+\.(\w+)" is placed in two %%section rows\.$/);
+  const column = match?.[1];
+  if (!column) {
+    base.description = "Could not read the column from the issue message.";
+    return base;
+  }
+  return rewriteRows(
+    lines,
+    issue,
+    base,
+    (rows) => {
+      /* The issue's line is the later placement. Remove the last occurrence on
+         it, which is the duplicate whether the first placement is on this line
+         or an earlier one. */
+      let rowIndex = -1;
+      let colIndex = -1;
+      rows.forEach((row, r) =>
+        row.forEach((name, c) => {
+          if (name === column) {
+            rowIndex = r;
+            colIndex = c;
+          }
+        })
+      );
+      if (rowIndex < 0) return undefined;
+      const next = rows.map((row) => [...row]);
+      next[rowIndex]?.splice(colIndex, 1);
+      return next.filter((row) => row.length > 0);
+    },
+    `Removed the second placement of "${column}".`
+  );
+}
+
+/**
+ * EML178: the state field is shown read-only in the form's header, so a row
+ * that places it is removed from the row. A section whose only column it was
+ * would be a heading over nothing, so that line goes as well.
+ */
+function fixPlacedStateField(lines: string[], issue: Issue, base: FixResult): FixResult {
+  const match = issue.message.match(/^%%section places "\w+\.(\w+)", the state field/);
+  const column = match?.[1];
+  if (!column) {
+    base.description = "Could not read the state field from the issue message.";
+    return base;
+  }
+  const index = (issue.line ?? 0) - 1;
+  const before = lines[index];
+  const span = before === undefined ? undefined : rowsSpan(before);
+  if (before === undefined || !span) {
+    base.description = `Line ${issue.line ?? "?"} is not a %%section with rows:; left alone.`;
+    return base;
+  }
+  const rows = parseRows(before.slice(span.start, span.end))
+    .map((row) => row.filter((name) => name !== column))
+    .filter((row) => row.length > 0);
+  if (rows.length === 0) {
+    lines.splice(index, 1);
+    base.applied = true;
+    base.description = `Removed the section that placed only "${column}"; the state is shown in the form's header.`;
+    base.changes = [{ lineNo: index + 1, before, after: "", action: "delete" }];
+    return base;
+  }
+  return rewriteRows(
+    lines,
+    issue,
+    base,
+    () => rows,
+    `Removed "${column}" from the section; the state is shown read-only in the form's header.`
+  );
+}
+
+/**
+ * EML512: a rule or saga that moved a record when a person recorded a move's time.
+ * An action button makes the move now, so the section goes; the checker only
+ * reports one whose every step or action is part of that pattern
+ * (language/move-facts.ts). The `<state>_at` help is rewritten in place, so no
+ * other fix's line number changes.
+ */
+function fixRetiredMove(lines: string[], issue: Issue, base: FixResult): FixResult {
+  const index = (issue.line ?? 0) - 1;
+  const span = sectionSpan(lines, index);
+  if (!span) {
+    base.description = `Line ${issue.line ?? "?"} is not a move rule or saga; left alone.`;
+    return base;
+  }
+  const name = lines[index]!.trim().split(/\s+/)[1];
+  const removed = lines.splice(span.start, span.end - span.start);
+  const rewritten = rewriteStockHelp(lines);
+  base.applied = true;
+  base.description =
+    `Removed ${name} (${removed.length} lines); an action button makes this move now.` +
+    (rewritten ? ` Rewrote ${rewritten} help line${rewritten === 1 ? "" : "s"} on the <state>_at columns.` : "");
+  base.changes = removed.map((before, offset) => ({
+    lineNo: span.start + offset + 1,
+    before,
+    after: "",
+    action: "delete" as const,
+  }));
+  return base;
 }
 
 // ---------------------------------------------------------------------------
@@ -783,6 +988,11 @@ ${c.bold("AUTO-FIXABLE CODES")}
   EML112   Duplicate attribute → delete the later line, keeping the stronger constraints
   EML103   A column the generator adds anyway → delete the line
   EML287   camelCase in a %%action when: → rewrite it as the snake_case column
+  EML172   columns no %%section row places → append them to the last section
+  EML174   a %%section row of three or more → split it into rows of two
+  EML175   a column placed in two %%section rows → remove the later one
+  EML178   the state field placed in a %%section row → remove it from the row
+  EML512   a move rule or saga a button replaces → remove it
   EML117   No primary key → insert  string id PK  as first attribute
   EML421   State workflow: no [*]→First transition → insert it
   EML422   State workflow: no terminal state (→[*]) → insert it

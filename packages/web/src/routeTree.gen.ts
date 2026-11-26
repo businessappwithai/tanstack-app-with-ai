@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TestRouteImport } from './routes/test'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
+import { Route as ApiCloudDeployRouteImport } from './routes/api/cloud-deploy'
 import { Route as ApiCopilotkitRouteImport } from './routes/api/copilotkit'
 import { Route as ApiDeployRouteImport } from './routes/api/deploy'
 import { Route as ApiGenerateRouteImport } from './routes/api/generate'
@@ -39,6 +40,10 @@ import { Route as ApiAuthRegisterRouteImport } from './routes/api/auth/register'
 import { Route as ApiCopilotkitSplatRouteImport } from './routes/api/copilotkit/$'
 import { Route as ApiDbGenerateSchemaRouteImport } from './routes/api/db/generate-schema'
 import { Route as ApiDbReverseEngineerRouteImport } from './routes/api/db/reverse-engineer'
+import { Route as ApiDbSeedDataRouteImport } from './routes/api/db/seed-data'
+import { Route as ApiDbStudioRouteImport } from './routes/api/db/studio'
+import { Route as ApiDbStudioOpenRouteImport } from './routes/api/db/studio-open'
+import { Route as ApiDbTestConnectionRouteImport } from './routes/api/db/test-connection'
 import { Route as ApiEmlValidateRouteImport } from './routes/api/eml/validate'
 import { Route as ApiMermaidIndexRouteImport } from './routes/api/mermaid/index'
 import { Route as ApiMermaidFilenameRouteImport } from './routes/api/mermaid/$filename'
@@ -58,12 +63,14 @@ import { Route as AdminRulesEntityRuleIdRouteImport } from './routes/admin/rules
 import { Route as ApiAdminUsersIndexRouteImport } from './routes/api/admin/users/index'
 import { Route as ApiProjectsIdIndexRouteImport } from './routes/api/projects/$id/index'
 import { Route as ApiProjectsIdEmlRouteImport } from './routes/api/projects/$id/eml'
+import { Route as ApiProjectsIdGitRouteImport } from './routes/api/projects/$id/git'
 import { Route as ApiRulesRuleIdIndexRouteImport } from './routes/api/rules/$ruleId/index'
 import { Route as ApiWorkflowsWorkflowIdIndexRouteImport } from './routes/api/workflows/$workflowId/index'
 import { Route as ApiWorkflowsWorkflowIdRetryRouteImport } from './routes/api/workflows/$workflowId/retry'
 import { Route as ApiWorkflowsWorkflowIdStatusRouteImport } from './routes/api/workflows/$workflowId/status'
 import { Route as ProjectsIdEnhanceIndexRouteImport } from './routes/projects/$id/enhance/index'
 import { Route as ProjectsIdEnhanceServiceNameRouteImport } from './routes/projects/$id/enhance/$serviceName'
+import { Route as ProjectsIdEnhanceLogicRouteImport } from './routes/projects/$id/enhance/logic'
 import { Route as ApiAdminUsersIdApproveRouteImport } from './routes/api/admin/users/$id/approve'
 import { Route as ApiAdminUsersIdRejectRouteImport } from './routes/api/admin/users/$id/reject'
 import { Route as ApiProjectsIdAutomationsIndexRouteImport } from './routes/api/projects/$id/automations/index'
@@ -72,6 +79,7 @@ import { Route as ApiProjectsIdDeploymentIndexRouteImport } from './routes/api/p
 import { Route as ApiProjectsIdEmlDownloadRouteImport } from './routes/api/projects/$id/eml.download'
 import { Route as ApiProjectsIdErdVersionsIndexRouteImport } from './routes/api/projects/$id/erd-versions/index'
 import { Route as ApiProjectsIdMembersIndexRouteImport } from './routes/api/projects/$id/members/index'
+import { Route as ApiProjectsIdRulesDryRunRouteImport } from './routes/api/projects/$id/rules/dry-run'
 import { Route as ApiProjectsIdWorkflowsIndexRouteImport } from './routes/api/projects/$id/workflows/index'
 import { Route as ApiProjectsIdErdVersionsVersionIdRestoreRouteImport } from './routes/api/projects/$id/erd-versions/$versionId/restore'
 import { Route as ApiProjectsIdMembersUserIdIndexRouteImport } from './routes/api/projects/$id/members/$userId/index'
@@ -113,6 +121,11 @@ const TestRoute = TestRouteImport.update({
 const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/admin/users',
   path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCloudDeployRoute = ApiCloudDeployRouteImport.update({
+  id: '/api/cloud-deploy',
+  path: '/api/cloud-deploy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCopilotkitRoute = ApiCopilotkitRouteImport.update({
@@ -231,6 +244,26 @@ const ApiDbReverseEngineerRoute = ApiDbReverseEngineerRouteImport.update({
   path: '/api/db/reverse-engineer',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDbSeedDataRoute = ApiDbSeedDataRouteImport.update({
+  id: '/api/db/seed-data',
+  path: '/api/db/seed-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbStudioRoute = ApiDbStudioRouteImport.update({
+  id: '/api/db/studio',
+  path: '/api/db/studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbStudioOpenRoute = ApiDbStudioOpenRouteImport.update({
+  id: '/api/db/studio-open',
+  path: '/api/db/studio-open',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDbTestConnectionRoute = ApiDbTestConnectionRouteImport.update({
+  id: '/api/db/test-connection',
+  path: '/api/db/test-connection',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiEmlValidateRoute = ApiEmlValidateRouteImport.update({
   id: '/api/eml/validate',
   path: '/api/eml/validate',
@@ -326,6 +359,11 @@ const ApiProjectsIdEmlRoute = ApiProjectsIdEmlRouteImport.update({
   path: '/api/projects/$id/eml',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiProjectsIdGitRoute = ApiProjectsIdGitRouteImport.update({
+  id: '/api/projects/$id/git',
+  path: '/api/projects/$id/git',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRulesRuleIdIndexRoute = ApiRulesRuleIdIndexRouteImport.update({
   id: '/api/rules/$ruleId/',
   path: '/api/rules/$ruleId/',
@@ -360,6 +398,11 @@ const ProjectsIdEnhanceServiceNameRoute =
     path: '/projects/$id/enhance/$serviceName',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsIdEnhanceLogicRoute = ProjectsIdEnhanceLogicRouteImport.update({
+  id: '/projects/$id/enhance/logic',
+  path: '/projects/$id/enhance/logic',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAdminUsersIdApproveRoute = ApiAdminUsersIdApproveRouteImport.update({
   id: '/api/admin/users/$id/approve',
   path: '/api/admin/users/$id/approve',
@@ -404,6 +447,12 @@ const ApiProjectsIdMembersIndexRoute =
   ApiProjectsIdMembersIndexRouteImport.update({
     id: '/api/projects/$id/members/',
     path: '/api/projects/$id/members/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiProjectsIdRulesDryRunRoute =
+  ApiProjectsIdRulesDryRunRouteImport.update({
+    id: '/api/projects/$id/rules/dry-run',
+    path: '/api/projects/$id/rules/dry-run',
     getParentRoute: () => rootRouteImport,
   } as any)
 const ApiProjectsIdWorkflowsIndexRoute =
@@ -457,6 +506,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/test': typeof TestRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/cloud-deploy': typeof ApiCloudDeployRoute
   '/api/copilotkit': typeof ApiCopilotkitRouteWithChildren
   '/api/deploy': typeof ApiDeployRoute
   '/api/generate': typeof ApiGenerateRoute
@@ -477,6 +527,10 @@ export interface FileRoutesByFullPath {
   '/api/copilotkit/$': typeof ApiCopilotkitSplatRoute
   '/api/db/generate-schema': typeof ApiDbGenerateSchemaRoute
   '/api/db/reverse-engineer': typeof ApiDbReverseEngineerRoute
+  '/api/db/seed-data': typeof ApiDbSeedDataRoute
+  '/api/db/studio': typeof ApiDbStudioRoute
+  '/api/db/studio-open': typeof ApiDbStudioOpenRoute
+  '/api/db/test-connection': typeof ApiDbTestConnectionRoute
   '/api/eml/validate': typeof ApiEmlValidateRoute
   '/api/mermaid/$filename': typeof ApiMermaidFilenameRoute
   '/api/mermaid/parse': typeof ApiMermaidParseRoute
@@ -497,9 +551,11 @@ export interface FileRoutesByFullPath {
   '/api/workflows/': typeof ApiWorkflowsIndexRoute
   '/admin/rules/$entity/$ruleId': typeof AdminRulesEntityRuleIdRoute
   '/api/projects/$id/eml': typeof ApiProjectsIdEmlRouteWithChildren
+  '/api/projects/$id/git': typeof ApiProjectsIdGitRoute
   '/api/workflows/$workflowId/retry': typeof ApiWorkflowsWorkflowIdRetryRoute
   '/api/workflows/$workflowId/status': typeof ApiWorkflowsWorkflowIdStatusRoute
   '/projects/$id/enhance/$serviceName': typeof ProjectsIdEnhanceServiceNameRoute
+  '/projects/$id/enhance/logic': typeof ProjectsIdEnhanceLogicRoute
   '/api/admin/users/': typeof ApiAdminUsersIndexRoute
   '/api/projects/$id/': typeof ApiProjectsIdIndexRoute
   '/api/rules/$ruleId/': typeof ApiRulesRuleIdIndexRoute
@@ -509,6 +565,7 @@ export interface FileRoutesByFullPath {
   '/api/admin/users/$id/reject': typeof ApiAdminUsersIdRejectRoute
   '/api/projects/$id/automations/$automationId': typeof ApiProjectsIdAutomationsAutomationIdRoute
   '/api/projects/$id/eml/download': typeof ApiProjectsIdEmlDownloadRoute
+  '/api/projects/$id/rules/dry-run': typeof ApiProjectsIdRulesDryRunRoute
   '/api/projects/$id/automations/': typeof ApiProjectsIdAutomationsIndexRoute
   '/api/projects/$id/deployment/': typeof ApiProjectsIdDeploymentIndexRoute
   '/api/projects/$id/erd-versions/': typeof ApiProjectsIdErdVersionsIndexRoute
@@ -529,6 +586,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/test': typeof TestRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/cloud-deploy': typeof ApiCloudDeployRoute
   '/api/copilotkit': typeof ApiCopilotkitRouteWithChildren
   '/api/deploy': typeof ApiDeployRoute
   '/api/generate': typeof ApiGenerateRoute
@@ -549,6 +607,10 @@ export interface FileRoutesByTo {
   '/api/copilotkit/$': typeof ApiCopilotkitSplatRoute
   '/api/db/generate-schema': typeof ApiDbGenerateSchemaRoute
   '/api/db/reverse-engineer': typeof ApiDbReverseEngineerRoute
+  '/api/db/seed-data': typeof ApiDbSeedDataRoute
+  '/api/db/studio': typeof ApiDbStudioRoute
+  '/api/db/studio-open': typeof ApiDbStudioOpenRoute
+  '/api/db/test-connection': typeof ApiDbTestConnectionRoute
   '/api/eml/validate': typeof ApiEmlValidateRoute
   '/api/mermaid/$filename': typeof ApiMermaidFilenameRoute
   '/api/mermaid/parse': typeof ApiMermaidParseRoute
@@ -569,9 +631,11 @@ export interface FileRoutesByTo {
   '/api/workflows': typeof ApiWorkflowsIndexRoute
   '/admin/rules/$entity/$ruleId': typeof AdminRulesEntityRuleIdRoute
   '/api/projects/$id/eml': typeof ApiProjectsIdEmlRouteWithChildren
+  '/api/projects/$id/git': typeof ApiProjectsIdGitRoute
   '/api/workflows/$workflowId/retry': typeof ApiWorkflowsWorkflowIdRetryRoute
   '/api/workflows/$workflowId/status': typeof ApiWorkflowsWorkflowIdStatusRoute
   '/projects/$id/enhance/$serviceName': typeof ProjectsIdEnhanceServiceNameRoute
+  '/projects/$id/enhance/logic': typeof ProjectsIdEnhanceLogicRoute
   '/api/admin/users': typeof ApiAdminUsersIndexRoute
   '/api/projects/$id': typeof ApiProjectsIdIndexRoute
   '/api/rules/$ruleId': typeof ApiRulesRuleIdIndexRoute
@@ -581,6 +645,7 @@ export interface FileRoutesByTo {
   '/api/admin/users/$id/reject': typeof ApiAdminUsersIdRejectRoute
   '/api/projects/$id/automations/$automationId': typeof ApiProjectsIdAutomationsAutomationIdRoute
   '/api/projects/$id/eml/download': typeof ApiProjectsIdEmlDownloadRoute
+  '/api/projects/$id/rules/dry-run': typeof ApiProjectsIdRulesDryRunRoute
   '/api/projects/$id/automations': typeof ApiProjectsIdAutomationsIndexRoute
   '/api/projects/$id/deployment': typeof ApiProjectsIdDeploymentIndexRoute
   '/api/projects/$id/erd-versions': typeof ApiProjectsIdErdVersionsIndexRoute
@@ -602,6 +667,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/test': typeof TestRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/cloud-deploy': typeof ApiCloudDeployRoute
   '/api/copilotkit': typeof ApiCopilotkitRouteWithChildren
   '/api/deploy': typeof ApiDeployRoute
   '/api/generate': typeof ApiGenerateRoute
@@ -622,6 +688,10 @@ export interface FileRoutesById {
   '/api/copilotkit/$': typeof ApiCopilotkitSplatRoute
   '/api/db/generate-schema': typeof ApiDbGenerateSchemaRoute
   '/api/db/reverse-engineer': typeof ApiDbReverseEngineerRoute
+  '/api/db/seed-data': typeof ApiDbSeedDataRoute
+  '/api/db/studio': typeof ApiDbStudioRoute
+  '/api/db/studio-open': typeof ApiDbStudioOpenRoute
+  '/api/db/test-connection': typeof ApiDbTestConnectionRoute
   '/api/eml/validate': typeof ApiEmlValidateRoute
   '/api/mermaid/$filename': typeof ApiMermaidFilenameRoute
   '/api/mermaid/parse': typeof ApiMermaidParseRoute
@@ -642,9 +712,11 @@ export interface FileRoutesById {
   '/api/workflows/': typeof ApiWorkflowsIndexRoute
   '/admin/rules/$entity/$ruleId': typeof AdminRulesEntityRuleIdRoute
   '/api/projects/$id/eml': typeof ApiProjectsIdEmlRouteWithChildren
+  '/api/projects/$id/git': typeof ApiProjectsIdGitRoute
   '/api/workflows/$workflowId/retry': typeof ApiWorkflowsWorkflowIdRetryRoute
   '/api/workflows/$workflowId/status': typeof ApiWorkflowsWorkflowIdStatusRoute
   '/projects/$id/enhance/$serviceName': typeof ProjectsIdEnhanceServiceNameRoute
+  '/projects/$id/enhance/logic': typeof ProjectsIdEnhanceLogicRoute
   '/api/admin/users/': typeof ApiAdminUsersIndexRoute
   '/api/projects/$id/': typeof ApiProjectsIdIndexRoute
   '/api/rules/$ruleId/': typeof ApiRulesRuleIdIndexRoute
@@ -654,6 +726,7 @@ export interface FileRoutesById {
   '/api/admin/users/$id/reject': typeof ApiAdminUsersIdRejectRoute
   '/api/projects/$id/automations/$automationId': typeof ApiProjectsIdAutomationsAutomationIdRoute
   '/api/projects/$id/eml/download': typeof ApiProjectsIdEmlDownloadRoute
+  '/api/projects/$id/rules/dry-run': typeof ApiProjectsIdRulesDryRunRoute
   '/api/projects/$id/automations/': typeof ApiProjectsIdAutomationsIndexRoute
   '/api/projects/$id/deployment/': typeof ApiProjectsIdDeploymentIndexRoute
   '/api/projects/$id/erd-versions/': typeof ApiProjectsIdErdVersionsIndexRoute
@@ -676,6 +749,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/test'
     | '/admin/users'
+    | '/api/cloud-deploy'
     | '/api/copilotkit'
     | '/api/deploy'
     | '/api/generate'
@@ -696,6 +770,10 @@ export interface FileRouteTypes {
     | '/api/copilotkit/$'
     | '/api/db/generate-schema'
     | '/api/db/reverse-engineer'
+    | '/api/db/seed-data'
+    | '/api/db/studio'
+    | '/api/db/studio-open'
+    | '/api/db/test-connection'
     | '/api/eml/validate'
     | '/api/mermaid/$filename'
     | '/api/mermaid/parse'
@@ -716,9 +794,11 @@ export interface FileRouteTypes {
     | '/api/workflows/'
     | '/admin/rules/$entity/$ruleId'
     | '/api/projects/$id/eml'
+    | '/api/projects/$id/git'
     | '/api/workflows/$workflowId/retry'
     | '/api/workflows/$workflowId/status'
     | '/projects/$id/enhance/$serviceName'
+    | '/projects/$id/enhance/logic'
     | '/api/admin/users/'
     | '/api/projects/$id/'
     | '/api/rules/$ruleId/'
@@ -728,6 +808,7 @@ export interface FileRouteTypes {
     | '/api/admin/users/$id/reject'
     | '/api/projects/$id/automations/$automationId'
     | '/api/projects/$id/eml/download'
+    | '/api/projects/$id/rules/dry-run'
     | '/api/projects/$id/automations/'
     | '/api/projects/$id/deployment/'
     | '/api/projects/$id/erd-versions/'
@@ -748,6 +829,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/test'
     | '/admin/users'
+    | '/api/cloud-deploy'
     | '/api/copilotkit'
     | '/api/deploy'
     | '/api/generate'
@@ -768,6 +850,10 @@ export interface FileRouteTypes {
     | '/api/copilotkit/$'
     | '/api/db/generate-schema'
     | '/api/db/reverse-engineer'
+    | '/api/db/seed-data'
+    | '/api/db/studio'
+    | '/api/db/studio-open'
+    | '/api/db/test-connection'
     | '/api/eml/validate'
     | '/api/mermaid/$filename'
     | '/api/mermaid/parse'
@@ -788,9 +874,11 @@ export interface FileRouteTypes {
     | '/api/workflows'
     | '/admin/rules/$entity/$ruleId'
     | '/api/projects/$id/eml'
+    | '/api/projects/$id/git'
     | '/api/workflows/$workflowId/retry'
     | '/api/workflows/$workflowId/status'
     | '/projects/$id/enhance/$serviceName'
+    | '/projects/$id/enhance/logic'
     | '/api/admin/users'
     | '/api/projects/$id'
     | '/api/rules/$ruleId'
@@ -800,6 +888,7 @@ export interface FileRouteTypes {
     | '/api/admin/users/$id/reject'
     | '/api/projects/$id/automations/$automationId'
     | '/api/projects/$id/eml/download'
+    | '/api/projects/$id/rules/dry-run'
     | '/api/projects/$id/automations'
     | '/api/projects/$id/deployment'
     | '/api/projects/$id/erd-versions'
@@ -820,6 +909,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/test'
     | '/admin/users'
+    | '/api/cloud-deploy'
     | '/api/copilotkit'
     | '/api/deploy'
     | '/api/generate'
@@ -840,6 +930,10 @@ export interface FileRouteTypes {
     | '/api/copilotkit/$'
     | '/api/db/generate-schema'
     | '/api/db/reverse-engineer'
+    | '/api/db/seed-data'
+    | '/api/db/studio'
+    | '/api/db/studio-open'
+    | '/api/db/test-connection'
     | '/api/eml/validate'
     | '/api/mermaid/$filename'
     | '/api/mermaid/parse'
@@ -860,9 +954,11 @@ export interface FileRouteTypes {
     | '/api/workflows/'
     | '/admin/rules/$entity/$ruleId'
     | '/api/projects/$id/eml'
+    | '/api/projects/$id/git'
     | '/api/workflows/$workflowId/retry'
     | '/api/workflows/$workflowId/status'
     | '/projects/$id/enhance/$serviceName'
+    | '/projects/$id/enhance/logic'
     | '/api/admin/users/'
     | '/api/projects/$id/'
     | '/api/rules/$ruleId/'
@@ -872,6 +968,7 @@ export interface FileRouteTypes {
     | '/api/admin/users/$id/reject'
     | '/api/projects/$id/automations/$automationId'
     | '/api/projects/$id/eml/download'
+    | '/api/projects/$id/rules/dry-run'
     | '/api/projects/$id/automations/'
     | '/api/projects/$id/deployment/'
     | '/api/projects/$id/erd-versions/'
@@ -893,6 +990,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   TestRoute: typeof TestRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  ApiCloudDeployRoute: typeof ApiCloudDeployRoute
   ApiCopilotkitRoute: typeof ApiCopilotkitRouteWithChildren
   ApiDeployRoute: typeof ApiDeployRoute
   ApiGenerateRoute: typeof ApiGenerateRoute
@@ -912,6 +1010,10 @@ export interface RootRouteChildren {
   ApiAuthRegisterRoute: typeof ApiAuthRegisterRoute
   ApiDbGenerateSchemaRoute: typeof ApiDbGenerateSchemaRoute
   ApiDbReverseEngineerRoute: typeof ApiDbReverseEngineerRoute
+  ApiDbSeedDataRoute: typeof ApiDbSeedDataRoute
+  ApiDbStudioRoute: typeof ApiDbStudioRoute
+  ApiDbStudioOpenRoute: typeof ApiDbStudioOpenRoute
+  ApiDbTestConnectionRoute: typeof ApiDbTestConnectionRoute
   ApiEmlValidateRoute: typeof ApiEmlValidateRoute
   ApiMermaidFilenameRoute: typeof ApiMermaidFilenameRoute
   ApiMermaidParseRoute: typeof ApiMermaidParseRoute
@@ -932,9 +1034,11 @@ export interface RootRouteChildren {
   ApiWorkflowsIndexRoute: typeof ApiWorkflowsIndexRoute
   AdminRulesEntityRuleIdRoute: typeof AdminRulesEntityRuleIdRoute
   ApiProjectsIdEmlRoute: typeof ApiProjectsIdEmlRouteWithChildren
+  ApiProjectsIdGitRoute: typeof ApiProjectsIdGitRoute
   ApiWorkflowsWorkflowIdRetryRoute: typeof ApiWorkflowsWorkflowIdRetryRoute
   ApiWorkflowsWorkflowIdStatusRoute: typeof ApiWorkflowsWorkflowIdStatusRoute
   ProjectsIdEnhanceServiceNameRoute: typeof ProjectsIdEnhanceServiceNameRoute
+  ProjectsIdEnhanceLogicRoute: typeof ProjectsIdEnhanceLogicRoute
   ApiAdminUsersIndexRoute: typeof ApiAdminUsersIndexRoute
   ApiProjectsIdIndexRoute: typeof ApiProjectsIdIndexRoute
   ApiRulesRuleIdIndexRoute: typeof ApiRulesRuleIdIndexRoute
@@ -943,6 +1047,7 @@ export interface RootRouteChildren {
   ApiAdminUsersIdApproveRoute: typeof ApiAdminUsersIdApproveRoute
   ApiAdminUsersIdRejectRoute: typeof ApiAdminUsersIdRejectRoute
   ApiProjectsIdAutomationsAutomationIdRoute: typeof ApiProjectsIdAutomationsAutomationIdRoute
+  ApiProjectsIdRulesDryRunRoute: typeof ApiProjectsIdRulesDryRunRoute
   ApiProjectsIdAutomationsIndexRoute: typeof ApiProjectsIdAutomationsIndexRoute
   ApiProjectsIdDeploymentIndexRoute: typeof ApiProjectsIdDeploymentIndexRoute
   ApiProjectsIdErdVersionsIndexRoute: typeof ApiProjectsIdErdVersionsIndexRoute
@@ -1005,6 +1110,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/users'
       fullPath: '/admin/users'
       preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cloud-deploy': {
+      id: '/api/cloud-deploy'
+      path: '/api/cloud-deploy'
+      fullPath: '/api/cloud-deploy'
+      preLoaderRoute: typeof ApiCloudDeployRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/copilotkit': {
@@ -1168,6 +1280,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDbReverseEngineerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/db/seed-data': {
+      id: '/api/db/seed-data'
+      path: '/api/db/seed-data'
+      fullPath: '/api/db/seed-data'
+      preLoaderRoute: typeof ApiDbSeedDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/studio': {
+      id: '/api/db/studio'
+      path: '/api/db/studio'
+      fullPath: '/api/db/studio'
+      preLoaderRoute: typeof ApiDbStudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/studio-open': {
+      id: '/api/db/studio-open'
+      path: '/api/db/studio-open'
+      fullPath: '/api/db/studio-open'
+      preLoaderRoute: typeof ApiDbStudioOpenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/db/test-connection': {
+      id: '/api/db/test-connection'
+      path: '/api/db/test-connection'
+      fullPath: '/api/db/test-connection'
+      preLoaderRoute: typeof ApiDbTestConnectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/eml/validate': {
       id: '/api/eml/validate'
       path: '/api/eml/validate'
@@ -1301,6 +1441,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProjectsIdEmlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/projects/$id/git': {
+      id: '/api/projects/$id/git'
+      path: '/api/projects/$id/git'
+      fullPath: '/api/projects/$id/git'
+      preLoaderRoute: typeof ApiProjectsIdGitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/rules/$ruleId/': {
       id: '/api/rules/$ruleId/'
       path: '/api/rules/$ruleId'
@@ -1341,6 +1488,13 @@ declare module '@tanstack/react-router' {
       path: '/projects/$id/enhance/$serviceName'
       fullPath: '/projects/$id/enhance/$serviceName'
       preLoaderRoute: typeof ProjectsIdEnhanceServiceNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$id/enhance/logic': {
+      id: '/projects/$id/enhance/logic'
+      path: '/projects/$id/enhance/logic'
+      fullPath: '/projects/$id/enhance/logic'
+      preLoaderRoute: typeof ProjectsIdEnhanceLogicRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/admin/users/$id/approve': {
@@ -1397,6 +1551,13 @@ declare module '@tanstack/react-router' {
       path: '/api/projects/$id/members'
       fullPath: '/api/projects/$id/members/'
       preLoaderRoute: typeof ApiProjectsIdMembersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/projects/$id/rules/dry-run': {
+      id: '/api/projects/$id/rules/dry-run'
+      path: '/api/projects/$id/rules/dry-run'
+      fullPath: '/api/projects/$id/rules/dry-run'
+      preLoaderRoute: typeof ApiProjectsIdRulesDryRunRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/projects/$id/workflows/': {
@@ -1482,6 +1643,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   TestRoute: TestRoute,
   AdminUsersRoute: AdminUsersRoute,
+  ApiCloudDeployRoute: ApiCloudDeployRoute,
   ApiCopilotkitRoute: ApiCopilotkitRouteWithChildren,
   ApiDeployRoute: ApiDeployRoute,
   ApiGenerateRoute: ApiGenerateRoute,
@@ -1501,6 +1663,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthRegisterRoute: ApiAuthRegisterRoute,
   ApiDbGenerateSchemaRoute: ApiDbGenerateSchemaRoute,
   ApiDbReverseEngineerRoute: ApiDbReverseEngineerRoute,
+  ApiDbSeedDataRoute: ApiDbSeedDataRoute,
+  ApiDbStudioRoute: ApiDbStudioRoute,
+  ApiDbStudioOpenRoute: ApiDbStudioOpenRoute,
+  ApiDbTestConnectionRoute: ApiDbTestConnectionRoute,
   ApiEmlValidateRoute: ApiEmlValidateRoute,
   ApiMermaidFilenameRoute: ApiMermaidFilenameRoute,
   ApiMermaidParseRoute: ApiMermaidParseRoute,
@@ -1521,9 +1687,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiWorkflowsIndexRoute: ApiWorkflowsIndexRoute,
   AdminRulesEntityRuleIdRoute: AdminRulesEntityRuleIdRoute,
   ApiProjectsIdEmlRoute: ApiProjectsIdEmlRouteWithChildren,
+  ApiProjectsIdGitRoute: ApiProjectsIdGitRoute,
   ApiWorkflowsWorkflowIdRetryRoute: ApiWorkflowsWorkflowIdRetryRoute,
   ApiWorkflowsWorkflowIdStatusRoute: ApiWorkflowsWorkflowIdStatusRoute,
   ProjectsIdEnhanceServiceNameRoute: ProjectsIdEnhanceServiceNameRoute,
+  ProjectsIdEnhanceLogicRoute: ProjectsIdEnhanceLogicRoute,
   ApiAdminUsersIndexRoute: ApiAdminUsersIndexRoute,
   ApiProjectsIdIndexRoute: ApiProjectsIdIndexRoute,
   ApiRulesRuleIdIndexRoute: ApiRulesRuleIdIndexRoute,
@@ -1533,6 +1701,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminUsersIdRejectRoute: ApiAdminUsersIdRejectRoute,
   ApiProjectsIdAutomationsAutomationIdRoute:
     ApiProjectsIdAutomationsAutomationIdRoute,
+  ApiProjectsIdRulesDryRunRoute: ApiProjectsIdRulesDryRunRoute,
   ApiProjectsIdAutomationsIndexRoute: ApiProjectsIdAutomationsIndexRoute,
   ApiProjectsIdDeploymentIndexRoute: ApiProjectsIdDeploymentIndexRoute,
   ApiProjectsIdErdVersionsIndexRoute: ApiProjectsIdErdVersionsIndexRoute,

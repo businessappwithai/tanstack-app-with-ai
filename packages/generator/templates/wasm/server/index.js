@@ -29,6 +29,7 @@ import { modelRoutes } from "./modules/model.routes.js";
 import { reportsRoutes } from "./modules/reports.routes.js";
 import { reportAuthRoutes } from "./modules/report-auth.routes.js";
 import { reportingRoutes } from "./modules/reporting.routes.js";
+import { reportAdminRoutes } from "./modules/report-admin.routes.js";
 
 const MIME = {
   html: "text/html; charset=utf-8",
@@ -99,6 +100,8 @@ export async function createServer(options) {
    */
   api.mount("/report-auth", reportAuthRoutes(model));
   api.mount("/reporting", reportingRoutes(model));
+  // Its administration: users, roles, table grants, the data source, the log.
+  api.mount("/report-admin", reportAdminRoutes(model));
 
   // `/workflow-definitions` is what the dictionary screens ask for; keeping the
   // alias here rather than duplicating handlers means one implementation.
@@ -194,7 +197,7 @@ export async function createServer(options) {
       if (asset) return asset;
       return errorResponse(notFound(`Nothing at ${pathname}`));
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, request.method);
     }
   }
 

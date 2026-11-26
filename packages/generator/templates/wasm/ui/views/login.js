@@ -164,6 +164,31 @@ export async function loginView(root, { project, onSignedIn }) {
           el("li", el("strong", "The application server"), " on a Worker with a Node-API runtime"),
           el("li", el("strong", "A Service Worker"), " answering this page's own /api requests"),
           el("li", el("strong", "No network"), " after load, and no data leaves the browser")
+        ),
+        /*
+         * The other application, named on the first screen rather than behind
+         * this one's sign-in.
+         *
+         * One model generates two applications, and the reporting one keeps its
+         * own accounts — `render()` in main.js matches `#/report` *before* the
+         * sign-in gate for exactly that reason, so it has never needed a session
+         * in this application. Until now the only way to it was the dashboard
+         * card, which is on the far side of a sign-in the reporting platform does
+         * not share: a reader who stopped at this screen was never told the
+         * second application existed. A plain anchor, because `hashchange` is
+         * already wired to the router.
+         */
+        el(
+          "div.login__other",
+          el("h2", "The reporting application"),
+          el(
+            "p.login__aside-note",
+            "The same model also generated an Enterprise Reporting application — its reports, " +
+              "charts and dashboard over this application's data, with one reporting role per " +
+              "role the model declares. It has its own accounts and its own sign-in, so you do " +
+              "not need to sign in here first."
+          ),
+          el("a.btn.btn--report", { href: "#/report" }, "Open Enterprise Reporting →")
         )
       ),
       el(

@@ -18,7 +18,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
-import { entities, harness, writableFields } from "../harness/index.ts";
+import { entities, harness, isStateField, writableFields } from "../harness/index.ts";
 
 interface WindowRow {
   sys_window_id: string;
@@ -260,9 +260,12 @@ describe("application dictionary — window, tab and field", () => {
           harness.client.get<Array<{ column_name: string }>>(`/bus/${entity.route}/fields/grid`),
         ]);
         const known = new Set(form.data.map((field) => field.column_name));
+        // The state field is the one grid column the form does not carry: it is
+        // shown read-only in the record's header, because only background
+        // workflows change it.
         const unknown = grid.data
           .map((field) => field.column_name)
-          .filter((name) => !known.has(name));
+          .filter((name) => !known.has(name) && !isStateField(entity, name));
         expect(unknown).toEqual([]);
       });
 

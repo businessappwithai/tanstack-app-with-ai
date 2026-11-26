@@ -8,20 +8,23 @@
  * and validates it against BetterAuth's session store.
  */
 
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, ForbiddenException, UnauthorizedException, ServiceUnavailableException, Inject, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { getAuth } from '../../../lib/better-auth';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { DatabaseService } from '../../../database/database.service';
 import { setRequestContext } from '../../../common/logging/logger.service';
+import { CapabilityService } from '../capability.service';
+import { getLogger } from '../../../common/logging/logger.service';
+import { CHAT_ONLY_CODE, chatOnlyRefuses } from '../../../common/chat-bridge';
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
-  private readonly logger = new Logger(SessionAuthGuard.name);
 
   constructor(
     @Inject(Reflector) private reflector: Reflector,
     @Optional() private readonly db?: DatabaseService,
+    @Optional() private readonly capabilities?: CapabilityService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -60,9 +63,32 @@ export class SessionAuthGuard implements CanActivate {
       });
       request.session = session;
 
-      // Enrich with sys_roles when sysUserId is set
+      // Everything the user's roles grant, in one query through
+      // sys_user_capability and cached per user (CapabilityService). The guards
+      // after this one — entity access, the moves — only look it up.
       const sysUserId = session.user.sysUserId as string | undefined;
-      if (sysUserId && this.db) {
+      // A deactivated or deleted account is refused here, on every request —
+      // not when its session cookie next goes back to the database.
+      if (sysUserId && this.capabilities && !(await this.capabilities.isActive(sysUserId))) {
+        throw new UnauthorizedException('This account has been deactivated.');
+      }
+      if (this.capabilities) {
+        try {
+          const capabilities = await this.capabilities.forUser({
+            sysUserId,
+            id: (session.user as any)?.id ?? null,
+            roles: (session.user as any)?.roles,
+            role: (session.user as any)?.role,
+          });
+          request.capabilities = capabilities;
+          request.user.sysRoles = capabilities.roles;
+          request.user.isMaster = capabilities.isMaster;
+        } catch (error) {
+          // Not knowing what a user may do is not the same as their holding
+          // nothing: the access guard refuses on a missing answer.
+          getLogger('auth').event('auth.session.unavailable', { step: "reading the caller's access", err: error });
+        }
+      } else if (sysUserId && this.db) {
         try {
           const roles = await this.db.kysely
             .selectFrom('sys_user_roles as ur')
@@ -78,12 +104,39 @@ export class SessionAuthGuard implements CanActivate {
         }
       }
 
-      this.logger.debug(`User authenticated: ${session.user.email}`);
+      // Chat-only mode: when the administrator has made the chat assistant the
+      // only way in, a request that did not come through it is refused for
+      // everybody but administrators. See common/chat-bridge.ts.
+      //
+      // `!== false`, not `=== true`: when the lookup above failed, nobody knows
+      // whether this is an administrator, and the one person who can turn the
+      // switch off must not be locked out by a fault. The mode fails open, as
+      // it does when the switch itself cannot be read.
+      if (
+        this.db &&
+        (await chatOnlyRefuses({
+          kysely: this.db.kysely,
+          headers: request.headers,
+          email: (session.user as any)?.email,
+          isMaster: request.user.isMaster !== false,
+        }))
+      ) {
+        throw new ForbiddenException({
+          message: 'This application is used through the assistant. Open the assistant to continue.',
+          error: 'Forbidden',
+          details: { code: CHAT_ONLY_CODE },
+        });
+      }
+
       return true;
     } catch (error) {
-      if (error instanceof UnauthorizedException) throw error;
-      this.logger.error(`Authentication failed: ${error.message}`);
-      throw new UnauthorizedException('Authentication failed. Please sign in again.');
+      if (error instanceof UnauthorizedException || error instanceof ForbiddenException) throw error;
+      // Not being able to *check* a session says nothing about whether it is valid. A 401 here
+      // — a database that was busy, a connection that dropped — tells the front end to sign the
+      // person out, and every screen they had open bounces to the sign-in page for a fault that
+      // was never theirs. Say the service could not answer, and let the request be retried.
+      getLogger('auth').event('auth.session.unavailable', { step: 'checking the session', err: error });
+      throw new ServiceUnavailableException('Could not check your session. Try again.');
     }
   }
 }

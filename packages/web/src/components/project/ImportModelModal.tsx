@@ -22,6 +22,7 @@ export interface ImportModelModalProps {
 
 interface Summary {
   ok: boolean;
+  check?: { errors: number; warnings: number; infos: number };
   entities: string[];
   relationships: number;
   rules: { name: string; entity: string }[];
@@ -153,7 +154,14 @@ export function ImportModelModal({ open, onClose, onImport }: ImportModelModalPr
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card shadow-xl">
+      {/* Capped at the viewport and scrolled inside, so a large model's summary never
+          pushes the Import button below the bottom of the screen. */}
+      <div
+        className={
+          "flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl border border-border bg-card " +
+          "shadow-xl"
+        }
+      >
         <div className="flex items-center gap-3 border-b border-border px-5 py-4">
           <FileCode2 className="h-5 w-5 text-primary" />
           <div className="flex-1">
@@ -167,7 +175,7 @@ export function ImportModelModal({ open, onClose, onImport }: ImportModelModalPr
           </button>
         </div>
 
-        <div className="space-y-4 px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {examples.length > 0 && (
             <div className="space-y-1.5">
               <label htmlFor="example-model" className="text-xs font-medium text-muted-foreground">
@@ -239,6 +247,14 @@ export function ImportModelModal({ open, onClose, onImport }: ImportModelModalPr
                         <> — {summary.workflows.map((workflow) => workflow.name).join(", ")}</>
                       )}
                     </li>
+                    {summary.check && (
+                      <li>
+                        EML checker: {summary.check.errors} errors · {summary.check.warnings}{" "}
+                        warnings · {summary.check.infos} notes
+                        {summary.check.errors + summary.check.warnings > 0 &&
+                          " — Validate on the Design page lists them"}
+                      </li>
+                    )}
                   </ul>
                 </>
               ) : (

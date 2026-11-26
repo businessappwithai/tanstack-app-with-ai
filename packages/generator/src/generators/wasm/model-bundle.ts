@@ -31,6 +31,7 @@ import {
   referenceFromColumnName,
 } from "@appwithai/core/types";
 import { tableNameFor } from "../../naming/tables";
+import { lifecycleTable } from "../tanstack-start-nestjs/lifecycle-module";
 import type { ParsedModel } from "../../pipeline/generate-application";
 import { deriveAccess } from "../../rbac/roles";
 import { buildReportingPack } from "../../reporting/pack";
@@ -486,6 +487,17 @@ export function buildModelBundle(
       seqNo: index,
     })),
     rbac: parsed.rbac,
+    /* Every table's lifecycle — Draft, the flow, Final — the same
+       `lifecycleTable` the NestJS stack's `lifecycle.ts` is written from, so
+       one model gives both stacks the same moves and the same lock. */
+    lifecycle: lifecycleTable(
+      parsed.entities.map((entity) => ({
+        name: entity.name,
+        tableName: tableNameFor(entity),
+        attributes: entity.attributes.map((attribute) => ({ name: attribute.name })),
+      })),
+      parsed.workflows
+    ),
     /* Queries, reports, charts, a dashboard and one reporting role per `%%rbac`
        role — read by `/api/reporting/*` and nothing else. Kept as a block
        rather than spread into the model so that what the reporting application
@@ -572,19 +584,33 @@ export function buildModelBundle(
           column.column_name
         ),
         seqNo: column.seq_no,
+        /* `%%field … readonly: | mandatory:` — Compiere's column logic. */
+        readOnlyLogic: column.read_only_logic,
+        mandatoryLogic: column.mandatory_logic,
       })),
-      // No field groups, and the form is therefore one flat list in the
-      // model's own column order.
+      // The model's `%%section` groups, and nothing else.
       //
-      // `sys_field.sys_field_group_id` is unset in both stacks — but it took a
-      // fix to make that true. The NestJS seed
-      // (`templates/common/seeds/sys-dictionary.ts.hbs`) used to assign a
-      // group by *position*, `i < 3 ? General : Details`, which its form
-      // renders as two headed sections split after the third column. So one
-      // model produced two applications that laid the same entity out
-      // differently, and the split was not something the model asked for.
-      // Change one of these two and change the other.
-      fieldGroups: [] as Array<{ tableName: string; name: string; seqNo: number }>,
+      // An entity with no sections has no groups, and its form is one flat
+      // list in the model's own column order. Groups used to be decided by
+      // *position* in the NestJS seed (`i < 3 ? General : Details`), which split
+      // every form after its third column — one model, two applications laying
+      // the same entity out differently, and a split nobody asked for. A group
+      // comes from the model or not at all, in both stacks
+      // (`templates/common/seeds/sys-dictionary.ts.hbs`). Change one of these
+      // two and change the other.
+      fieldGroups: dictionary.sysFieldGroups
+        .filter((group) => group._tabRef)
+        .map((group) => ({
+          tableName:
+            tableByTemp.get(
+              dictionary.sysTabs.find((tab) => tab._tempId === group._tabRef)?._tableRef ?? ""
+            ) ?? "",
+          name: group.name,
+          description: group.description,
+          columns: group.columns ?? 2,
+          collapsed: group.is_collapsed_by_default,
+          seqNo: group.seq_no ?? 0,
+        })),
       fields: dictionary.sysFields.map((field) => {
         const reference = columnByTemp.get(field._columnRef);
         const tableName = reference?.table ?? tabTable.get(field._tabRef) ?? "";
@@ -607,10 +633,21 @@ export function buildModelBundle(
           isInsertable: true,
           seqNo: field.seq_no,
           seqNoGrid: field.seq_no_grid,
+          /* `%%section`: the group, and where in its two-column grid. */
+          fieldGroup: field._groupRef
+            ? dictionary.sysFieldGroups.find((group) => group._tempId === field._groupRef)?.name
+            : undefined,
+          isSameLine: field.is_same_line,
+          columnSpan: field.column_span,
           fieldType: attribute?.type,
           referenceId: attribute?.referenceId,
           defaultValue: attribute?.defaultValue ?? undefined,
           isKey: attribute?.columnName === "id",
+          /* Field logic (applicationDictionary.fieldLogic): evaluated by the
+             form as the record is edited and by bus.routes.js on every write. */
+          displayLogic: field.display_logic,
+          readOnlyLogic: field.read_only_logic,
+          mandatoryLogic: field.mandatory_logic,
         };
       }),
     },
@@ -619,11 +656,27 @@ export function buildModelBundle(
   return { model, schema };
 }
 
-// Columns that are real, queryable and useless in a grid. `id` is a uuid
-// nobody reads, and the audit columns would make every table eight columns
-// wider than the model asked for. All of them stay on the form.
-const NOISE = new Set(["id", "created_by", "updated_by", "deleted_by", "deleted_at", "version"]);
-const isNoise = (column: string) => NOISE.has(column);
+/**
+ * Columns that are real, queryable and useless in a grid. `id` is a uuid nobody
+ * reads, and the audit columns would make every table eight columns wider than
+ * the model asked for. All of them stay on the form.
+ *
+ * `DictionaryGenerator` does not apply this — it marks every column grid-visible
+ * and each consumer narrows it, which is why this is exported rather than
+ * private. The NestJS stack applies the same set as `GRID_NOISE` in
+ * `templates/common/seeds/sys-dictionary.ts.hbs` (a literal, because a template
+ * cannot import), and `manual/index.ts` imports this one so the manual reports
+ * the grid the application actually draws. Change one and change the other.
+ */
+export const GRID_NOISE = new Set([
+  "id",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+  "version",
+]);
+const isNoise = (column: string) => GRID_NOISE.has(column);
 
 function entityNameFor(entities: Array<{ name: string; tableName: string }>, tableName: string) {
   return entities.find((entity) => entity.tableName === tableName)?.name ?? tableName;
@@ -651,7 +704,7 @@ function isPersonRoleColumn(columnName: string): boolean {
 }
 
 /** The table a foreign-key column points at, for the form's lookup control. */
-function refTableFor(
+export function refTableFor(
   entities: Array<{
     name: string;
     tableName: string;
@@ -670,10 +723,15 @@ function refTableFor(
      used to reach the form with no reference table and render as a text box
      asking for a uuid. */
   if (isPersonRoleColumn(columnName)) {
-    const user = entities.find(
-      (entity) => entity.tableName === "bus_user" || entity.name === "User"
-    );
-    if (user) return user.tableName;
+    /* The person entity is the first of User, Staff, Employee the model declares —
+       the same order the checker uses (language/checker.ts, personEntityName). A
+       model with only Staff (a car wash, a clinic) must still get its lookup. */
+    for (const name of ["User", "Staff", "Employee"]) {
+      const person = entities.find(
+        (entity) => entity.name === name || entity.tableName === `bus_${name.toLowerCase()}`
+      );
+      if (person) return person.tableName;
+    }
   }
 
   const base = columnName.replace(/_id$/, "");

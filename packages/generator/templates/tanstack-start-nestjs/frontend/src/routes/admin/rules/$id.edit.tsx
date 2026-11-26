@@ -1,21 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  CheckCircle,
-  HelpCircle,
-  History,
-  Loader2,
-  Save,
-  TestTube2,
-  ToggleLeft,
-  ToggleRight,
-  XCircle,
-} from "lucide-react";
+import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { RuleTableEditor } from "@/components/automation/RuleTableEditor";
-import { asDecisionTable } from "@/lib/automation/rule-content";
+import { RuleGraphEditor } from "@/components/rules/RuleGraphEditor";
+import { ruleEntityLabel, useRuleEntities } from "@/hooks/use-rule-entities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,19 +31,23 @@ interface Rule {
   updatedBy?: string;
 }
 
+const OPERATION_LABELS: Record<string, string> = {
+  CREATE: "Creating a record",
+  UPDATE: "Changing a record",
+  DELETE: "Deleting a record",
+  ALL: "Any write",
+};
+
 function EditRulePage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [jdmContent, setJdmContent] = useState("");
+  // The rule as it was stored; the editor reads it once, on opening.
+  const [loaded, setLoaded] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Dry run state
-  const [testData, setTestData] = useState("{}");
-  const [testResult, setTestResult] = useState<any>(null);
-  const [showTestPanel, setShowTestPanel] = useState(false);
 
   const { data: rule, isLoading } = useQuery({
     queryKey: ["admin", "rules", id],
@@ -63,29 +56,21 @@ function EditRulePage() {
     },
   });
 
-  // The decision table's trigger-workflow action offers these by name. Without
-  // them this page referenced an undefined `availableWorkflows` and failed to
-  // compile, so editing an existing rule was impossible.
-  const { data: workflowsData } = useQuery({
-    queryKey: ["workflow-definitions"],
-    queryFn: async () => {
-      const data = await apiClient.get<any[]>("/workflow-definitions?isActive=true");
-      return Array.isArray(data) ? data : [];
-    },
-  });
-  const availableWorkflows = (workflowsData ?? []).map((wf: any) => ({
-    id: wf.id,
-    name: wf.name,
-    description: wf.description,
-  }));
+  // The rule's entity's own columns, for the table's input pickers.
+  const { data: entities = [] } = useRuleEntities();
+  const entityFields = entities.find((entity) => entity.value === rule?.entityName)?.fields ?? [];
+  const entityLabel = ruleEntityLabel(entities, rule?.entityName);
 
   useEffect(() => {
     if (rule) {
+      let text = rule.jdmContent;
       try {
-        setJdmContent(JSON.stringify(JSON.parse(rule.jdmContent), null, 2));
+        text = JSON.stringify(JSON.parse(rule.jdmContent), null, 2);
       } catch {
-        setJdmContent(rule.jdmContent);
+        // kept as stored
       }
+      setJdmContent(text);
+      setLoaded(text);
       setIsActive(rule.isActive);
     }
   }, [rule]);
@@ -104,22 +89,6 @@ function EditRulePage() {
     },
   });
 
-  const dryRunMutation = useMutation({
-    mutationFn: async (data: { testData: Record<string, unknown> }) => {
-      return await apiClient.post("/rules/evaluate", {
-        entityName: rule?.entityName || "Account",
-        operation: rule?.operation || "CREATE",
-        data: data.testData,
-      });
-    },
-    onSuccess: (result) => {
-      setTestResult(result);
-    },
-    onError: (error: Error) => {
-      setTestResult({ error: error.message });
-    },
-  });
-
   const validate = () => {
     const newErrors: Record<string, string> = {};
     try {
@@ -135,15 +104,6 @@ function EditRulePage() {
     e.preventDefault();
     if (!validate()) return;
     updateMutation.mutate({ jdmContent, isActive });
-  };
-
-  const handleDryRun = () => {
-    try {
-      const parsed = JSON.parse(testData);
-      dryRunMutation.mutate({ testData: parsed });
-    } catch {
-      toast.error("Invalid test data JSON");
-    }
   };
 
   if (isLoading) {
@@ -197,15 +157,18 @@ function EditRulePage() {
                 {rule.operation}
               </Badge>
               <Badge variant="secondary" className="text-xs">
-                {rule.entityName}
+                {entityLabel}
               </Badge>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-8 py-8">
-        <form onSubmit={handleSubmit}>
+      <div className="max-w-6xl mx-auto px-8 py-8">
+        {/* The form holds the rule's details only. The graph editor's own toolbar is made of
+            plain buttons, and a button inside a form submits it: pressing the Simulator's
+            play control saved the rule. The editor sits outside, and Save names the form. */}
+        <form id="rule-form" onSubmit={handleSubmit}>
           {/* Rule metadata display (read-only) */}
           <div className="border-2 border-foreground mb-8">
             <div className="bg-muted/40 px-6 py-3 border-b-2 border-foreground">
@@ -217,13 +180,14 @@ function EditRulePage() {
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
                     Entity
                   </Label>
-                  <p className="mt-1 font-medium">{rule.entityName}</p>
+                  <p className="mt-1 font-medium">{entityLabel}</p>
                 </div>
                 <div>
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
-                    Operation
+                    Runs at
                   </Label>
-                  <p className="mt-1 font-medium">{rule.operation}</p>
+                  <p className="mt-1 font-medium">{OPERATION_LABELS[rule.operation] ?? rule.operation}</p>
+                  <p className="text-[11px] text-muted-foreground">Set by the workflow it is attached to.</p>
                 </div>
                 <div>
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -268,145 +232,27 @@ function EditRulePage() {
             </div>
           </div>
 
-          {/* Decision Table Editor */}
+        </form>
+
+          {/* The rule: the modelling tool's own graph editor */}
           <div className="border-2 border-foreground mb-8">
             <div className="bg-muted/40 px-6 py-3 border-b-2 border-foreground">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-wider">Decision Logic</h2>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-none text-xs"
-                  onClick={() => setShowTestPanel(!showTestPanel)}
-                >
-                  <TestTube2 className="h-3.5 w-3.5 mr-1" />
-                  {showTestPanel ? "Hide Test" : "Test Rule"}
-                </Button>
-              </div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider">Decision Logic</h2>
             </div>
-            <RuleTableEditor
-              name={rule.ruleName}
-              table={asDecisionTable(jdmContent)}
-              // Serialised on the way out. `jdmContent` is the JSON text the
-              // rules API stores and every check on this page parses; the
-              // editor hands back a DecisionTable object. Passing the setter
-              // straight in put the object into a string state, so the save
-              // path's JSON.parse threw and a rule authored in the table editor
-              // could not be saved at all — it failed validation as "Invalid
-              // JDM content" with nothing on screen to explain why.
-              onChange={(next) => setJdmContent(JSON.stringify(next, null, 2))}
-            />
+            {loaded && (
+              <RuleGraphEditor
+                key={rule.id}
+                entityName={rule.entityName}
+                ruleName={rule.ruleName}
+                initialContent={loaded}
+                fallbackFields={entityFields.map((field) => field.value)}
+                onChange={setJdmContent}
+              />
+            )}
             {errors.jdmContent && (
               <p className="text-xs text-red-600 dark:text-red-400 px-4 pb-2">{errors.jdmContent}</p>
             )}
           </div>
-
-          {/* Test Panel */}
-          {showTestPanel && (
-            <div className="border-2 border-foreground mb-8">
-              <div className="bg-amber-50 dark:bg-amber-950/40 px-6 py-3 border-b-2 border-foreground">
-                <h2 className="text-sm font-semibold uppercase tracking-wider flex items-center gap-2">
-                  <TestTube2 className="h-4 w-4" />
-                  Dry Run — Test Your Rule
-                </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Enter sample entity data to see how your rule would evaluate it.
-                </p>
-              </div>
-              <div className="p-6">
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">
-                      Test Data (JSON)
-                    </Label>
-                    <textarea
-                      className="w-full h-40 font-mono text-xs border-2 border-border p-3 rounded-none"
-                      value={testData}
-                      onChange={(e) => setTestData(e.target.value)}
-                      placeholder={`{\n  "name": "Test Account",\n  "email": null,\n  "status": "active"\n}`}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="mt-2 rounded-none bg-amber-600 text-white hover:bg-amber-700"
-                      onClick={handleDryRun}
-                      disabled={dryRunMutation.isPending}
-                    >
-                      {dryRunMutation.isPending ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <TestTube2 className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      Run Test
-                    </Button>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">
-                      Result
-                    </Label>
-                    {testResult ? (
-                      <div className="h-40 overflow-auto border-2 border-border p-3 bg-muted/40 text-xs">
-                        {testResult.error ? (
-                          <div className="flex items-start gap-2 text-red-600 dark:text-red-400">
-                            <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <p className="font-semibold">Error</p>
-                              <p>{testResult.error}</p>
-                            </div>
-                          </div>
-                        ) : testResult.results?.length > 0 ? (
-                          <div className="space-y-2">
-                            {testResult.results.map((r: any, i: number) => (
-                              <div
-                                key={i}
-                                className={`flex items-start gap-2 p-2 rounded ${
-                                  r.actions?.some((a: any) => a.type === "prevent")
-                                    ? "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300"
-                                    : r.actions?.some((a: any) =>
-                                          (a.type as string)?.startsWith("cascade")
-                                        )
-                                      ? "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
-                                      : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
-                                }`}
-                              >
-                                {r.actions?.some((a: any) => a.type === "prevent") ? (
-                                  <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                ) : r.actions?.some((a: any) =>
-                                    (a.type as string)?.startsWith("cascade")
-                                  ) ? (
-                                  <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                ) : (
-                                  <HelpCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                )}
-                                <div>
-                                  <p className="font-semibold">{r.ruleName}</p>
-                                  {r.actions?.map((a: any, j: number) => (
-                                    <p key={j}>
-                                      [{a.type}] {a.config?.message}
-                                    </p>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                            <CheckCircle className="h-4 w-4" />
-                            <span className="font-semibold">All checks passed — no violations</span>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="h-40 border-2 border-dashed border-border flex items-center justify-center text-muted-foreground/70 text-xs">
-                        Click "Run Test" to see results
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Actions */}
           <div className="flex items-center justify-between">
@@ -421,6 +267,7 @@ function EditRulePage() {
             </Link>
             <Button
               type="submit"
+              form="rule-form"
               disabled={updateMutation.isPending}
               className="bg-foreground text-background hover:bg-foreground/90 rounded-none px-8"
             >
@@ -432,8 +279,7 @@ function EditRulePage() {
               {updateMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </div>
-        </form>
-      </main>
+      </div>
     </div>
   );
 }

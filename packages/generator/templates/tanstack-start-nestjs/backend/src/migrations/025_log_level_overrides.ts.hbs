@@ -1,0 +1,28 @@
+/**
+ * Log levels an administrator set through `PUT /api/logging/levels/:channel`.
+ *
+ * They used to live in the process's memory and vanish on restart, which is the right default
+ * for "turn this up for ten minutes" and the wrong one for "keep the payment channel at debug
+ * until the incident is closed". A row here is applied at start-up and every half minute
+ * afterwards, so a restart keeps it and so does a second instance.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { Kysely, sql } from 'kysely';
+
+export async function up(db: Kysely<any>): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS sys_log_level_override (
+      channel    VARCHAR(64) PRIMARY KEY,
+      level      VARCHAR(16) NOT NULL,
+      updated_by VARCHAR(255),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `.execute(db);
+}
+
+export async function down(db: Kysely<any>): Promise<void> {
+  await sql`DROP TABLE IF EXISTS sys_log_level_override`.execute(db);
+}

@@ -43,6 +43,9 @@ import {
 } from "@/hooks/use-entities";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { getClientLogger } from "@/lib/logger";
+
+const log = getClientLogger("field-layout");
 
 // ============================================================================
 // Types
@@ -246,7 +249,7 @@ export function FieldLayoutEditor({ entityName }: FieldLayoutEditorProps) {
         const newGridDisplayed =
           visibilityType === "grid" ? !f.is_displayed_grid : f.is_displayed_grid;
 
-        console.log(`Toggling ${fieldId} ${visibilityType}:`, {
+        log.debug(`Toggling ${fieldId} ${visibilityType}`, {
           before: { form: f.is_displayed, grid: f.is_displayed_grid },
           after: { form: newFormDisplayed, grid: newGridDisplayed },
         });
@@ -259,7 +262,6 @@ export function FieldLayoutEditor({ entityName }: FieldLayoutEditorProps) {
         };
       });
 
-      console.log("Updated fields:", updated);
       return updated;
     });
     setHasChanges(true);
@@ -280,7 +282,7 @@ export function FieldLayoutEditor({ entityName }: FieldLayoutEditorProps) {
         };
       });
 
-    console.log(`Saving field updates (${editMode} mode):`, updates);
+    log.debug(`Saving field updates (${editMode} mode)`, { count: updates.length });
 
     if (updates.length > 0) {
       batchUpdateMutation.mutate(updates);

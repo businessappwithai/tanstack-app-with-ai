@@ -1,0 +1,212 @@
+/**
+ * A button press is two transactions, and a workflow bound to the status it
+ * moves to decides whether the second one commits.
+ *
+ * Pressing a move with the form's values (`data`) first saves them — the record
+ * stays in the status it is in — and then runs the move: the workflows bound to
+ * the status it reaches (`operation: ENTER:<STATE>`), and, if every one succeeds,
+ * the status write. This suite holds the API to the part that is easy to get
+ * wrong, because every half of it looks fine from the outside:
+ *
+ *   - a bound workflow that fails refuses the move with 422 `WORKFLOW_FAILED`,
+ *     naming the workflow and the half of the press it failed in
+ *     (`details.phase: "workflow"`), and the status does not move;
+ *   - what was typed is kept: the save committed first, so the value is on the
+ *     record and the version moved on by exactly that save;
+ *   - the failed run is recorded where Run History lists it — the rollback took
+ *     the run row with it, so it is written back afterwards;
+ *   - fixing the cause and pressing again moves the record, and the stale
+ *     message goes with it;
+ *   - a workflow bound to a status is never run by a plain save.
+ *
+ * The workflow it binds is built here through the API, from the status the
+ * model's own machine draws, and removed again — so a model with no status
+ * machine has nothing to drive and says so.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
+import {
+  getEntity,
+  firstTextField,
+  harness,
+  stateMachines,
+  successorsOf,
+} from "../harness/index.ts";
+
+interface Row {
+  id?: string;
+  version?: number;
+  doc_status_message?: string | null;
+  [column: string]: unknown;
+}
+
+interface Refusal {
+  statusCode?: number;
+  message?: string;
+  details?: {
+    code?: string;
+    phase?: string;
+    workflow?: string;
+    reason?: string;
+    saved?: boolean;
+    version?: number;
+    to?: string;
+  };
+}
+
+interface DefinitionRow {
+  id?: string;
+}
+
+interface RunRow {
+  workflow_name?: string;
+  operation?: string;
+  status?: string;
+}
+
+const RUN = Date.now().toString(36);
+
+/**
+ * A designer workflow that always fails: it creates a row with a column nothing
+ * declares. It is bound to `status`, so only a move into it runs it.
+ */
+function breaker(entity: string, status: string, name: string) {
+  const mermaid = [
+    "flowchart TD",
+    "    start([Moved]) --> s1[Create a row that cannot exist]",
+    "    s1 --> done([Response])",
+    `%%workflow name: ${name}`,
+    `%%hook afterUpdate on ${entity}`,
+    "%%step s1 type: CreateEntity",
+    `%%step s1 entity: ${entity}`,
+    '%%step s1 fields: {"e2e_no_such_column":"x"}',
+  ].join("\n");
+  return { name, kind: "automation", operation: `ENTER:${status.toUpperCase()}`, mermaid };
+}
+
+describe("a workflow bound to a status", () => {
+  beforeAll(async () => {
+    await harness.setup();
+  });
+
+  afterAll(async () => {
+    await harness.teardown();
+  });
+
+  it("has a state machine to drive, or declares none", () => {
+    if (stateMachines.length === 0) {
+      console.log("  (no %%workflow … kind: state in this model — nothing to bind a status to)");
+    }
+    expect(Array.isArray(stateMachines)).toBe(true);
+  });
+
+  for (const machine of stateMachines.slice(0, 2)) {
+    const entity = getEntity(machine.entity);
+    if (!entity) continue;
+
+    describe(`${machine.entity}`, () => {
+      it("keeps the typing, the status and the reason when a bound workflow fails", async () => {
+        const record = await harness.createWithParents(entity);
+        if (!record?.id) return;
+        const id = String(record.id);
+        const route = `/bus/${entity.route}/${id}`;
+
+        const read = await harness.client.get<Row>(route);
+        const at = String(read.data?.[machine.statusField] ?? "");
+        if (!at || at === "error") return;
+        const next = successorsOf(machine, at)[0];
+        if (!next) return;
+
+        const name = `e2e-bound-${RUN}-${machine.entity}`;
+        const created = await harness.client.post<DefinitionRow>(
+          "/workflow-definitions",
+          { ...breaker(entity.name, next, name), entityName: machine.tableName },
+          { allowFailure: true }
+        );
+        // A model whose entity names cannot be bound this way is not the subject.
+        if (!created.ok || !created.data?.id) return;
+        const definitionId = String(created.data.id);
+
+        try {
+          const text = firstTextField(entity);
+          const typed = `e2e-press-${RUN}`;
+          const version = Number(read.data?.version);
+          const refused = await harness.client.post<Refusal>(
+            `${route}/transition`,
+            { to: next, ...(text ? { data: { [text.name]: typed } } : {}) },
+            { allowFailure: true, headers: { "If-Match": `"${version}"` } }
+          );
+          // A rule of the model may refuse the move before the workflow runs (422
+          // RULE_REFUSED) — the model working, and not what is under test.
+          if (refused.status === 422 && refused.data?.details?.code !== "WORKFLOW_FAILED") return;
+          // Nor is a save the model's own rules would not accept.
+          if (refused.data?.details?.phase === "save") return;
+
+          expect(refused.status).toBe(422);
+          expect(refused.data?.details?.code).toBe("WORKFLOW_FAILED");
+          expect(refused.data?.details?.workflow).toBe(name);
+          expect(refused.data?.details?.phase).toBe("workflow");
+          expect(refused.data?.details?.saved).toBe(true);
+
+          const after = await harness.client.get<Row>(route);
+          // The move was undone ...
+          expect(String(after.data?.[machine.statusField])).toBe(at);
+          expect(after.data?.doc_status_message).toBeTruthy();
+          // ... the save was not.
+          if (text) {
+            expect(after.data?.[text.name]).toBe(typed);
+            expect(Number(after.data?.version)).toBe(version + 1);
+            expect(refused.data?.details?.version).toBe(version + 1);
+          }
+
+          // The failed run is in Run History, written back after the rollback.
+          const runs = await harness.client.get<{ items?: RunRow[] } | RunRow[]>(
+            "/workflows/runs?limit=100",
+            { allowFailure: true }
+          );
+          const listed = Array.isArray(runs.data) ? runs.data : (runs.data?.items ?? []);
+          expect(
+            listed.some(
+              (run) =>
+                run.workflow_name === name &&
+                run.status === "error" &&
+                run.operation === `ENTER:${next.toUpperCase()}`
+            )
+          ).toBe(true);
+        } finally {
+          await harness.client.delete(`/workflow-definitions/${definitionId}`, {
+            allowFailure: true,
+          });
+        }
+
+        // The cause is gone: the same press moves the record, and the reason with it.
+        const again = await harness.client.get<Row>(route);
+        const moved = await harness.client.post<Row>(
+          `${route}/transition`,
+          { to: next },
+          { allowFailure: true, headers: { "If-Match": `"${Number(again.data?.version)}"` } }
+        );
+        if (moved.status === 422) return;
+        expect(moved.status).toBe(200);
+        expect(String(moved.data?.[machine.statusField])).toBe(next);
+        expect(moved.data?.doc_status_message ?? null).toBeNull();
+      });
+
+      it("refuses a binding to a state the machine does not draw", async () => {
+        const refused = await harness.client.post<Refusal>(
+          "/workflow-definitions",
+          {
+            ...breaker(entity.name, "e2e_no_such_state", `e2e-unbound-${RUN}-${machine.entity}`),
+            entityName: machine.tableName,
+          },
+          { allowFailure: true }
+        );
+        expect(refused.status).toBe(400);
+        expect(String(refused.data?.message)).toContain("does not draw");
+      });
+    });
+  }
+});

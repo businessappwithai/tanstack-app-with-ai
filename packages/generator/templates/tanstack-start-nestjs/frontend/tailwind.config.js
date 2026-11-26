@@ -6,6 +6,7 @@ export default {
   content: [
     './src/routes/**/*.{js,ts,jsx,tsx}',
     './src/components/**/*.{js,ts,jsx,tsx}',
+    './src/editors/**/*.{js,ts,jsx,tsx}',
     './src/styles/**/*.css',
   ],
   theme: {

@@ -415,7 +415,7 @@ everyone's tree, where the next run overwrites them anyway.
 | `bun run test` (this repository) | ✅ 512 passed, 6 skipped |
 | `bun run test:wasm:cli` — overlay footprint contract | ✅ 16/16 |
 
-Re-verified after ISSUE-012 to ISSUE-014, on bun 1.4.0 / linux-x64, with every
+Re-verified after ISSUE-012 to ISSUE-014, on CI's bun / linux-x64, with every
 job in `ci.yml` reproduced locally:
 
 | Check | Result |

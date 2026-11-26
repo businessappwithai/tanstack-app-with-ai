@@ -175,6 +175,9 @@ CREATE TABLE IF NOT EXISTS sys_field_group (
   sys_field_group_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sys_tab_id UUID REFERENCES sys_tab(sys_tab_id),
   name VARCHAR(100) NOT NULL,
+  description TEXT,
+  columns INTEGER DEFAULT 1,
+  is_collapsed_by_default BOOLEAN DEFAULT false,
   seq_no INTEGER DEFAULT 0,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -204,11 +207,33 @@ CREATE TABLE IF NOT EXISTS sys_field (
   display_logic TEXT,
   is_key BOOLEAN DEFAULT false,
   is_parent BOOLEAN DEFAULT false,
+  is_same_line BOOLEAN DEFAULT false,
+  column_span INTEGER,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(sys_tab_id, sys_column_id)
 );
+
+-- `%%section` layout. In the CREATE above for a new database, and added here
+-- for one a tab wrote before sections existed: the schema is re-run on every
+-- boot and only ever adds.
+ALTER TABLE sys_field_group ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE sys_field_group ADD COLUMN IF NOT EXISTS columns INTEGER DEFAULT 1;
+ALTER TABLE sys_field_group ADD COLUMN IF NOT EXISTS is_collapsed_by_default BOOLEAN DEFAULT false;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS is_same_line BOOLEAN DEFAULT false;
+-- X and Y Position are gone from the dictionary: a form is laid out by Sequence,
+-- Same Line and Column Span alone. A database written before that loses them here.
+ALTER TABLE sys_field DROP COLUMN IF EXISTS x_position;
+ALTER TABLE sys_field DROP COLUMN IF EXISTS y_position;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS column_span INTEGER;
+-- Field logic: Compiere's Display, Read Only and Mandatory Logic. Display is the
+-- field's alone; read-only and mandatory are the column's, repeated on the field.
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS display_logic TEXT;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS read_only_logic TEXT;
+ALTER TABLE sys_field ADD COLUMN IF NOT EXISTS mandatory_logic TEXT;
+ALTER TABLE sys_column ADD COLUMN IF NOT EXISTS read_only_logic TEXT;
+ALTER TABLE sys_column ADD COLUMN IF NOT EXISTS mandatory_logic TEXT;
 
 CREATE TABLE IF NOT EXISTS sys_category (
   sys_category_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -321,6 +346,38 @@ CREATE TABLE IF NOT EXISTS sys_transition_access (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- The `%%report` questions this application answers about itself.
+--
+-- These were served from `model.json` in memory until now, which made them the
+-- one part of the application that could be read and never changed: no table,
+-- so no create, update or delete. The NestJS stack has had `sys_report` since
+-- migration 018 and this is the same shape deliberately, down to the column
+-- names, so one model produces two applications that agree about what a report
+-- is.
+--
+-- `sql_text` rather than `sql`: the column holds a statement and `sql` is a
+-- reserved word in enough dialects that naming it that invites a quoting bug.
+-- Every read of it still goes through `assertReadOnly` at run time — the table
+-- is ordinary and an administrator can now write to it, so the runtime trusts
+-- what it is handed exactly as much as it did before, which is not at all.
+CREATE TABLE IF NOT EXISTS sys_report (
+  sys_report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(120) NOT NULL UNIQUE,
+  title VARCHAR(255) NOT NULL,
+  entity_name VARCHAR(100),
+  table_name VARCHAR(100),
+  chart VARCHAR(20),
+  x_axis VARCHAR(100),
+  y_axis VARCHAR(100),
+  help TEXT,
+  sql_text TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_report_table ON sys_report(table_name, sort_order);
 CREATE INDEX IF NOT EXISTS idx_sys_column_table ON sys_column(sys_table_id);
 CREATE INDEX IF NOT EXISTS idx_sys_field_tab ON sys_field(sys_tab_id);
 CREATE INDEX IF NOT EXISTS idx_sys_session_token ON sys_session(token);
@@ -391,3 +448,22 @@ CREATE TABLE IF NOT EXISTS rpt_session (
 
 CREATE INDEX IF NOT EXISTS idx_rpt_session_token ON rpt_session(token);
 CREATE INDEX IF NOT EXISTS idx_rpt_user_email ON rpt_user(email);
+
+-- What happened in the reporting application: sign-ins, report and chart runs
+-- (allowed or refused), and every administrator change to its users, roles and
+-- table grants. It is what the reporting side's System Logs screen reads, and
+-- the only record of who ran what — a refusal is logged as well as a run,
+-- because a role's access is only visible in what it was denied.
+CREATE TABLE IF NOT EXISTS rpt_activity_log (
+  rpt_activity_log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  occurred_at TIMESTAMPTZ DEFAULT NOW(),
+  rpt_user_id UUID,
+  email VARCHAR(255),
+  action VARCHAR(50) NOT NULL,
+  target VARCHAR(255),
+  outcome VARCHAR(20) NOT NULL,
+  detail TEXT,
+  duration_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_rpt_activity_log_at ON rpt_activity_log(occurred_at DESC);

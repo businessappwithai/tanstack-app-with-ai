@@ -43,7 +43,7 @@ export interface EvaluationOptions {
  */
 // The class encapsulates the private static instance and init flag that make it a
 // singleton; see the doc comment above.
-// biome-ignore lint/complexity/noStaticOnlyClass: deliberate singleton.
+// deliberate singleton.
 class ZenEngineSingleton {
   private static instance: ZenEngine | null = null;
   private static initialized = false;
@@ -188,11 +188,24 @@ class ZenEngineSingleton {
       }
 
       if (errorMessage.includes("node") || errorMessage.includes("edge")) {
+        // The engine reports a node's failure as JSON — `{"nodeId":"i","source":"/status: null
+        // is not of type \"string\""}` — and the old catch-all called all of them "invalid JDM
+        // structure", so a record with a blank field read as a broken graph.
+        const node = /\{[^{}]*"nodeId"[^{}]*\}/.exec(errorMessage)?.[0];
+        let reason: string | undefined;
+        try {
+          const parsed = node ? (JSON.parse(node) as { source?: unknown }) : undefined;
+          if (typeof parsed?.source === "string") reason = parsed.source;
+        } catch {
+          /* not JSON after all — fall through to the structural wording */
+        }
         return {
           success: false,
           error: {
             code: "RULE_EVALUATION_FAILED",
-            message: "Rule evaluation failed: invalid JDM structure",
+            message: reason
+              ? `Rule evaluation failed: ${reason}`
+              : "Rule evaluation failed: invalid JDM structure",
             details: errorMessage,
           },
         };

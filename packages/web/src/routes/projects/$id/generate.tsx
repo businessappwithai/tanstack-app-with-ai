@@ -3,7 +3,6 @@ import { CheckCircle2, Database, Loader2, Zap } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { JourneyArc } from "@/components/JourneyArc";
-import { ProgressStepper } from "@/components/ProgressStepper";
 import { WizardStepHeader } from "@/components/WizardStepHeader";
 import { requestContext } from "@/lib/request-context";
 import { useProjectStore } from "@/store/projectStore";
@@ -47,7 +46,7 @@ const stackOptions: StackOption[] = [
     icon: <Database className="w-8 h-8" />,
     features: [
       "NestJS REST API",
-      "Knex.js with PostgreSQL",
+      "Kysely with PostgreSQL",
       "TanStack Start Frontend",
       "Monorepo Architecture",
       // Matches DEFAULT_FRONTEND_PORT / DEFAULT_BACKEND_PORT in
@@ -216,7 +215,7 @@ function GeneratePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div role="main" className="min-h-screen bg-background flex flex-col">
       <header className="bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <WizardStepHeader
@@ -226,24 +225,7 @@ function GeneratePage() {
             estimatedTime="3-5 min"
           />
 
-          <ProgressStepper
-            currentStep="generate"
-            onStepClick={(step) => {
-              if (step === "init") {
-                navigate({ to: "/projects/$id/init", params: { id: projectId } });
-              } else if (step === "design") {
-                navigate({ to: "/projects/$id/design", params: { id: projectId } });
-              } else if (step === "logic") {
-                navigate({ to: "/projects/$id/logic", params: { id: projectId } });
-              } else if (step === "enhance") {
-                navigate({ to: "/projects/$id/enhance", params: { id: projectId } });
-              } else if (step === "deploy") {
-                navigate({ to: "/projects/$id/deploy", params: { id: projectId } });
-              }
-            }}
-          />
-
-          <JourneyArc currentStep="generate" />
+                    <JourneyArc currentStep="generate" projectId={projectId} />
         </div>
       </header>
 
@@ -309,7 +291,7 @@ function GeneratePage() {
                 type="button"
                 onClick={handleGenerate}
                 disabled={!selectedStack || isGenerating}
-                className="flex-1 flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg rounded-2xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary/90 text-slate-900 font-bold text-lg rounded-2xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98] disabled:opacity-50"
                 style={{ backgroundColor: "#FF8400" }}
               >
                 <Zap className="w-5 h-5" />
@@ -327,8 +309,8 @@ function GeneratePage() {
                 <span className="ml-4 text-muted-foreground">Generation Logs</span>
                 {isGenerating && (
                   <span
-                    className="ml-auto px-3 py-1 text-xs rounded-full font-sans"
-                    style={{ backgroundColor: "rgba(255, 132, 0, 0.2)", color: "#FF8400" }}
+                    className="text-brand ml-auto px-3 py-1 text-xs rounded-full font-sans"
+                    style={{ backgroundColor: "rgba(255, 132, 0, 0.2)" }}
                   >
                     IN PROGRESS
                   </span>
@@ -367,21 +349,31 @@ function GeneratePage() {
                 <div ref={logsEndRef} />
               </div>
 
-              {generationComplete && !error && (
-                <button
-                  type="button"
-                  onClick={handleContinue}
-                  className="mt-6 w-full flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg rounded-2xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
-                  style={{ backgroundColor: "#FF8400" }}
-                >
-                  <CheckCircle2 className="w-5 h-5" />
-                  Continue to Enhancement
-                </button>
-              )}
             </div>
           )}
         </div>
       </div>
+
+      <footer className="border-t border-border bg-background/80 backdrop-blur-md sticky bottom-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/projects/$id/design", params: { id: projectId }, search: { view: "mermaid" } })}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-secondary text-foreground font-medium transition-all"
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            onClick={handleContinue}
+            disabled={isGenerating}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: "#FF8400" }}
+          >
+            Continue →
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

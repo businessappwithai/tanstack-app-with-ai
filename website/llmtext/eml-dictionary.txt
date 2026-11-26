@@ -1,0 +1,397 @@
+# AppWithAI — the Application Dictionary (mandatory) (chunk `eml-dictionary.txt` of https://www.appwithai.org/llms.txt)
+
+> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1, §7.2 · enhancement-examples.txt §9
+
+- **The Application Dictionary is mandatory, all of it** (§3.7): a lookup for
+  every reference, a dropdown for every closed vocabulary, help on every entity,
+  column and section, and **every form laid out as headed sections of two-column
+  rows**. Nothing after authoring adds a value you leave out.
+
+### 3.7 The Application Dictionary — what your ERD becomes on every screen
+
+The generated application does not hard-code its forms. Every table, column,
+window, tab, field, section and lookup is a row in an **Application
+Dictionary**, and the running interface reads those rows at runtime — which is
+why a field can be added to a live application without a deployment. **You never
+write dictionary rows, and there is no `%%dictionary` directive.** The dictionary
+is derived, one way, from what you declare — so "filling in the dictionary"
+means declaring the model precisely enough for every derived value to be the
+right one. Nothing after authoring adds a value you left out.
+
+#### 3.7.1 Three layers, and where each value comes from
+
+| Layer | Rows | What it answers | Where its values come from in your model |
+|---|---|---|---|
+| **Storage** | `sys_table`, `sys_column`, `sys_reference`, `sys_ref_list` | What is stored, and as what kind of value | Entity blocks, attribute types and modifiers, `%%enum` + `%%field … enum:`, `%%entity … help:`, `%%field … help:` |
+| **Screen** | `sys_window`, `sys_tab`, `sys_field`, `sys_field_group` | Where a value is shown, beside what, under which heading | One window and tab per entity (a line item's tab sits in its parent's window); **`%%section`** for the headings, rows and columns |
+| **Navigation and access** | `sys_category`, `sys_access`, the role tables | Where an entity is found, and who may see it | `%%category`, `%%rbac` |
+
+| You write | It becomes |
+|---|---|
+| an entity block | `sys_table` (the `bus_<snake>` table), one `sys_window` (unless it is a line item) and one `sys_tab` |
+| an attribute | `sys_column` and a `sys_field` on the entity's tab |
+| its type, alias and modifiers | `sys_column.sys_reference_id` — **the control a person gets** (§3.7.2) |
+| `%%enum` + `%%field <E>.<c> enum:` | a `List` reference with one `sys_ref_list` row per value |
+| `%%entity <E> help:` | `sys_table.description` — and the opening of that entity's section of the generated manual |
+| `%%field <E>.<c> help:` | `sys_column.description` — what the field's `?` shows, and the column's row in the manual |
+| `%%section entity: <E>; name: …; help: …; rows: …` | one `sys_field_group` per section (heading, help, two columns) and each field's group, order, row, column and span (§3.7.6) |
+| `%%field <E>.<c> display: \| readonly: \| mandatory: <logic>` | `sys_field.display_logic`, and `read_only_logic` / `mandatory_logic` on both `sys_column` and `sys_field` — when the field shows, locks or is required (§3.7.9) |
+| `%%entity <Child> parent: <Parent>` | the child's tab inside the parent's window at level 1, linked on the child's foreign key (§3.5.1) |
+| `%%category name: …; entities: …` | `sys_category`, the dashboard's grouping |
+| `%%entity <E> icon:` | `sys_table.icon` — the card, window heading and navigation icon |
+| `%%rbac … .read` | which roles' `sys_access` rows reach the entity, and so whose dashboard shows it |
+
+#### 3.7.2 Reference types — the control each column gets
+
+The property that decides what a user actually sees is the column's **reference
+type**, `sys_column.sys_reference_id`. It is derived in this order, and the first
+rule that matches wins:
+
+1. The entity's primary key gets **ID** (13) — the key, hidden on every form.
+2. A column **marked `FK` and named `_id` / `_by` that resolves to a declared
+   entity** gets **Table Direct** (19) — a lookup on the parent table (§3.7.3).
+3. A column bound by `%%field <E>.<c> enum: <Enum>` gets that enum's **List**
+   reference (id 1000 or above) — a dropdown of exactly those values.
+4. A semantic alias picks its own control: `email` → **Email** (30), `phone` →
+   **Phone** (31), `url` → **URL** (24), `password` → **Password** (29, masked),
+   `color` → **Color** (27).
+5. Otherwise the canonical type decides: `text` → **Text** (14, a memo box),
+   `boolean` → **Yes-No** (20, a switch), `decimal` / `money` → **Amount** (12,
+   right aligned), `date` → **Date** (15), `datetime` → **DateTime** (16), `json`
+   → **JSON** (28), `integer` → **Integer** (11), anything else → **String**
+   (10, a plain text box).
+
+So the reference type is a decision you make by how you declare the column — and
+**two mistakes silently leave a column at String**, which is how a generated
+application comes back with raw ids and free text where lookups and dropdowns
+should be. Both still render exactly as drawn in a Mermaid viewer; the checker
+report is the only place they show:
+
+| Mistake | What the user gets | Code |
+|---|---|---|
+| A reference column without the `FK` modifier — `string vendor_id` instead of `string vendor_id FK` | a uuid in a text box instead of the vendor lookup | `EML119` |
+| A closed vocabulary with no binding — `%%enum OrderStatus` declared, `%%field Order.status enum: OrderStatus` missing | a free-text box where the state machine expects one of five values | `EML146` |
+
+#### 3.7.3 Reference fields — how a column becomes a lookup
+
+A reference is the column a person fills by **choosing a record** rather than
+typing a value, and it is the part of the dictionary most often got wrong. A
+column becomes a Table Direct lookup only when **all four** of these hold:
+
+1. **It carries the `FK` modifier.** `string account_id FK`. The modifier is what
+   says "this is a reference"; the name alone is not enough (`EML119`).
+2. **Its name ends `_id`** — or is a **person-role name** (below). A foreign key
+   with any other ending is `EML114`, which the fixer repairs by appending `_id`.
+3. **Its name resolves to a declared entity, by name.** The prefix before `_id`,
+   in snake_case, must be an entity's name: `purchase_order_line_id` finds
+   `PurchaseOrderLine`, and finds nothing if the entity is called `POLine`.
+   `primary_contact_id` does **not** find `Contact`: name a second reference to
+   the same parent by the parent (`contact_id`), or the name will not resolve.
+   A column that resolves to nothing is stored as a plain string — no lookup, no
+   display name, the raw id in every grid (`EML502`).
+4. **A relationship line connects the two entities.** `Account ||--o{ Contact :
+   "employs"`. Without it the dictionary describes a reference the schema does
+   not enforce, and the browser build gets no foreign-key constraint.
+
+**References to a person.** A column that names a person by the role they play
+resolves to the model's person entity — `User` if the model declares one, else
+`Staff`, else `Employee`:
+
+| Column name | Resolves to |
+|---|---|
+| any name ending `_by` or `_by_id` — `approved_by_id`, `reported_by_id`, `signed_by_id` | the person entity |
+| `owner_id`, `manager_id`, `assigned_to`, `author_id`, `user_id`, `pi_id`, `lab_manager_id`, `remediation_owner_id` | the person entity |
+
+So `string owner_id FK` on an Opportunity is a lookup on users, with no
+`owner_id`-shaped entity required — but the person entity must exist, and the
+relationship line must be drawn to it.
+
+**References inside one entity, and to a parent.** A self-reference
+(`string parent_id FK` on `Category`, with `Category ||--o{ Category : "contains"`)
+is a lookup on the same table, and the checker notes it (`EML123`, info). A line
+item's link to its owner (`InvoiceLine.invoice_id`) is an ordinary reference that
+`%%entity InvoiceLine parent: Invoice` additionally marks as the tab's link
+column (§3.5.1).
+
+**Optional or required.** A reference is required unless it carries `OPTIONAL`.
+Make it optional when the record can exist before, or without, the thing it
+points at — a lead before its campaign is known, a contact with no account.
+
+**What the lookup shows: the display value.** A reference stores a uuid, and
+every screen that shows one turns it back into something a person recognises —
+the lookup dropdown and the grid cell. The dictionary decides what a record is
+*called* from its **identifier columns** (`sys_column.is_identifier`):
+
+| What the referenced entity declares | What a reference to it shows |
+|---|---|
+| `name` — or `full_name`, `display_name`, `title`, `label`, `subject` | that column |
+| the entity's own `<entity>_name` (or `_title`, `_label`) — `department_name` on `Department` | that column |
+| `first_name` **and** `last_name` | both, joined — `Omar Kowalski` |
+| `code`, `reference` or `number` — or the entity's own `<entity>_code`, `_reference`, `_number` | that column — `CON2026-0001` |
+| **two or more `FK` columns and no name of its own** | its first two parents, resolved and joined — `Spring Promo — Omar Kowalski` |
+| none of those | the first plain `string`/`text` column you declared |
+| no text column at all | the uuid — the outcome to avoid |
+
+So **every entity that something references wants a name column**, placed first
+in its first `%%section`. A join entity — `CampaignMember`, `OrderLine`,
+`QuoteLineItem` — needs nothing extra: it labels itself from its first two
+references in declared order, so **declare the two that name it first**. Only one
+level deep, never more than two parents, and the primary key is never part of a
+display value.
+
+**References also decide the sample data.** A generated application is seeded so
+it can be opened and used, parents first, and a Table Direct column is seeded with
+the id of a row that exists — while a reference downgraded to String is seeded
+with words, so the first thing you see is a lookup that resolves to nothing.
+
+#### 3.7.4 Closed vocabularies — List references
+
+A column whose value is one of a known set — a status, a stage, a type, a
+priority, a tier, a method — is a **List**: declare the set with `%%enum` and
+bind the column with `%%field`:
+
+```
+%%enum OpportunityStage: prospecting, qualification, proposal, negotiation, closed_won, closed_lost
+%%field Opportunity.stage enum: OpportunityStage
+```
+
+The binding, not the enum, is what makes the dropdown. A `status`, `state` or
+`stage` column without one is `EML146`; any other closed vocabulary left unbound
+is a text box nobody will spell consistently. Say in the column's help what each
+value means to the business, because the dictionary lists the values and nothing
+else says what choosing one does.
+
+#### 3.7.5 Help — the only explanation the application has
+
+`sys_table.description`, `sys_column.description` and `sys_field_group.description`
+each have exactly one source — the `help:` you write — and they are what every
+field's `?` shows, the sentence under every section heading, and the whole of the
+generated manual's prose:
+
+```
+%%entity Contact help: A person at an account. Deals and cases hang off the contact you actually deal with.
+%%field Contact.account_id help: The company this person works for. Leave empty for a personal contact.
+%%field Contact.owner_id help: The salesperson responsible. Reassign when the territory changes.
+%%section entity: Contact; name: Consent; help: What the person has said they do not want; campaigns must honour both.; rows: email_opt_out, do_not_call
+```
+
+**Cover every entity, every column but the primary key, and every section —
+without exception**, including the self-evident ones. The bar is *say something
+the name does not*:
+
+| Subject | Say | Not |
+|---|---|---|
+| An entity | what the record is for in this business, when one comes into existence, and what it must not be confused with | `A contact record.` |
+| A column | why the value matters, what is expected in it, what reads it downstream | `The contact's email.` |
+| A reference | what the reference is *for* — `The ward this bed stands in` | `The ward id.` |
+| An enum-bound column | what each value means — for a state field, which recorded fact moves a record into it, since only the workflows set it | `The status.` |
+| A section | what the person filling it in is doing there, and when it is complete | `Contact fields.` |
+
+`EML152` reports an entity with no help, `EML153` names the columns of an entity
+that have none, `EML177` a section with none, and `EML151` help that restates its
+own subject — which is what help written to satisfy a coverage check looks like.
+
+#### 3.7.6 Form layout — sections of two-column rows (mandatory)
+
+A column says what is stored; a field says it is on the screen; **a section says
+where, and beside what.** Each record's form is laid out as **headed sections,
+each a grid of two columns**, and the model is the only place that layout is
+decided:
+
+```
+%%section entity: <Entity>; name: <Heading>; help: <what this part is for>; rows: <col>, <col> | <col> | <col>, <col>
+```
+
+- `rows` separates rows with `|` and the columns of a row with `,`. **A row holds
+  one or two columns.** Two sit side by side; one spans the full width.
+- Sections render in the order they are declared, fields in row order.
+- Repeating a section's `entity` and `name` continues it on the next line, so a
+  long section stays readable; `help` is read from the first line.
+- `collapsed: true` closes a section until it is opened.
+- `help` may contain `;`; no other value may.
+
+**It is mandatory.** Every entity — line items included — declares its sections,
+and **every column but the primary key and the state field is placed in exactly
+one row**.
+
+**The state field is not in the form body — it is in the header and the grid.**
+On an entity with a `kind: state` machine, the column it drives (`status`, else
+`state`, else `stage`) moves only by the record's action buttons (§5.2), so it
+is never an input. The generated form shows it **read-only in its top header**,
+beside the record's title, labelled from its enum; the list grid **always**
+shows it as a column, and an administrator's grid-visibility toggle cannot hide
+it. No `%%section` row places it (`EML178`, auto-fixed by removing it), and
+leaving it out of every row is not a gap: `EML170` and `EML172` do not count it.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `EML170` | warning · completeness | the entity declares no `%%section` — its form is one flat, unheaded list |
+| `EML171` | error | a `%%section` without `entity:`, `name:` or `rows:` |
+| `EML172` | warning · completeness · auto-fix | columns placed in no row — the fixer appends them to the last section, two per row; move them to where they belong |
+| `EML173` | error | the section names an entity the model does not declare |
+| `EML174` | error · auto-fix | a row with more than two columns — the fixer splits it |
+| `EML175` | warning · auto-fix | a column placed twice — the fixer removes the later one |
+| `EML176` | error | a row names a column the entity lacks, or its primary key |
+| `EML177` | warning · completeness | a section with no `help:`, or help that restates its heading |
+| `EML178` | warning · auto-fix | a row places the state field — the fixer removes it; the state is shown in the form's header |
+
+**How to lay a form out:**
+
+1. **Open with what identifies the record** — the display-value columns (§3.7.3)
+   and the one or two values someone checks first: `name, account_number`,
+   `case_number, subject`. Never the state field — the header already shows it.
+2. **Pair what is filled in or read together** — `first_name, last_name`;
+   `start_date, end_date`; `quantity, unit_price`; the fact a move depends on
+   beside the person who records it (`approved_at, approved_by_id`); a `_due_at`
+   beside its `_at`.
+3. **Give a row of one to what needs the width** — `text` columns, an address
+   line, a long description, a subject line, a reference whose label is long.
+   Never use a row of one to avoid deciding what pairs with what.
+4. **Name a section for what the person is doing** — *Identity, Contact, Terms,
+   Delivery, Triage, Clinical findings* — never for the kind of column it holds:
+   *References*, *Dates* and *Numbers* describe a schema, not a form.
+5. **Two to six rows a section.** An entity with twelve columns has three or four
+   sections, not one; an entity with three columns may have one.
+6. **Last, and `collapsed: true`:** what is rarely touched — internal notes,
+   integration references, cancellation and withdrawal details, figures only an
+   administrator reads.
+
+A complete example, for a support case:
+
+```
+%%section entity: SupportCase; name: Case; help: The number the customer quotes and what is wrong in their words. Where the case stands is in the header.; rows: case_number, subject | description
+%%section entity: SupportCase; name: Customer; help: Who raised the case and which account it is charged against.; rows: account_id, contact_id
+%%section entity: SupportCase; name: Triage; help: What kind of problem it is, how urgent, how it arrived, and who is working it.; rows: case_type, priority | origin, owner_id | escalated_by_id
+%%section entity: SupportCase; name: Service level; help: The deadlines the account's SLA sets, and whether either was missed.; rows: sla_policy_id, is_sla_breached | first_response_due_at, first_response_at | resolution_due_at, resolved_at
+%%section entity: SupportCase; name: Resolution; help: What fixed it and how the customer rated the outcome.; rows: resolution_notes | satisfaction_score
+```
+
+**What it compiles to.** One `sys_field_group` per section on the entity's tab —
+`name` the heading, `description` the help, `columns = 2`,
+`is_collapsed_by_default` from `collapsed:` — and on every field
+`sys_field_group_id`, `seq_no` (section by section, row by row), `is_same_line`
+(the right-hand field of a pair, drawn beside the one before it) and `column_span`
+(2 for a row of one). There is no X or Y position: Sequence, Same Line and
+Column Span are the whole of a form's layout. Both generated applications draw it the same
+way: the deployable one and the one that runs in a browser tab. A column a
+sectioned entity leaves out of every row is not lost — it is drawn in a trailing,
+collapsed *Other* section — and an entity with no sections at all is drawn as one
+flat list in declared order, which is correct and which nobody designed. An
+administrator can rearrange any of it afterwards in Application Dictionary →
+Fields without regenerating, which is the point of the dictionary being data.
+
+#### 3.7.7 The manual, and the rest of what is derived
+
+**The generated manual is the second reader of everything above.** Generation
+writes `manual.html` beside the application — a section per entity with every
+field's control type, constraints, enumerated values and help, then **where it
+appears**: the window, the tab, the sections with their help, and every field
+with its section and place (`row 2, right`, `row 3, full width`) — then the
+entity's relationships, state machine, rules and the roles that may see it. It can
+only report the help you wrote: where a column has none it prints a dash.
+
+The rest of the dictionary follows the same way: `%%index` becomes real indexes,
+and `%%category` (§3.6) becomes the dashboard grouping — a model that declares
+none gets a single "General" group holding everything. `%%entity … icon:` reaches
+`sys_table.icon`, which the entity's card, window heading and navigation draw —
+and it is **required on every entity**. Without it every card and every navigation
+entry draws the same generic table glyph, and a person scanning forty screens has
+nothing but the label to go on. Pick a lucide name that depicts the thing
+(`Ship` for a vessel, `FileText` for a document, `Receipt` for an invoice), give
+no two entities in one category the same one, and check each name at
+https://lucide.dev/icons — a name lucide does not have draws a placeholder and
+the checker does not catch it (eml-syntax.txt, *An `icon:` names a lucide icon*). The
+remaining `%%entity` keys — `label`, `prefix`, `softDelete`, `audited` — are
+validated but not yet compiled (§7).
+
+**The `version` column is what makes two people's edits safe, and you write
+nothing for it.** It is one of the columns the generator adds (§3.1), raised by
+every save. A save made after somebody else saved the same record is refused
+rather than applied, and the form offers **Reload their version**, **Overwrite
+with mine** or **Keep editing**. Over the API: a read answers with
+`ETag: "<version>"`, a `PUT`/`PATCH` sends `If-Match: "<version>"`, and a stale
+one gets **409** with `details.code: "VERSION_CONFLICT"`. So never declare a
+column called `version` (`EML103`), and never model a "locked by" column to stop
+two people saving at once.
+
+**Every card on the dashboard is scoped to whoever is reading it** — the entity
+blocks hold what `%%rbac … .read` lets this role see, with line items excluded
+because a child is reached through its parent.
+
+#### 3.7.8 Completeness — nine codes, none advisory
+
+A dictionary that comes out right is nine habits in the model: **mark every
+reference `FK`**, **bind every closed vocabulary with `%%field … enum:`**, **give
+every referenced entity a name column**, **write `help:` on every entity, every
+column and every section**, **lay every entity out in `%%section` rows of two**,
+group the entities with `%%category` — each carrying `name:` — and prefer the
+specific type alias over the canonical name. All but the last are checked:
+
+| Code | What the dictionary records instead |
+|---|---|
+| `EML119` | a reference column as `String` — a uuid in a text box, not a lookup |
+| `EML146` | a closed vocabulary as `String` — a free text box, not a dropdown |
+| `EML151` | help that restates its own name — coverage without meaning |
+| `EML152` | `sys_table.description` empty — the entity's manual section opens with nothing |
+| `EML153` | `sys_column.description` empty — the field prints a dash in the form *and* in the manual |
+| `EML154` | a `%%category` the parser drops, so its entities fall into "General" |
+| `EML170` | no `sys_field_group` — the form is one flat, unheaded list |
+| `EML172` | a field in no section — it lands in a trailing "Other" section |
+| `EML177` | `sys_field_group.description` empty — a heading with nothing under it |
+
+They are warnings rather than errors because the generator does not refuse them;
+they are still required. `node audit-model.mjs <file>.mmd` fails while any of
+them stands (§8.5), and §10 item 22 makes exiting `0` there part of delivering.
+
+#### 3.7.9 Field logic — when a field shows, locks or is required
+
+Compiere's **Display Logic**, **Read Only Logic** and **Mandatory Logic**: three
+conditions a field carries, each over the values of the record being edited. Write
+them on the column with `%%field`, in Compiere's own syntax:
+
+```text
+%%field Opportunity.loss_reason      display: @stage@=closed_lost
+%%field Opportunity.loss_reason      mandatory: @stage@=closed_lost
+%%field Opportunity.amount           readonly: @stage@=closed_won | @stage@=closed_lost
+%%field Quote.discount_percent       readonly: @status@!draft
+%%field Contract.renewal_notice_days display: @auto_renew@=Y
+%%field Contract.renewal_notice_days mandatory: @auto_renew@=Y
+```
+
+| Write | Means |
+|---|---|
+| `@column@=value` | equal — `@column@` is a column of the **same** entity |
+| `@column@!value` | not equal (`!=`, `^` and `<>` read the same) |
+| `>` `<` `>=` `<=` | compared as numbers when both sides are numbers, else as text (an ISO date compares in date order) |
+| `&` `\|` | and, or — read **left to right, no precedence, no parentheses**: `a \| b & c` is `(a \| b) & c` |
+| `Y` / `N`, `''` | a Yes/No column's values; the empty value (`@x@=''` is blank, `@x@!''` is set) |
+
+**Three separate rules, as Compiere keeps them.** Display hides the field while
+false; read-only locks it while true; mandatory requires it while true **and the
+field is shown** — a value nobody can see is not one anybody can be made to enter.
+The form re-evaluates all three on every change, so a field appears, locks or
+becomes required as the record is edited.
+
+**The API is the control, not the form.** Both generated stacks refuse a create
+or update that leaves a displayed field empty while its mandatory logic holds
+(400, `Validation failed`), and an update that changes a field while its read-only
+logic holds **for the record as stored**. Sending an unchanged value back is not a
+change. Display logic never refuses a write. Workflows and hooks are not people:
+a saga's `UpdateEntity` is not judged by field logic.
+
+**Column and field.** Read-only and mandatory logic land on `sys_column` and on
+`sys_field`; display logic on the field alone. An administrator can edit any of
+them afterwards in Window, Tab and Field without regenerating, and a field's own
+logic wins over its column's.
+
+**What it is not for.** Logic reads the record's own columns — no other table, no
+role, no `@#context@` variable, no `@SQL=` and no callouts. A rule that needs any
+of those is a `%%action` or a `%%hook`. Do not put logic on the primary key or on
+the state field, which are never inputs.
+
+| Code | Severity | What it means |
+|---|---|---|
+| `EML156` | error | the logic does not parse |
+| `EML157` | error | it reads a `@column@` the entity does not declare |
+| `EML158` | warning | display logic that depends on its own field — once hidden it can never be shown again |
+| `EML159` | warning | logic on the primary key or the state field |

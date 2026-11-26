@@ -9,16 +9,15 @@
   "scripts": {
     "start": "bun eml.ts",
     "validate:examples": "bun eml.ts validate -i ../examples/crm.eml.mmd",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check ."
+    "typecheck": "bun check"
   },
   "engines": {
-    "bun": ">=1.0",
+    "bun": ">=1.4.4",
     "node": ">=18"
   },
   "devDependencies": {
     "@types/node": "22",
-    "bun-types": "^1.4.0",
+    "bun-types": "^1.4.3",
     "typescript": "5.6.3"
   }
 }

@@ -8,24 +8,24 @@
  * them across two pages is what made rules and workflows feel like two products.
  */
 
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AutomationBuilder,
   type RuleTableSummary,
-} from "@/components/automation/AutomationBuilder";
-import { AutomationHelp } from "@/components/automation/AutomationHelp";
-import { RailSection } from "@/components/automation/RailList";
-import { RuleTableEditor } from "@/components/automation/RuleTableEditor";
+} from "@appwithai/editors/components/automation/AutomationBuilder";
+import { RailSection } from "@appwithai/editors/components/automation/RailList";
+import { RuleTableEditor } from "@appwithai/editors/components/automation/RuleTableEditor";
 import {
   type Automation,
   emptyAutomation,
   parseAutomation,
   serializeAutomation,
   validateAutomation,
-} from "@/lib/automation/model";
+} from "@appwithai/editors/lib/automation/model";
+import { type DecisionTable, emptyDecisionTable } from "@appwithai/editors/lib/workflow/bpmn-model";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AutomationHelp } from "@/components/automation/AutomationHelp";
 import { requestContext } from "@/lib/request-context";
-import { type DecisionTable, emptyDecisionTable } from "@/lib/workflow/bpmn-model";
 
 async function checkAuthMe() {
   const { baseUrl, fetchInit } = await requestContext();

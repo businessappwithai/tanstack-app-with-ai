@@ -1,0 +1,203 @@
+# AppWithAI — a complete worked example (chunk `enhancement-examples.txt` of https://www.appwithai.org/llms.txt)
+
+> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1, §7.2 · enhancement-examples.txt §9
+
+## 9. A complete worked example
+
+Every construct in this specification, in one checker-clean document. These
+bytes, saved as `acme-dance-studio.mmd`, are a finished deliverable: no headings,
+no prose, no explanation outside the language itself. This is the shape of what
+you hand over — imitate it exactly, at whatever size the business needs.
+
+```mermaid
+%%meta name: Acme Dance Studio
+%%meta kind: erd
+%%meta version: 1.0.0
+
+%%category name: Scheduling; description: Classes, the rooms that host them and who teaches; icon: CalendarClock; entities: DanceClass, Room, Instructor
+%%category name: Membership; description: Members and their bookings; icon: Users; default: true; entities: Member, Booking
+
+%% Every entity belongs to a functional role. `read` is what decides it, so
+%% signing in as reception gives you the desk's application rather than the
+%% studio's. `manager` reads everything because managing is that job.
+%%rbac role:reception|manager|instructor on DanceClass.read
+%%rbac role:reception|manager on Room.read
+%%rbac role:manager|instructor on Instructor.read
+%%rbac role:reception|manager on Member.read
+%%rbac role:reception|manager|instructor on Booking.read
+
+%%enum ClassStatus: scheduled, running, completed, cancelled
+%%enum BookingStatus: requested, confirmed, attended, cancelled, no_show
+%%enum MemberTier: trial, standard, unlimited
+
+erDiagram
+    Instructor {
+        string  id PK
+        string  full_name
+        email   email UK
+        phone   phone OPTIONAL
+        boolean is_active
+    }
+    Room {
+        string  id PK
+        string  name UK
+        integer capacity
+    }
+    Member {
+        string  id PK
+        string  full_name
+        email   email UK
+        string  tier
+        date    joined_on
+        integer credits
+    }
+    DanceClass {
+        string   id PK
+        string   instructor_id FK
+        string   room_id FK
+        string   title
+        string   status
+        datetime starts_at
+        integer  capacity
+        integer  booked_count
+        money    price OPTIONAL
+    }
+    Booking {
+        string   id PK
+        string   member_id FK
+        string   dance_class_id FK
+        string   status
+        datetime requested_at
+        datetime confirmed_at OPTIONAL
+        datetime checked_in_at OPTIONAL
+        datetime absent_marked_at OPTIONAL
+        datetime cancelled_at OPTIONAL
+        text     cancellation_reason OPTIONAL
+    }
+
+    Instructor ||--o{ DanceClass : "teaches"
+    Room       ||--o{ DanceClass : "hosts"
+    Member     ||--o{ Booking : "makes"
+    DanceClass ||--o{ Booking : "receives"
+
+%%field DanceClass.status enum: ClassStatus
+%%field Booking.status enum: BookingStatus
+%%field Member.tier enum: MemberTier
+
+%%index DanceClass(instructor_id, starts_at)
+%%index Booking(dance_class_id, status)
+
+%%entity Instructor help: Somebody who teaches at the studio. Instructors are booked against classes, so one who leaves is deactivated rather than deleted: their past classes stay attributed and the attendance history stays readable.
+%%entity Instructor icon: GraduationCap
+%%field Instructor.full_name help: The name on the timetable, which is how members choose a class. Use the name the studio advertises rather than the one on the contract.
+%%field Instructor.email help: Where the schedule and any cancellation reach them, and how they sign in. Unique, because it identifies the person.
+%%field Instructor.phone help: A number reception can call on the morning of a class. Optional, and the reason a class is covered rather than cancelled when somebody is ill.
+%%field Instructor.is_active help: Whether they are currently teaching. Cleared instead of deleting; an inactive instructor should not appear when a new class is scheduled.
+
+%%entity Room help: A physical studio a class is held in. Rooms are the constraint the timetable is built against — two classes cannot share one at the same hour — and their capacity is the ceiling on every class booked into them.
+%%entity Room icon: DoorOpen
+%%field Room.name help: What the room is called on the timetable and on the door. Unique, because a member navigating the building relies on it being unambiguous.
+%%field Room.capacity help: The most people the room legally holds, instructor included. It is a fire regulation rather than a preference, and no class may be booked above it.
+
+%%entity Member help: Somebody who books classes. The membership record carries the tier that decides what they may book and the credit balance a trial member spends, so it exists before any booking does.
+%%entity Member icon: IdCard
+%%field Member.full_name help: The name reception greets them by and the name on the class register.
+%%field Member.email help: Where confirmations and cancellations are sent, and how the member signs in. Unique across members, so one person is one history.
+%%field Member.tier help: trial — pay-as-you-go from a credit balance; standard — a set number of classes a month; unlimited — no cap. The tier is what the admission rule reads before allowing a booking.
+%%field Member.joined_on help: When the membership began. It is what a length-of-relationship report is built on and what a renewal date is computed from.
+%%field Member.credits help: Classes a trial member has left to spend. The admission rule refuses a trial member with none, which is the only thing standing between a free trial and an unlimited one.
+
+%%entity DanceClass help: One session at one time in one room with one instructor. The class is what a member books onto and what the studio is paid for; its booked count is maintained by the booking saga rather than typed, because two people booking at once must not both be told there was a seat.
+%%entity DanceClass icon: Music
+%%field DanceClass.instructor_id help: Who is teaching. Changing it is a substitution, and members who booked for a named instructor generally expect to be told.
+%%field DanceClass.room_id help: Where it is held. It caps the class's own capacity and is what a member is looking for when they arrive.
+%%field DanceClass.title help: The class as it appears on the timetable — the style and the level a member is choosing between. "Beginners' salsa", not "Class 14".
+%%field DanceClass.status help: scheduled — open for bookings; running — under way; completed — taught, and countable in attendance; cancelled — called off, and every booking on it has to be moved or refunded. Only the moves the lifecycle draws are allowed.
+%%field DanceClass.starts_at help: When the session begins, in the studio's own time zone. It orders the timetable and it is what a reminder is sent against.
+%%field DanceClass.capacity help: The most bookings this session will take, at or below the room's limit. Set lower than the room where the style needs floor space.
+%%field DanceClass.booked_count help: How many places are taken. Maintained by the booking saga, and the figure the admission rule compares against capacity — a count that drifts is how a class comes to be oversold.
+%%field DanceClass.price help: What a member pays for this session if they are not drawing on a tier or a credit. Empty where the class is included in the membership.
+
+%%entity Booking help: One member's place on one session, from the moment they ask for it to the moment they turn up or do not. It is what capacity is counted against, so a cancellation frees a place and a no-show does not — which is the distinction the whole waiting list depends on.
+%%entity Booking icon: Ticket
+%%field Booking.member_id help: Who is booked. It is what the class register is built from and who a cancellation notice is sent to.
+%%field Booking.dance_class_id help: The session being booked. Its capacity and booked count are what the admission rule checks before the booking is accepted.
+%%field Booking.status help: requested — asked for, not yet accepted; confirmed — the place is held; attended — the member came; cancelled — the place is released; no_show — the place was held and wasted, which is what a repeat-offender policy is built on. Set only by the booking workflows, when reception records the time below that each move depends on; nobody changes it by hand.
+%%field Booking.requested_at help: When the member asked, not when reception confirmed. It orders the waiting list, so it is the only fair basis for who gets a freed place.
+%%field Booking.confirmed_at help: When reception accepted the booking. Recording it confirms a requested booking and takes a seat in the class.
+%%field Booking.checked_in_at help: When the member arrived. Recording it on a confirmed booking marks it attended.
+%%field Booking.absent_marked_at help: When reception recorded that the member did not come. Recording it on a confirmed booking marks it a no-show, which keeps the seat counted.
+%%field Booking.cancelled_at help: When the booking was rejected or cancelled. Recording it releases the place, whether the booking was still requested or already confirmed.
+%%field Booking.cancellation_reason help: Why the place was given up, in the member's words. It is the difference between a member the studio should call and one who simply changed their mind.
+%%section entity: Instructor; name: Instructor; help: Who teaches, how the studio reaches them, and whether they can be timetabled.; rows: full_name, is_active | email, phone
+%%section entity: Room; name: Room; help: The studio room and how many dancers it safely holds.; rows: name, capacity
+%%section entity: Member; name: Member; help: Who dances here, how to reach them, and the membership they hold.; rows: full_name, email | tier, joined_on | credits
+%%section entity: DanceClass; name: Class; help: What is taught, by whom, where, and whether it is going ahead.; rows: title, status | instructor_id, room_id
+%%section entity: DanceClass; name: Session; help: When it runs, how many it takes and have booked, and what a drop-in pays.; rows: starts_at, price | capacity, booked_count
+%%section entity: Booking; name: Booking; help: Who booked which class and when they asked. Where the booking stands is shown in the header.; rows: member_id, dance_class_id | requested_at
+%%section entity: Booking; name: Progress; help: The times reception records as the booking moves on — each one is what moves it, and the reason if it was given up.; rows: confirmed_at, checked_in_at | absent_marked_at, cancelled_at | cancellation_reason
+
+%%meta name: Booking Admission
+%%meta kind: rules
+%%rule bookingAdmission on Booking event: beforeCreate priority: 10
+flowchart TD
+    A([Start: Booking requested]) --> B{class is full?}
+    B -->|Yes| C[Refuse: no seats left]
+    B -->|No| D{member tier == trial?}
+    D -->|Yes| E{member credits > 0?}
+    E -->|No| F[Refuse: trial credits exhausted]
+    E -->|Yes| G[Admit and spend one credit]
+    D -->|No| H[Admit]
+    C --> Z([End: Admission decided])
+    F --> Z
+    G --> Z
+    H --> Z
+
+    %%action refuseFullClass validation-error when: status == "requested" and booked_count >= capacity message: This class is full — offer the member the waitlist
+
+%%meta name: Booking Lifecycle
+%%meta kind: workflow
+%%workflow BookingLifecycle entity: Booking kind: state
+stateDiagram-v2
+    [*] --> requested
+    requested --> confirmed : confirm
+    requested --> cancelled : reject
+    confirmed --> attended  : check_in
+    confirmed --> cancelled : cancel
+    confirmed --> no_show   : mark_absent
+    attended  --> [*]
+    cancelled --> [*]
+    no_show   --> [*]
+
+    %%rbac role:reception|manager on Booking.update
+    %%rbac role:manager on Booking.delete
+
+%%meta name: Booking Progress
+%%meta kind: rules
+%%rule bookingProgress on Booking event: beforeUpdate priority: 10
+flowchart TD
+    A([Booking updated]) --> B{Which time was recorded?}
+    B -->|Confirmed| C[Confirm and take a seat]
+    B -->|Cancelled| D[Release the place]
+    B -->|Checked in| F[Mark it attended]
+    B -->|Absent| G[Mark it a no-show]
+    C --> Z([End])
+    D --> Z
+    F --> Z
+    G --> Z
+
+    %%action confirmBooking trigger-workflow when: status == "requested" and confirmed_at != null and cancelled_at == null workflow: ClassFillTracking message: Booking confirmed — updating the class headcount
+
+%%meta name: Class Fill Tracking
+%%meta kind: workflow
+%%workflow ClassFillTracking entity: Booking kind: saga trigger: rule
+flowchart TD
+    A([Booking confirmed]) --> B(Count the seat)
+    B --> C[Raise the class headcount]
+    C --> D[Mark the booking confirmed]
+    D --> Z([Headcount updated])
+
+    %%step B Formula target: seatCount source: booked_count operation: add operand: 1
+    %%step C UpdateEntity entity: DanceClass targetSource: dance_class_id field: booked_count source: seatCount
+    %%step D UpdateEntity field: status value: confirmed
+```

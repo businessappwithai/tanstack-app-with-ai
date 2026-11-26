@@ -54,6 +54,10 @@ export function ProgressStepper({
                   type="button"
                   onClick={() => goToStep?.(step.key)}
                   disabled={!isClickable}
+                  aria-label={`Step ${step.number}: ${step.label}${
+                    isCompleted ? " (completed)" : isCurrent ? " (current)" : ""
+                  }`}
+                  aria-current={isCurrent ? "step" : undefined}
                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
                     isCurrent
                       ? "bg-primary text-white ring-4 ring-primary/20"

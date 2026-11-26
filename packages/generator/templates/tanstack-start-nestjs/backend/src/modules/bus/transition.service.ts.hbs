@@ -1,0 +1,461 @@
+/**
+ * Transition Service — a record's action buttons.
+ *
+ * A record moves through its lifecycle (common/lifecycle.ts) only when someone
+ * presses one of its moves: an edge its state diagram drew, or Reopen from a
+ * Final state back to Draft. Pressing one is
+ *
+ *   1. lock the row, check the version the caller read (409 VERSION_CONFLICT)
+ *   2. the move must be one the record has from where it is (409 INVALID_TRANSITION)
+ *   3. the caller's roles must grant it (403 TRANSITION_FORBIDDEN) — a move no
+ *      grant names is open to anyone who may update the record; Reopen with no
+ *      grant is the administrator's alone
+ *   4. the record's refusing rules judge it as it will be — the new state, the
+ *      `<state>_at` the move stamps (422 with the rule's message)
+ *   5. write the state, stamp `<state>_at`, raise the version, set the assignee
+ *   6. the update workflows and those bound to this move and to the state it
+ *      reaches run, then
+ *      the rules that start a workflow run again on the moved record — a rule
+ *      keyed on `stage == "closed_won"` starts its process here
+ *
+ * all in one transaction: a failure anywhere leaves the record where it was,
+ * and the answer says why (422 WORKFLOW_FAILED). Every press is written to
+ * `sys_record_transitions`, a refused one included.
+ *
+ * A workflow's own write of the state field goes through `move` too, as the
+ * system: the edge is checked, roles are not.
+ *
+ * Generated: {{now}}
+ * Project: {{project.name}}
+ */
+
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+  forwardRef,
+} from '@nestjs/common';
+import type { Kysely } from 'kysely';
+import { KYSELY_CONNECTION } from '../../database/database.constants';
+import { getLogger } from '../../common/logging/logger.service';
+import {
+  findMove,
+  lifecycleOf,
+  movesFrom,
+  phaseOf,
+  type Lifecycle,
+  type LifecycleMove,
+} from '../../common/lifecycle';
+import { CapabilityService, type Capabilities } from '../auth/capability.service';
+import { RulesService } from '../rules/rules.service';
+import { WorkflowRunError, WorkflowService } from '../workflow/workflow.service';
+import { BusService } from './bus.service';
+
+/** Who pressed it. `system` is a workflow: the edge is checked, roles are not. */
+export interface TransitionActor {
+  id?: string | null;
+  name?: string | null;
+  capabilities?: Capabilities;
+  system?: boolean;
+}
+
+export interface TransitionRequest {
+  /** The move's event (`close_won`), or… */
+  event?: string;
+  /** …the state it goes to. With both, the edge they name together. */
+  to?: string;
+  /** The version the caller read; required from a person (428 without it, in the controller). */
+  version?: number;
+  /** Who the record is with after the move — a user, a role, or neither. */
+  assignTo?: string | null;
+  assignRole?: string | null;
+  /**
+   * The form was saved a moment ago, by the same press (the first of its two
+   * transactions). The record's update workflows ran with that save, so the move
+   * does not run them again — only the ones bound to this move and its state.
+   */
+  afterSave?: boolean;
+}
+
+/** One button, for the caller and the record where it is. */
+export interface AvailableAction {
+  event: string;
+  to: string;
+  label: string;
+  kind: 'move' | 'reopen';
+  /** True when only some roles may press it. */
+  restricted: boolean;
+  /** The roles that may, when restricted. */
+  roles: string[];
+}
+
+export interface TransitionResult {
+  record: Record<string, any>;
+  lifecycle: { column: string; from: string | null; to: string; phase: string; event: string };
+  ranWorkflows: string[];
+}
+
+@Injectable()
+export class TransitionService {
+  private readonly log = getLogger('entity');
+
+  constructor(
+    @Inject(KYSELY_CONNECTION) private readonly db: Kysely<any>,
+    private readonly capabilities: CapabilityService,
+    @Inject(forwardRef(() => RulesService)) private readonly rulesService: RulesService,
+    @Inject(forwardRef(() => WorkflowService)) private readonly workflowService: WorkflowService,
+    @Inject(forwardRef(() => BusService)) private readonly busService: BusService,
+  ) {}
+
+  private lifecycle(entity: string): { tableName: string; lifecycle: Lifecycle } {
+    const tableName = this.busService.getTableName(entity);
+    const lifecycle = lifecycleOf(tableName);
+    if (!lifecycle) throw new NotFoundException(`"${entity}" is not a business entity.`);
+    return { tableName, lifecycle };
+  }
+
+  /**
+   * May the actor press this move? A move a grant names is that grant's
+   * roles' (and the administrator's); one no grant names is open to whoever may
+   * update the record; Reopen with no grant is the administrator's alone.
+   */
+  private async decide(actor: TransitionActor, tableName: string, move: LifecycleMove) {
+    if (actor.system) return { allowed: true, restricted: false, roles: [] as string[] };
+    const capabilities = actor.capabilities ?? { roles: [], isMaster: false, grants: new Set<string>() };
+    const decision = await this.capabilities.decide(capabilities, move.kind, tableName, move.event, move.from, move.to);
+    if (decision.restricted || !decision.allowed) return decision;
+    const update = await this.capabilities.decide(capabilities, 'op', tableName, 'update');
+    return { allowed: update.allowed, restricted: update.restricted, roles: update.roles };
+  }
+
+  /** The moves the caller may make on this record now. */
+  async availableActions(entity: string, id: string, actor: TransitionActor): Promise<AvailableAction[]> {
+    const { tableName, lifecycle } = this.lifecycle(entity);
+    const row: any = await this.db
+      .selectFrom(tableName as any)
+      .select([lifecycle.column] as any)
+      .where('id' as any, '=', id)
+      .where('deleted_at' as any, 'is', null)
+      .executeTakeFirst();
+    if (!row) throw new NotFoundException(`Record not found in ${tableName} with id: ${id}`);
+    const actions: AvailableAction[] = [];
+    for (const move of movesFrom(lifecycle, row[lifecycle.column])) {
+      const decision = await this.decide(actor, tableName, move);
+      if (!decision.allowed) continue;
+      actions.push({
+        event: move.event,
+        to: move.to,
+        label: move.label,
+        kind: move.kind,
+        restricted: decision.restricted,
+        roles: decision.roles,
+      });
+    }
+    return actions;
+  }
+
+  /**
+   * The states a record can be in for this person to have a move to make — the
+   * "waiting for me" list is the records in one of them. A record moves between
+   * roles as it moves through its flow, so this is where it leaves one person's
+   * list and arrives in the next's.
+   */
+  async awaitingStates(entity: string, actor: TransitionActor): Promise<{ column: string; states: string[] }> {
+    const { tableName, lifecycle } = this.lifecycle(entity);
+    const states = new Set<string>();
+    for (const from of new Set(lifecycle.edges.map((edge) => edge.from))) {
+      for (const move of movesFrom(lifecycle, from)) {
+        if (move.kind !== 'move') continue;
+        if ((await this.decide(actor, tableName, move)).allowed) {
+          states.add(from);
+          break;
+        }
+      }
+    }
+    return { column: lifecycle.column, states: [...states] };
+  }
+
+  private async record(
+    db: Kysely<any>,
+    row: {
+      tableName: string;
+      id: string;
+      event: string;
+      from: string | null;
+      to: string;
+      outcome: 'moved' | 'refused' | 'failed';
+      message?: string | null;
+      actor: TransitionActor;
+      assignTo?: string | null;
+      assignRole?: string | null;
+    },
+  ): Promise<void> {
+    try {
+      await db
+        .insertInto('sys_record_transitions' as any)
+        .values({
+          table_name: row.tableName,
+          record_id: row.id,
+          event: row.event || null,
+          from_state: row.from,
+          to_state: row.to,
+          outcome: row.outcome,
+          message: row.message ?? null,
+          actor_id: row.actor.system ? 'system' : (row.actor.id ?? null),
+          actor_name: row.actor.system ? 'workflow' : (row.actor.name ?? null),
+          assigned_to: row.assignTo ?? null,
+          assigned_role: row.assignRole ?? null,
+        } as any)
+        .execute();
+    } catch (error: any) {
+      // The log is a record of what happened, not a condition of it happening.
+      this.log.event('entity.transition.unlogged', { entity: row.tableName, recordId: row.id, err: error });
+    }
+  }
+
+  private refuse(
+    tableName: string,
+    id: string,
+    from: string | null,
+    to: string,
+    reason: string,
+    error: Error,
+  ): never {
+    getLogger('workflow').event('workflow.transition.refused', {
+      entity: tableName,
+      recordId: id,
+      from,
+      to,
+      reason,
+    });
+    throw error;
+  }
+
+  /**
+   * Press a move. Runs in the caller's transaction when given one (a workflow's
+   * own state write), else in a transaction of its own.
+   */
+  async move(
+    entity: string,
+    id: string,
+    request: TransitionRequest,
+    actor: TransitionActor,
+    trx?: Kysely<any>,
+  ): Promise<TransitionResult> {
+    const { tableName, lifecycle } = this.lifecycle(entity);
+    let refusal: { from: string | null; to: string; event: string; message: string } | undefined;
+    let failure: WorkflowRunError | undefined;
+    try {
+      const run = async (db: Kysely<any>) =>
+        this.moveIn(db, tableName, lifecycle, id, request, actor, (r, cause) => {
+          refusal = r;
+          failure = cause instanceof WorkflowRunError ? cause : undefined;
+        });
+      return trx ? await run(trx) : await this.db.transaction().execute(run);
+    } catch (error: any) {
+      // The transaction rolled back, so a refusal is logged outside it.
+      if (refusal) {
+        await this.record(this.db, {
+          tableName,
+          id,
+          ...refusal,
+          outcome: error instanceof UnprocessableEntityException ? 'failed' : 'refused',
+          actor,
+        });
+      }
+      // The rollback took the failed run and its reason with it. Put them back,
+      // on their own connection: Run History shows which workflow refused the
+      // move, and the record carries the reason without its status or version
+      // changing. Only when this call owned the transaction — inside a caller's
+      // (a workflow's own state write) the caller's rollback is the end of it.
+      if (failure && !trx) {
+        await this.workflowService.recordFailedRun(tableName, id, failure);
+        await this.db
+          .updateTable(tableName as any)
+          .set({ doc_status_message: refusal?.message ?? failure.message } as any)
+          .where('id' as any, '=', id)
+          .execute()
+          .catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  private async moveIn(
+    db: Kysely<any>,
+    tableName: string,
+    lifecycle: Lifecycle,
+    id: string,
+    request: TransitionRequest,
+    actor: TransitionActor,
+    noteRefusal: (
+      refusal: { from: string | null; to: string; event: string; message: string },
+      cause?: unknown,
+    ) => void,
+  ): Promise<TransitionResult> {
+    const existing: any = await db
+      .selectFrom(tableName as any)
+      .selectAll()
+      .where('id' as any, '=', id)
+      .where('deleted_at' as any, 'is', null)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!existing) throw new NotFoundException(`Record not found in ${tableName} with id: ${id}`);
+
+    const from = existing[lifecycle.column] == null ? null : String(existing[lifecycle.column]);
+    const wanted = { event: request.event, to: request.to };
+    const label = request.event ?? request.to ?? '';
+
+    const currentVersion = Number(existing.version ?? 0);
+    if (request.version !== undefined && currentVersion !== request.version) {
+      noteRefusal({ from, to: request.to ?? label, event: request.event ?? '', message: 'version conflict' });
+      this.refuse(tableName, id, from, request.to ?? label, 'version-conflict', new ConflictException({
+        message: 'This record was changed by someone else after you opened it.',
+        error: 'Conflict',
+        details: { code: 'VERSION_CONFLICT', entity: tableName, id, expectedVersion: request.version, currentVersion },
+      }));
+    }
+
+    const move = findMove(lifecycle, from, wanted);
+    if (!move) {
+      const offered = movesFrom(lifecycle, from).map((m) => m.event || m.to);
+      noteRefusal({ from, to: request.to ?? label, event: request.event ?? '', message: 'no such move' });
+      this.refuse(tableName, id, from, request.to ?? label, 'invalid-transition', new ConflictException({
+        message:
+          `"${label}" is not a move of this record from "${from ?? 'nothing'}". ` +
+          (offered.length ? `Its moves are: ${offered.join(', ')}.` : 'It has no moves from here.'),
+        error: 'Conflict',
+        details: { code: 'INVALID_TRANSITION', entity: tableName, id, from, offered },
+      }));
+    }
+
+    const decision = await this.decide(actor, tableName, move);
+    if (!decision.allowed) {
+      const message =
+        move.kind === 'reopen' && decision.roles.length === 0
+          ? 'Only an administrator can reopen this record.'
+          : `"${move.label}" can be pressed by: ${decision.roles.join(', ')}.`;
+      noteRefusal({ from, to: move.to, event: move.event, message });
+      this.refuse(tableName, id, from, move.to, 'role', new ForbiddenException({
+        message,
+        error: 'Forbidden',
+        details: { code: 'TRANSITION_FORBIDDEN', entity: tableName, id, move: move.event || move.to, roles: decision.roles },
+      }));
+    }
+
+    // The record as the move leaves it: the new state and the time it got there.
+    const now = new Date();
+    const stamp = `${move.to}_at`;
+    const columns = new Set(Object.keys(existing));
+    const changes: Record<string, unknown> = {
+      [lifecycle.column]: move.to,
+      doc_status: phaseOf(lifecycle, move.to),
+      doc_status_message: null,
+      version: currentVersion + 1,
+      updated_at: now,
+    };
+    if (lifecycle.hasMachine && columns.has(stamp)) changes[stamp] = now;
+    if (request.assignTo !== undefined && columns.has('assigned_to')) changes.assigned_to = request.assignTo;
+    if (request.assignRole !== undefined && columns.has('assigned_role')) changes.assigned_role = request.assignRole;
+    const after = { ...existing, ...changes };
+    const judged = await this.busService.withNumericValues(tableName, after);
+
+    // Refusing rules hold on a move as on a save: "a resolved case needs its notes".
+    const verdict = await this.rulesService.validate(tableName, judged, 'update');
+    if (!verdict.valid) {
+      const message = verdict.errors.join(' ');
+      noteRefusal({ from, to: move.to, event: move.event, message });
+      this.refuse(tableName, id, from, move.to, 'rule', new UnprocessableEntityException({
+        message: message || 'A business rule refused this move.',
+        error: 'Unprocessable Entity',
+        details: { code: 'RULE_REFUSED', entity: tableName, id, errors: verdict.errors },
+      }));
+    }
+
+    const rows = await db
+      .updateTable(tableName as any)
+      .set(changes as any)
+      .where('id' as any, '=', id)
+      .where('version' as any, '=', currentVersion)
+      .returningAll()
+      .execute();
+    const record = rows[0] as any;
+
+    const ranWorkflows: string[] = [];
+    try {
+      // A move is an update of the record, so the update processes run on it —
+      // a process checking `stage is closed_won` runs when Close won is pressed,
+      // and only then, since the record is locked after — and so do the ones
+      // bound to this move and to the state it reaches.
+      const bound = [
+        request.afterSave ? undefined : ('update' as const),
+        move.event ? (`transition:${move.event}` as const) : undefined,
+        `enter:${move.to}` as const,
+      ].filter((operation): operation is 'update' | `transition:${string}` | `enter:${string}` => !!operation);
+      for (const operation of bound) {
+        await this.workflowService.runLocalWorkflows(tableName, id, operation, judged, {}, {
+          db,
+          throwOnError: true,
+        });
+        ranWorkflows.push(operation);
+      }
+      // The rules that start a process see the moved record (triggers only).
+      await this.rulesService.executeMatchedActions(tableName, id, judged, 'update', {
+        db,
+        throwOnError: true,
+        triggersOnly: true,
+      });
+    } catch (error: any) {
+      const message = error?.message ?? String(error);
+      noteRefusal({ from, to: move.to, event: move.event, message }, error);
+      throw new UnprocessableEntityException({
+        message: `"${move.label}" did not go through: ${message}. The record is still "${from}".`,
+        error: 'Unprocessable Entity',
+        details: {
+          code: 'WORKFLOW_FAILED',
+          entity: tableName,
+          id,
+          from,
+          to: move.to,
+          ...(error instanceof WorkflowRunError
+            ? { workflow: error.workflow, reason: error.reason }
+            : { reason: message }),
+        },
+      });
+    }
+
+    await this.record(db, {
+      tableName,
+      id,
+      event: move.event,
+      from,
+      to: move.to,
+      outcome: 'moved',
+      actor,
+      assignTo: request.assignTo,
+      assignRole: request.assignRole,
+    });
+    getLogger('workflow').event('workflow.transition.applied', {
+      entity: tableName,
+      recordId: id,
+      from,
+      to: move.to,
+      userId: actor.system ? 'system' : (actor.id ?? null),
+    });
+
+    return {
+      record,
+      lifecycle: {
+        column: lifecycle.column,
+        from,
+        to: move.to,
+        phase: phaseOf(lifecycle, move.to),
+        event: move.event,
+      },
+      ranWorkflows,
+    };
+  }
+}

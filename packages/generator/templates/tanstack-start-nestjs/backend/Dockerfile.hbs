@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.0-alpine AS builder
+FROM oven/bun:1.4.4-alpine AS builder
 
 WORKDIR /app
 
@@ -31,7 +31,7 @@ RUN if [ -f bun.lock ]; then bun install --frozen-lockfile --production; \
     else bun install --production; fi
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0-alpine
+FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production

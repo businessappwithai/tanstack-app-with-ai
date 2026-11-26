@@ -148,7 +148,7 @@
 <p>Behind those screens the model also carries the behaviour:</p>
 <ul>
   <li><strong>Eight business rules</strong> — lead scoring and routing, a qualification gate, forecasting, a closed-won gate, discount policy, case triage, renewal risk.</li>
-  <li><strong>Five state machines</strong> — the lifecycle of a lead, an opportunity, a quote, a support case and a contract, each with role guards on its transitions.</li>
+  <li><strong>Five state machines</strong> — the lifecycle of a lead, an opportunity, a quote, a support case and a contract, each moved only by background workflows — a rule notices the fact a move rests on and starts the saga that writes the state.</li>
   <li><strong>Seven hook workflows</strong> — the lifecycle handlers that normalize an email, mint an account number, block a delete, redact a phone number.</li>
   <li><strong>Five sagas</strong> — lead conversion, quote approval escalation, critical case escalation, closed-won handoff and the renewal playbook.</li>
 </ul>
@@ -200,8 +200,9 @@
   <figure>
     <img src="img/51-crm-roles.png" alt="The Role Management screen listing Administrator as a master role and Analyst, Manager and User as standard roles, each active with a description.">
     <figcaption>
-      <b>Roles, seeded and enforced.</b> A transition your state machine guards with <code>[Manager]</code>
-      is a permission check against this table at runtime. <a href="06-dictionary.html">Chapter 06</a>.
+      <b>Roles, seeded and enforced.</b> A role your model's <code>%%rbac</code> lines name is a permission
+      check against this table at runtime — on what a person may read, create, update or delete, never on a
+      state, which only background workflows change. <a href="06-dictionary.html">Chapter 06</a>.
     </figcaption>
   </figure>
 </div>
@@ -272,7 +273,7 @@
 <table>
   <thead><tr><th>Requirement</th><th>Why</th></tr></thead>
   <tbody>
-    <tr><td><code>bun</code> ≥ 1.3.14</td><td>The repository is Bun-only. Never <code>npm</code> or <code>pnpm</code>.</td></tr>
+    <tr><td><code>bun</code> ≥ 1.4.3</td><td>The repository is Bun-only. Never <code>npm</code> or <code>pnpm</code>.</td></tr>
     <tr><td>PostgreSQL 16+</td><td>The generated backend targets Postgres. One database for the generator, one per generated app.</td></tr>
     <tr><td>The repository</td><td><code>bun install</code> at the root once.</td></tr>
   </tbody>

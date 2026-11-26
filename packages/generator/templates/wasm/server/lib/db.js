@@ -9,7 +9,7 @@
  * would be a different application from the one the model described.
  *
  * The PGlite class is injected rather than imported: the Node host resolves it
- * from node_modules and the browser host from a vendored (or CDN) ES module,
+ * from node_modules and the browser host from a vendored ES module (never a CDN),
  * and this file has to be the same file in both.
  */
 
@@ -39,6 +39,22 @@ export class Database {
     return result.rows || [];
   }
 
+  /**
+   * Run one statement and name its NUMERIC columns.
+   *
+   * Postgres returns NUMERIC (and DECIMAL, which money compiles to) as a string
+   * so no digit is lost, and a string is indistinguishable from a text column
+   * holding digits — so a screen that wants to format a number has to be told
+   * which columns are numbers. OID 1700 is NUMERIC.
+   */
+  async queryWithNumeric(sql, params = []) {
+    const result = await this.pg.query(sql, params);
+    const numeric = (result.fields || [])
+      .filter((field) => field.dataTypeID === 1700)
+      .map((field) => field.name);
+    return { rows: result.rows || [], numeric };
+  }
+
   async one(sql, params = []) {
     const rows = await this.query(sql, params);
     return rows[0] || null;
@@ -55,6 +71,45 @@ export class Database {
   async exec(sql) {
     if (!sql || !sql.trim()) return;
     await this.pg.exec(sql);
+  }
+
+  /**
+   * Run `work` in one transaction, handing it a Database bound to it.
+   *
+   * Not for atomicity alone. On the browser's `idb://` store PGlite writes its
+   * files back to IndexedDB after every statement made outside a transaction,
+   * so a seed of a thousand statements is a thousand flushes — measured at over
+   * three minutes against about two seconds in memory. Inside a transaction the
+   * flush happens once, at the end.
+   */
+  async transaction(work) {
+    if (this.inTransaction || typeof this.pg.transaction !== "function") return work(this);
+    return this.pg.transaction(async (tx) => {
+      const bound = new Database(tx);
+      bound.inTransaction = true;
+      return work(bound);
+    });
+  }
+
+  /**
+   * Run `work`, and if it throws undo only what it did.
+   *
+   * A statement that fails inside a transaction aborts the whole transaction, so
+   * a caller that tolerates a failure — a sample row that breaks a constraint —
+   * needs a savepoint around it. Outside a transaction there is nothing to
+   * abort and `work` runs as it is.
+   */
+  async attempt(work) {
+    if (!this.inTransaction) return work();
+    await this.pg.exec("SAVEPOINT attempt");
+    try {
+      const result = await work();
+      await this.pg.exec("RELEASE SAVEPOINT attempt");
+      return result;
+    } catch (error) {
+      await this.pg.exec("ROLLBACK TO SAVEPOINT attempt");
+      throw error;
+    }
   }
 
   async close() {

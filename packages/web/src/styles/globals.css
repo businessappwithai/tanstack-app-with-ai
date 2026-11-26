@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
+@source "../../../editors/src";
 
 @layer base {
   :root {
@@ -10,7 +11,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.6%;
     --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
+    --muted-foreground: 0 0% 40%; /* #666666 — 5.7:1 on the page and on muted surfaces; 45.1% was 4.3:1 */
     --accent: 0 0% 9.0%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 84.2% 60.2%;
@@ -57,3 +58,7 @@
     color: hsl(var(--foreground));
   }
 }
+/* The brand orange as text. #FF8400 on white is 2.4:1, which fails AA for text;
+   #C2410C is 5.2:1. On the dark surface the original orange is the readable one. */
+.text-brand { color: #c2410c; }
+.dark .text-brand { color: #ff8400; }

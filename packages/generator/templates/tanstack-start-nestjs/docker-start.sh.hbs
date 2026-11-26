@@ -21,6 +21,16 @@ log() { echo "[{{project.name}}] $*"; }
 : "${BACKEND_URL:=http://127.0.0.1:${BACKEND_PORT}}"
 export BACKEND_URL
 
+# Better Auth refuses a state-changing request whose Origin is not in
+# CORS_ORIGIN, and a production build no longer trusts localhost implicitly.
+# `docker run` sets neither, so the first sign-in answered 403 "Invalid origin"
+# — which reads as a wrong password rather than a missing variable. Default to
+# the address this container is published on; a real deployment names its own.
+if [ -z "$(printenv CORS_ORIGIN)" ]; then
+  export CORS_ORIGIN="http://localhost:${PORT},http://127.0.0.1:${PORT}"
+  log "CORS_ORIGIN was not set — trusting ${CORS_ORIGIN} (set it to the real URL when deploying)"
+fi
+
 if [ -z "$DATABASE_URL" ]; then
   log "DATABASE_URL is not set — the application has no database to talk to"
   exit 1

@@ -3,8 +3,9 @@
  * Creates system roles and initial users with Better-Auth integration
  * Sign-in credentials are created through Better Auth's own API, so the rows
  * always match the installed version's schema and hasher.
- * Default password for all users: "admin123" — long enough for the configured
- * minPasswordLength; change it before this runs anywhere real.
+ * Default password for the demo accounts: "admin123" — long enough for the
+ * configured minPasswordLength; change it before this runs anywhere real.
+ * The Administrator account takes ADMIN_PASSWORD instead when it is set.
  *
  * Generated: {{now}}
  */
@@ -56,6 +57,30 @@ const ROLES: RoleDefinition[] = [
 
 /** Seeded for every demo account; change it before anything real runs here. */
 const DEFAULT_PASSWORD = 'admin123';
+
+/**
+ * The password an account is created with.
+ *
+ * The Administrator takes ADMIN_PASSWORD when the operator set one; this seed
+ * used to ignore it, so the variable the compose file and `.env` advertise
+ * only took effect when the application's own start-up created the account
+ * first — which, after this seed, it never does. Read when called, not at module
+ * load: this file can be imported before `.env` has been loaded.
+ *
+ * Shorter than Better Auth's minimum (8) is refused with a warning rather than
+ * passed on: it would be rejected at sign-in as "Invalid email or password",
+ * which reads as a wrong password. Every other demo account keeps the default.
+ */
+function passwordFor(userDef: UserDefinition): { password: string; fromEnv: boolean } {
+  if (userDef.roleName !== 'Administrator') return { password: DEFAULT_PASSWORD, fromEnv: false };
+  const configured = process.env.ADMIN_PASSWORD;
+  if (!configured) return { password: DEFAULT_PASSWORD, fromEnv: false };
+  if (configured.length < 8) {
+    console.warn('  ⚠ ADMIN_PASSWORD is shorter than 8 characters and was ignored.');
+    return { password: DEFAULT_PASSWORD, fromEnv: false };
+  }
+  return { password: configured, fromEnv: true };
+}
 
 /**
  * One account per role.
@@ -225,8 +250,9 @@ export async function seed(db: Kysely<any>): Promise<void> {
       .executeTakeFirst();
 
     if (!existingBaUser) {
+      const { password, fromEnv } = passwordFor(userDef);
       await auth.api.signUpEmail({
-        body: { email: userDef.email, password: DEFAULT_PASSWORD, name: userDef.name },
+        body: { email: userDef.email, password, name: userDef.name },
       });
 
       // Better Auth owns the identity; the application's own columns — which
@@ -240,13 +266,21 @@ export async function seed(db: Kysely<any>): Promise<void> {
         .where('email', '=', userDef.email)
         .execute();
 
-      console.log(`  ✓ Created better-auth user: ${userDef.email} (password: "${DEFAULT_PASSWORD}")`);
+      // A password the operator supplied is never echoed; the default is public.
+      console.log(
+        fromEnv
+          ? `  ✓ Created better-auth user: ${userDef.email} (password: from ADMIN_PASSWORD)`
+          : `  ✓ Created better-auth user: ${userDef.email} (password: "${DEFAULT_PASSWORD}")`
+      );
     }
   }
 
   console.log('✓ Users and roles seeded successfully');
   console.log('\n📋 Default Credentials:');
-  console.log(`   All users can log in with password: "${DEFAULT_PASSWORD}"`);
+  console.log(`   Demo accounts log in with password: "${DEFAULT_PASSWORD}"`);
+  if (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length >= 8) {
+    console.log('   The Administrator uses ADMIN_PASSWORD.');
+  }
   console.log('\n👥 Users Created:');
   for (const user of USERS) {
     console.log(`   - ${user.email} (${user.roleName})`);

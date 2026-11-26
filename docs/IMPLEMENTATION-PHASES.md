@@ -438,7 +438,7 @@ Note: These are estimates and do not account for review cycles, infrastructure p
 
 ## Appendix: Technology Compatibility Matrix
 
-| Technology | Bun.js 1.3+ | PostgreSQL | Knex.js | Fastify | Next.js 14 |
+| Technology | Bun.js 1.4.4+ | PostgreSQL | Knex.js | Fastify | Next.js 14 |
 |-----------|-------------|------------|---------|---------|------------|
 | Better Auth | ✅ | ✅ | Custom adapter | ✅ (beta) | ✅ |
 | Trigger.dev SDK v3 | ✅ | N/A | N/A | N/A | ✅ |
@@ -447,6 +447,6 @@ Note: These are estimates and do not account for review cycles, infrastructure p
 
 **Key compatibility notes:**
 - Better Auth + Fastify: beta support; needs `bodyParser: false` in NestJS and careful handler mounting
-- `@gorules/zen-engine`: The Node.js binding uses native Rust via N-API; confirm Bun.js N-API compatibility (Bun 1.3 supports most N-API modules). WASM fallback available if needed.
+- `@gorules/zen-engine`: The Node.js binding uses native Rust via N-API; confirm Bun.js N-API compatibility (Bun supports most N-API modules). WASM fallback available if needed.
 - Trigger.dev v3 SDK: Works with Bun.js as the task runner runtime.
 

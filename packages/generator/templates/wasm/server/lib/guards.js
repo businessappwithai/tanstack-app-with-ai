@@ -93,30 +93,3 @@ export async function checkOperationAccess(db, user, tableName, operation) {
     );
   }
 }
-
-/**
- * Transition access, matched on the states a write crosses.
- *
- * A transition has no endpoint of its own — moving a record along an edge is an
- * ordinary status update — so the compiler stored the `(from_state, to_state)`
- * pair and the check happens where the update knows both ends. Both are kept
- * because one event can sit on several edges.
- */
-export async function checkTransitionAccess(db, user, tableName, before, after, statusColumn) {
-  if (!statusColumn) return;
-  const from = before ? before[statusColumn] : null;
-  const to = after ? after[statusColumn] : null;
-  if (!to || from === to) return;
-
-  const rows = await db.query(
-    `SELECT role_name, transition FROM sys_transition_access
-      WHERE table_name = $1 AND from_state = $2 AND to_state = $3 AND is_active = true`,
-    [tableName, String(from ?? ""), String(to)]
-  );
-  if (!rows.length) return;
-  if (!holdsRole(user, rows.map((row) => row.role_name))) {
-    throw forbidden(
-      `Your roles do not permit the "${rows[0].transition}" transition (${from} to ${to})`
-    );
-  }
-}

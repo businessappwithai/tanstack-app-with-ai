@@ -11,9 +11,17 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 
+import { getLogger } from './common/logging/logger.service';
+
 // Load .env from backend root (parent of src/) regardless of cwd
 config({ path: path.join(__dirname, '..', '.env'), override: true });
 config({ path: path.join(__dirname, '..', '.env.local'), override: true });
+
+// A script's console output is its report to the person running it, and stays.
+// What it also does is name each outcome as a log event, so a migration that
+// failed on a server is a line a collector can find. The terminal stays quiet
+// about those events unless someone asks (LOG_LEVEL=info).
+process.env.LOG_LEVEL ??= 'warn';
 
 async function createDialect(): Promise<PostgresDialect> {
   const url = process.env.DATABASE_URL;
@@ -44,10 +52,13 @@ async function runSeeds(db: Kysely<any>) {
     if (seedModule.seed) {
       try {
         console.log(`Running seed: ${file}`);
+        const startedAt = Date.now();
         await seedModule.seed(db);
         console.log(`✓ Seed "${file}" completed`);
+        getLogger('db').event('db.seed.completed', { name: file, durationMs: Date.now() - startedAt });
       } catch (error) {
         console.error(`✗ Seed "${file}" failed:`, error);
+        getLogger('db').event('db.seed.failed', { name: file, err: error });
         throw error;
       }
     }

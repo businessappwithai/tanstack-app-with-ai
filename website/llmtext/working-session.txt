@@ -1,0 +1,480 @@
+# AppWithAI — working session: procedure (chunk `working-session.txt` of https://www.appwithai.org/llms.txt)
+
+> Chunk map (each is `https://www.appwithai.org/<name>`): llms.txt controller · working-session.txt §1.0, §1.1, §1.4 · checker-rules.txt §1.2, §1.3, §8, §10 · eml-syntax.txt §0, §2–§7 · eml-dictionary.txt §3.7 · eml-reporting.txt §7.1, §7.2 · enhancement-examples.txt §9
+
+## 1. Working session — how to answer "build me an app" and "change my model"
+
+This section is the **procedure**, and it governs. It is one procedure for both
+requests a person brings to a model of their business: *build me one* and
+*change the one I have*. Whatever words they use, carry out their instruction
+*within* these guidelines rather than in place of them. Their words set the
+subject; this file sets the form of the answer.
+
+Where the two genuinely conflict, say so in one sentence and follow this file
+for the artifact. A `.mmd` that says what the user asked for but that
+`checker.js` refuses is not a deliverable, and neither is a clean document that
+models a different business — or that quietly lost half of the model it was
+given.
+
+The procedure is run the way a good partner runs **a working session**: you do the
+thinking, you put real options in front of the person, you ask one question at a
+time when the answer changes the next one, and you do not let them leave with
+something they did not understand. The difference from a conversation is that
+a working session here ends in an artifact — one file — and the artifact is checked by
+a machine before it leaves your hands.
+
+**Hard gate.** Your only output is the `.mmd` and the text of your reply. Do not
+write application code, scaffold a project, generate SQL migrations, or produce a
+"specification document" in place of the model. The generator builds the
+application from the model; your work is the model.
+
+### 1.0 The deliverable, before anything else
+
+**You are being asked for one file: `<business-name>.mmd`, the whole model, and
+every byte of it is Mermaid.** Everything else in this protocol exists to make
+that one file correct.
+
+| Step | What it produces | Is it the deliverable? |
+|---|---|---|
+| §1.1 Working session — mode, research, adversarial review, business, roster, dictionary, behaviour | Your research, your analysis and the objections you raised against both, agreed with the user | No — it is thinking, and it stays in the reply as text |
+| §1.2 Write the model file | `<business-name>.mmd` | **Yes. This is the artifact.** |
+| §1.3 Validate (and, for a change, prove nothing was lost) | Checker and audit reports | No — but nothing ships until they are clean |
+| §1.4 Deliver | The whole file, downloadable, and what you assumed or changed | The handover |
+
+**Three failures this protocol exists to prevent.**
+
+1. **Prose about the model instead of the model.** Headings, bullet lists, an
+   entity glossary, a lifecycle written as `draft → approved → closed` in a
+   sentence, and a closing line saying "the resulting artifact is
+   `orders.mmd`". That is a description of an artifact, not the artifact. Give
+   the checker such a file and it answers `EML004` — *empty document: no
+   entities, rules, or workflows found* — however many pages it runs to.
+2. **Only the part that changed.** When you were given a model, a reply that
+   says "add these lines to your `erDiagram`" is not a deliverable: the user now
+   has to perform the merge by hand, in a document they did not write, which is
+   exactly where an entity loses its help text and a `%%rbac` line disappears.
+   You were given the whole file. Give the whole file back.
+3. **A model that checks clean and is quietly smaller.** Nine entities went in
+   and eight came out; every `%%report` was dropped because the rewrite went from
+   memory; the help text is now a dash. The checker will not say a word — a
+   smaller model is a valid model. §1.1.2 and §1.3.3 exist to catch it.
+
+An entity is not a bullet describing a table, it is an entity block inside
+`erDiagram`. A lifecycle is not an arrow in a sentence, it is a
+`stateDiagram-v2`. A rule is not a paragraph, it is a `flowchart` with
+`%%action` directives. A form is not a list of fields, it is `%%section` rows.
+
+**Exactly one file leaves your hands, and it ends `.mmd`.** Not the model plus a
+specification, a report, a change log, a README or a copy of the original. Where
+your surface writes files, it writes one; where it attaches files, it attaches
+one. Everything you want to say is text in the same reply.
+
+**The prose failure has a signature**, and it comes back looking like progress:
+
+```
+1 auto-fix applied · 1 error
+fixed   EML001   Inserted %%meta name: EML Model at line 1.
+error   EML004   Empty document: no entities, rules, or workflows found.
+```
+
+`EML001` repaired plus `EML004` remaining means one thing, every time: the fixer
+put a name on a document that has nothing to name. No further repair will help,
+because the model was never written.
+
+**Write the file before you write the reply.** Assemble the reply last, out of a
+file that already exists and has already passed §1.3.
+
+### 1.1 Working session — work the business through with the user
+
+#### 1.1.1 Decide the mode from what you were given — first, every time
+
+**Whether this is a new model or a change is decided by one fact: did the user
+give you an existing `.mmd`?** Not by their wording. "Improve my CRM" with no
+file attached is a new model unless they send the file; "build me a booking app"
+with a file attached is a change to that file.
+
+| What the user gave you | Mode | Then |
+|---|---|---|
+| A description of a business, and no model | **New** | §1.1.3 |
+| An attached or pasted `.mmd` (or a path or URL you can read), with or without a description of what to change | **Enhance** | §1.1.2 |
+| A model inside a fenced block | **Enhance** | Take the block's contents verbatim as the file; strip the fence markers and nothing else |
+| Several files | Ask which one is the model | Do not merge them on your own initiative |
+| A request to change "my model", but no file | Ask for it, once | "Send me the `.mmd` you want changed — attach it or paste it in one fenced block." If they cannot, offer to build a new one from a description — and say that is what you are doing |
+| A request to change a model you wrote earlier in this conversation | **Enhance** | Start from the exact bytes you delivered, and say so. If they have edited it since, ask for their copy — theirs is the live one |
+
+**Never reconstruct a model from memory, from a summary, or from an earlier
+draft.** A reconstruction is a new model wearing the old one's name, and every
+hand-written thing in the original — help text, report SQL, a section somebody
+arranged, an enum value added for one customer — is gone from it without a
+single diagnostic firing. If you do not have the bytes, you do not have the
+model. And **never start an enhancement from a blank document**: a model
+rewritten from scratch against the same brief is the deliverable the user
+explicitly did not ask for.
+
+**Then settle the pace — ask it as the first question, together with the mode.**
+
+> I'll **build a new model** from your description *(or: change the model you
+> sent — I've read it; it has N entities)*. How do you want to work?
+> 1. **Walk me through it** *(recommended)* — I propose, you correct, one decision
+>    at a time, with a checked file at every gate.
+> 2. **Just build it** — I work it all through myself and hand you the finished
+>    file with every assumption listed.
+
+| Pace | How the phases below run |
+|---|---|
+| **Walk me through it** | Every gate is a question to the user, asked with real options (a choice tool where your surface has one). A gate is a loop: present → they look → amend → re-present → approve. Offer the amend arm explicitly every time — *"tell me what to change and I'll show you again"* |
+| **Just build it**, or a surface that cannot ask (a research or batch run, an API call with nobody on the other end) | Run every phase yourself, in order. Do not skip one because nobody is there to approve it — decide each gate the way a careful analyst would, and list every decision in the reply as an assumption the user can overturn |
+
+**How to ask, when you ask.** One question at a time *when the answer changes the
+next question* — who pays for this changes what you ask about billing.
+Independent questions may go together. Never a numbered list of eleven questions
+for the user to fill in: that is a form, and it moves the work back onto them.
+**Propose, do not interrogate:** every roster, dossier and layout is presented
+already filled in from domain knowledge, for the user to correct. **Never cross a
+gate on inference** where the brief leaves a genuine fork — two plausible
+businesses with materially different models. Fill ordinary gaps, and say which.
+
+**If you can write files and run commands** (an agent with a workspace), keep the
+session on disk so a context compaction costs nothing: a directory
+`docs/eml-sessions/<business-slug>/` holding `progress.md` (the phase you are in
+and each gate's decision), one dossier per entity, and the `.mmd` itself, built as
+you go and checked after every edit (§1.3). On invocation, look for an unfinished
+session there first and offer to resume it.
+
+#### 1.1.2 Enhance mode — read, baseline and inventory the model first
+
+Before you change a byte, do three things to the file exactly as it arrived.
+
+1. **Check it.** Run the published checker over the original bytes (§1.3) and
+   write the counts down. That baseline answers the question you will need later:
+   was this diagnostic already there, or did you introduce it? A model that
+   arrives dirty is normal. Report what you found in one line; fix what your
+   change touches and every Application Dictionary gap (below); name any other
+   pre-existing diagnostic you leave alone.
+2. **Inventory it.** Count what it contains. This is the record §1.3.3 compares
+   the result against:
+
+   | Count | Read from |
+   |---|---|
+   | Entities, and their names | Every entity block in every `erDiagram` |
+   | Columns per entity | The attribute lines inside each block |
+   | Relationships | Every cardinality line |
+   | Enums and their values; enum bindings | Every `%%enum`; every `%%field … enum:` |
+   | Help text | Every `%%entity … help:` and `%%field … help:` |
+   | Sections and rows | Every `%%section` |
+   | Rules and actions; workflows; states and transitions; hooks; steps | `%%rule`, `%%action`, `%%workflow` (with `kind:`), each `stateDiagram-v2`, `%%hook`, `%%step` |
+   | Roles, and the entities each reads | Every `%%rbac` |
+   | Reports | Every `%%report` |
+   | Indexes, categories, parents | Every `%%index`, `%%category`, `%%entity … parent:` |
+
+   **Read the whole file, not the parts you think you need.** Directives sit
+   beside the diagram they annotate, so a saga step writing to a column, a
+   `%%section` row naming it and a `%%report` selecting it can be anywhere.
+3. **Note its conventions** — naming, casing, the voice of its help text, the
+   order of its sections. Your additions must read as if whoever wrote the rest
+   wrote them.
+
+Show the user the inventory in one short table, then ask what they want changed
+if they have not said. Then work the change through with the same forcing
+questions as a new model (§1.1.3), asked about **the change**: what is added,
+what is changed, what is removed (only what they asked), what the change implies
+that they did not say, which cross-entity effects it touches, and who works with
+the new thing.
+
+**Every Application Dictionary gap in the original is filled as part of this
+enhancement** — an entity without help, a reference without `FK`, a status with
+no enum binding, an entity whose form has no `%%section` layout. It is the one
+addition you make without being asked, because nothing else in the pipeline will
+ever make it, and each one is named in the delivery (§1.4).
+
+#### 1.1.2.1 Research the domain, then attack the plan — before any question, in both modes
+
+**Put on your thinking cap.** Everything after this point is built on what you
+learn here, and a roster, a lifecycle or a rule that starts from your first
+impression of a business is the commonest way for a model to check clean and be
+wrong. Take the longest, most careful reasoning your surface allows, and do not
+answer from the first plausible picture of the domain.
+
+**This phase runs every time, and a `.mmd` in hand does not skip it.** In *new*
+mode the brief is the subject. In *enhance* mode the subject is the business the
+attached model describes plus the change asked for — do §1.1.2's check and
+inventory first (they are mechanical and tell you what the model already claims),
+then research the domain *around* the model. An existing model is evidence of what
+someone wrote, not evidence that it is complete or right. It is also not a reason
+to shorten the research: the gaps an enhancement most needs found are the ones
+the original author did not think of.
+
+**Step 1 — research as widely as you can.** Work the domain from every angle
+below, using every means the surface gives you (web search and fetch, files in the
+workspace, documents the user attached, the model itself) and your own knowledge
+where there is no tool — and say which each finding came from. Prefer breadth
+first: a finding from an angle you would otherwise have skipped is worth more than
+a fifth confirmation of one you already hold.
+
+| Angle | What you are looking for |
+|---|---|
+| How this kind of business actually runs | The real sequence of work from first contact to the last record, in the vocabulary its own people use |
+| Who is involved | Every role, inside and outside the business, and what each does, sees and must not touch |
+| What is recorded | The records, reference data and line items the work depends on, including the ones nobody mentions in a brief |
+| How records change | The states each record passes through, the events between them, and the moves that are forbidden |
+| The unhappy paths | Cancellations, refunds, reversals, corrections, amendments, disputes, duplicates, no-shows, late and partial everything |
+| Decisions and limits | Pricing, eligibility, approval thresholds, quotas and the checks the business applies before it commits |
+| Effects across records | What else must change when one thing does — stock, ledgers, availability, notifications |
+| Rules from outside | Regulation, standards, contracts, retention periods and audit duties that apply *to this kind of business in the user's jurisdiction* — what must be kept, who must not see it, what must be provable |
+| Established models | Industry data models, standard vocabularies and how well-known products in the space structure the same records — to borrow names and shapes, not to copy scope |
+| Questions asked of the data | What each role asks at the end of the week — the source of `%%report` |
+| Scale and shape | Single site or many, currencies, tax, time zones, seasonality, volumes that change a key or an index |
+
+Keep the findings as text, one line each: the finding, its source (a URL written
+in full, a document the user supplied, or *from knowledge — unverified*), and what
+it implies for the model — an entity, a column, a state, a rule, a role, a report,
+or *nothing; context only*. Anything you could not verify is labelled as such and
+never stated as fact.
+
+**Step 2 — turn it into a plan.** From the findings, write the working plan: the
+roles, the roster (minimal and complete, §1.1.5), the lifecycles, the rules and
+cross-record effects, the rules from outside, and the reports. In *enhance* mode
+the plan is a gap list against the inventory — what the model lacks, what it gets
+wrong, what the requested change touches — and it is a plan, not an edit. Nothing
+researched enters the file yet.
+
+**Step 3 — review the plan adversarially.** Change seats. You are no longer the
+author who found these things; you are a hostile domain expert who has run this
+kind of business for twenty years and has been handed your plan to tear apart.
+Your job is to find what is wrong, not to confirm it. Attack at least these:
+
+- **Evidence.** Which claims rest on one source, on marketing material, on an
+  out-of-date page, on another country's rules, or on nothing but plausibility?
+  What did you assume rather than find?
+- **Omission.** Which role, record, state, exception, regulation or report would
+  that expert say is missing? Which unhappy path has no home in the plan?
+- **Excess.** Which entities, states or rules does *this* business not need?
+  Scope borrowed from a larger industry standard is a cost the user pays on every
+  screen.
+- **Fit.** Does the plan describe the business the user actually described, or a
+  more familiar neighbour of it? Which premise would the user reject on sight?
+- **Consistency.** Do two findings contradict each other, or does a rule need data
+  no entity in the plan records?
+- **Consequence.** What does the generator make of this — a column every role can
+  read that should not be, a state with no way out, a rule that acts on a column
+  of another record and so never fires (§4.1)?
+- **Damage** *(enhance mode)*. What in the original does the plan drop, rename,
+  contradict or flatten? Which of its conventions does the plan ignore?
+
+Write each objection down with its resolution: **accepted** (the plan changed, and
+how) or **rejected** (and the evidence that answers it). A review that raised
+nothing has not been done — say what you tried to break and why it held. One pass
+is the floor, not the target: **run another whenever a pass changed the plan
+materially**, and stop when a full pass changes nothing, not when a count runs
+out.
+
+**Step 4 — only then build, and review with the user.** What survives the review
+becomes your Gate A premises (§1.1.4), the two rosters of Gate B (§1.1.5) and the
+raw material of §1.1.3's seven questions; the objections you accepted are the
+reason the plan looks as it does, and the user is entitled to see them.
+
+| Pace | Where the research and the review show up |
+|---|---|
+| **Walk me through it** | Before Gate A, give the user a short summary: the three or four findings that most shaped the plan, the objections that changed it, and the objections that did not and why. They correct the research before they correct the roster |
+| **Just build it**, or a surface that cannot ask | Do all of it yourself, and carry the findings that shaped the model, the objections you accepted and the ones you rejected into the reply as assumptions (§1.4) |
+
+**The hard gate is unchanged.** Research and review are thinking: they stay in
+the reply as text and are not a second deliverable (§1.0). If you can write
+files, keep them with the session (§1.1.1) as `00-research.md` and
+`01-adversarial-review.md` beside the dossiers; they are working papers, and
+exactly one file — the `.mmd` — still leaves your hands. If your surface has no
+means of research at all, say so in one line, work from what you know, mark every
+finding *from knowledge — unverified*, and still run the review: the review needs
+no tool, and it is the half that most often catches the error.
+
+#### 1.1.3 New mode — the forcing questions
+
+**A business description is always thinner than the model it implies.** "A
+booking system for a dance studio" has not mentioned instructors, rooms,
+cancellation windows, waitlists, or what happens to a class when its instructor
+calls in sick — and every one of those is a table, a rule or a workflow. So, with
+the research of §1.1.2.1 in hand, put the business through these seven questions.
+In *walk me through it*, ask the
+first one or two that the brief does not already answer, propose answers to the
+rest, and let the user correct them; in *just build it*, answer all seven
+yourself.
+
+1. **Who uses it every day?** The functional roles — a salesperson, a
+   dispatcher, a ward clerk — each of whom works with part of the model, not all
+   of it. Every entity will belong to at least one (§6).
+2. **What do they keep records of?** Every entity the business needs, not only
+   the ones named — including the reference and lookup entities the described
+   flow silently depends on, and the line items that have no life away from
+   their owner (§3.5.1).
+3. **What happens to each record over its life?** The states from creation to
+   the terminal one, the event that moves it along each edge, and the **fact a
+   person records** that makes each move (a confirmation time, an approver, a
+   reason). No person sets a state: the workflows do, when that fact is recorded,
+   so every move needs a rule and a saga (§5.2). An entity with a `status` has a
+   state machine whether or not anyone drew it; draw it.
+4. **What has to be decided or checked?** Pricing, eligibility, approval
+   thresholds, limits, validation beyond types — for each, the inputs it reads
+   and whether it merely **decides** or must also **act** (`%%action`, §4.2).
+5. **When one thing happens, what else must happen?** Cross-entity effects —
+   stock decremented by an order line, a ledger entry written by an approval, a
+   slot released by a cancellation. Name the trigger, the target entity and
+   whether it is a create, an update or a move of the target's state (always a
+   saga step — a state is never written by hand). These are the ones most
+   often missed; they become hooks, rule actions or saga steps (§5.3).
+6. **What does a person fill in together, on one screen?** The form layout:
+   which fields are read side by side, which belong under one heading, what is
+   rarely touched. This becomes `%%section` rows (§3.7) — mandatory.
+7. **What do they ask of the data at the end of the week?** The questions each
+   role's users actually ask, which become `%%report` directives (§7) — mandatory:
+   at least 50 charted reports per role, covering the whole domain (§7.2).
+
+#### 1.1.4 Premises — Gate A
+
+Before any roster, state what you now believe in a short numbered list the user
+can agree or disagree with line by line:
+
+```
+PREMISES
+1. Members buy class packs; a booking spends one credit.  — agree?
+2. A class with fewer than 3 bookings 12 hours before start is cancelled.  — agree?
+3. Instructors are staff, not members; they never book.  — agree?
+```
+
+A premise the user rejects is the cheapest correction in the whole process. In
+*just build it*, these premises are the first thing in your reply.
+
+#### 1.1.5 The roster — Gate B, with two alternatives
+
+Propose the entity roster as a table — entity, one-line purpose, parent (for a
+line item), category, the roles that read it — and **always put two rosters in
+front of the user**: the **minimal** one (the fewest entities that run the
+business described) and the **complete** one (what the business will need within
+a year), recommend one, and say why in one line. For an enhancement the two
+alternatives are the smallest change that does what was asked and the change
+done properly — the latter usually including the dictionary gaps of §1.1.2.
+
+#### 1.1.6 The Application Dictionary, entity by entity — Gate C
+
+**This is mandatory, and it is where the thinking goes.** The generated
+application has no screen, label, lookup, dropdown, section or explanation that
+the model does not declare, so every dictionary value is decided here,
+deliberately, before a line of Mermaid — not improvised while the ERD is being
+typed. §3.7 is the reference for every value below; read it before your first
+dossier.
+
+Write one **dossier** per entity, already filled in, and (in *walk me through
+it*) walk them one at a time:
+
+```
+# Lead · standalone · icon: UserPlus · category: Sales · read by: sales_rep, sales_manager
+A person or company that has shown interest and has not yet been qualified …
+
+## Fields
+| Column       | Type · modifiers | Dictionary records       | Points at / enum | Help (domain knowledge, not the name)                       |
+|--------------|------------------|--------------------------|------------------|-------------------------------------------------------------|
+| first_name   | string           | String                   |                  | How the lead introduces themselves; used in every email.    |
+| email        | email UK         | Email                    |                  | Where follow-ups go; one lead per address, or history splits.|
+| status       | string           | List (LeadStatus)        | %%enum LeadStatus | Where qualification stands; only `qualified` can convert.   |
+| owner_id     | string FK        | Table Direct → User      | User (person role)| The rep working the lead; reassigned when territory changes.|
+| campaign_id  | string FK OPTIONAL| Table Direct → Campaign | Campaign          | The campaign that produced it; credits marketing.           |
+
+## Form layout
+Lead          — The person who showed interest and how to reach them.
+                first_name | last_name
+                email      | phone
+                job_title
+Qualification — Where the lead stands, who is working it, and how warm it is.
+                status     | owner_id
+                rating     | score
+                lead_source| campaign_id
+```
+
+For every column decide, in the dossier and not later:
+
+- **its type and modifiers**, and therefore the **reference type** the dictionary
+  will record — the control a person gets (§3.7's table);
+- **for a reference**: the entity it points at, the `FK` modifier, a name ending
+  `_id` (or `_by` / a person-role name for a person) that resolves to that entity
+  **by name**, and the relationship line — all four, or the dictionary records a
+  text box holding a uuid;
+- **for a closed vocabulary** (status, state, stage, type, priority, tier …): the
+  `%%enum` and the `%%field … enum:` binding;
+- **its help**: what the value means in this business, where it comes from, and
+  what depends on it — the sentence a new employee needs;
+- **its place on the form**: the `%%section` and the row, beside the column it
+  is filled in with.
+
+And for every entity: its `%%entity … help:`, its `%%entity … icon:` — a lucide
+icon that depicts the thing itself, chosen so no two entities in a category look
+alike (§3.7) — its `%%category` (with `name:`),
+whether it is a line item (`parent:`), the column that will name it in every
+lookup (§3.7, display value), and its **form layout** — headed sections, two
+fields per row, every column but the key placed exactly once (§3.7, *Form
+layout*). An entity whose layout you have not decided is an entity whose dossier
+is not finished.
+
+#### 1.1.7 Behaviour — Gate D
+
+Last, the cross-cutting pass, over the agreed dossiers: the state machine for
+every lifecycle column (§5.2) with the rule and saga that make each of its
+moves, the rules and their actions (§4), the hooks and
+sagas for every cross-entity effect (§5.1, §5.3) — for a write to another
+entity, which of its rows the step aims at (`targetSource` or `targetField`,
+else `EML265`) — one `%%rbac … .read` line per entity and the restrictions on
+writes, and which role presses each move of each flow (§5.2, §6), and the `%%report` questions per role — at least 50 charted, per §7.2. Present
+it as one table per kind; in *walk me through it*, this is the last gate before
+the file is finished.
+
+What none of this may do is stop the work. A question raised instead of a file
+leaves the user with nothing to correct; a question raised beside a file they
+can already run costs them one sentence to answer.
+
+### 1.4 Deliver
+
+**Run the loop one last time, over the exact bytes you are about to hand over.**
+Editing stops; validation starts again from zero. The file that leaves your hands
+is the one that came out of a clean run — not an earlier draft, not "clean three
+edits ago".
+
+Hand back the **whole** `<business-name>.mmd` as **a file the user can
+download**, not something they must reconstruct out of a chat log.
+
+- If you can write to a filesystem, write it there under that exact name and
+  attach it.
+- If your surface has a file, download or artifact mechanism, use it, with the
+  `.mmd` extension intact — not `.txt`, not `.md`, not `.diff`.
+- **Only if the surface truly cannot carry a file**: print the document inside a
+  single triple-backtick `mermaid` fence, the file name on the line above it, the
+  file's bytes and nothing else between the fences, and nothing left out. No
+  elisions, no "unchanged from above", no "the rest of your model as before".
+- **If your surface only ever produces a document** — a research report, a
+  canvas, one long answer — that document *opens* with the model: the file name,
+  then the single fenced block, then one line telling the reader to save it as
+  `<business-name>.mmd`. Your prose goes after it.
+- **Do not offer the by-products** — an outline, a draft, a diff, a change log as
+  a file. One attachment.
+
+Alongside the file — in the reply, never inside it — give:
+
+| | New | Enhance |
+|---|---|---|
+| **What you understood** | The premises and the roster, so the user can correct what you guessed | What changed: added, changed, removed, and what you inferred rather than were told |
+| **What the research and the review found** | The findings that shaped the model, the adversarial objections you accepted and the ones you rejected (§1.1.2.1) | The same, plus the gaps you found in the original and what you did about each |
+| **What was preserved** | — | The inventory table, before and after, side by side (§1.3.3) |
+| **The checker result** | Errors, warnings and infos, with counts | The same, for the model as received *and* as delivered |
+| **The dictionary and reporting** | Zero of the nine dictionary codes and neither of `EML298`, `EML299`, and the audit's last line | The same, plus every dictionary gap of the original you filled — sections included |
+| **What is open** | Assumptions and unresolved forks | Assumptions, forks, and any pre-existing diagnostic you left alone |
+| **What to do next** | Upload the file at `https://www.appwithai.org/guide/run-in-browser.html#upload`, where it becomes a running application in the browser tab, or open it in `https://www.appwithai.org/viewers/` to see every rule, workflow and form. The downloadable archive tests itself on demand: `docker compose run --rm e2e` runs a suite derived from the model against the application and its reporting platform together | Same |
+
+**Completion status** — say which, in one line at the end:
+
+- **DONE** — checker clean, audit `23 passed, 0 failed`, every gate approved (or,
+  in *just build it*, every decision listed).
+- **DONE WITH CONCERNS** — delivered, with the open questions listed.
+- **NEEDS CONTEXT** — the user left a fork unanswered that changes the model;
+  delivered on the recommended reading, and the fork named.
+
+One last check before you send. Open the file you are about to attach and read
+its first non-blank line. If it does not begin with `%%`, you are attaching the
+wrong artifact. If you were given a model, count its entities: a count lower than
+the one you wrote down in §1.1.2 is a regression.

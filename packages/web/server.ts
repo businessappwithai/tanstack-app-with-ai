@@ -143,6 +143,8 @@ const server = Bun.serve({
         durationMs: null,
         requestId: request.headers.get("x-request-id"),
         err: error,
+        errorCategory: "internal",
+        errorCode: "INTERNAL_ERROR",
       });
       return new Response("Internal Server Error", { status: 500 });
     }

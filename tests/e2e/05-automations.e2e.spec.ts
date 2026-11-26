@@ -24,7 +24,7 @@ import {
   newStep,
   parseAutomation,
   serializeAutomation,
-} from "../../packages/web/src/lib/automation/model";
+} from "../../packages/editors/src/lib/automation/model";
 import {
   adminContext,
   BEHAVIOUR_EML,

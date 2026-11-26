@@ -9,7 +9,6 @@
  * you have to translate before you can use.
  */
 
-import { useState } from "react";
 import {
   OPERATORS,
   STEP_GLYPHS,
@@ -19,8 +18,9 @@ import {
   TRIGGER_EVENTS,
   TRIGGER_HINTS,
   TRIGGER_LABELS,
-} from "@/lib/automation/model";
-import { cn } from "@/lib/utils";
+} from "@appwithai/editors/lib/automation/model";
+import { cn } from "@appwithai/editors/lib/utils";
+import { useState } from "react";
 
 export interface HelpExample {
   /** An entity in this app, used through the examples. */

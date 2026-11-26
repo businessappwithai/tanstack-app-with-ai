@@ -145,8 +145,14 @@ export interface CompiledSaga {
   /** Entity as the model spells it. */
   entity: string;
   trigger: "automatic" | "rule";
-  /** Which write runs it. Only consulted when `trigger` is `automatic`. */
-  operation: "CREATE" | "UPDATE" | "DELETE" | "ALL";
+  /**
+   * Which write runs it. Only consulted when `trigger` is `automatic`.
+   *
+   * `ENTER:<STATE>` binds it to the move into a state: the generated workflow
+   * runner selects it, upper-cased, when a button moves a record into that state
+   * (see `TransitionService.move`), and a plain save never does.
+   */
+  operation: "CREATE" | "UPDATE" | "DELETE" | "ALL" | `ENTER:${string}`;
   steps: CompiledStep[];
 }
 
@@ -297,7 +303,7 @@ export function parseEdges(diagram: string): FlowGraph {
     let match: RegExpExecArray | null;
     // Not matchAll: the body rewinds lastIndex so a chained `A --> B --> C`
     // yields both edges, and matchAll owns the cursor.
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard exec-loop idiom
+    // standard exec-loop idiom
     while ((match = EDGE.exec(trimmed)) !== null) {
       const from = match[1]!;
       const to = match[2]!;
@@ -393,6 +399,8 @@ export interface SagaSection {
   kind: string;
   trigger?: "automatic" | "rule";
   operation?: "CREATE" | "UPDATE" | "DELETE" | "ALL";
+  /** The state whose entering move starts it (`status:`). */
+  status?: string;
   diagram: string;
 }
 
@@ -570,12 +578,28 @@ export function compileSagas(
       name: section.name,
       entity: section.entity,
       trigger: section.trigger === "rule" ? "rule" : "automatic",
-      operation: section.operation ?? "CREATE",
+      operation: sagaOperation(section, onWarn),
       steps: orderSteps(section.diagram ?? "", declared),
     });
   }
 
   return compiled;
+}
+
+/**
+ * The operation a saga is stored under. A `status:` binds it to the move into
+ * that state (`ENTER:<STATE>`); a rule-triggered saga is resolved by name, so a
+ * status on one decides nothing and is dropped with a warning.
+ */
+function sagaOperation(section: SagaSection, onWarn: (message: string) => void): CompiledSaga["operation"] {
+  if (section.status) {
+    if (section.trigger === "rule") {
+      onWarn(`Workflow "${section.name}": status is ignored on a rule-triggered saga.`);
+    } else {
+      return `ENTER:${section.status.trim().toUpperCase().replace(/[\s-]+/g, "_")}`;
+    }
+  }
+  return section.operation ?? "CREATE";
 }
 
 function escapeXmlAttr(value: string): string {
@@ -705,6 +729,10 @@ ${edges.join("\n")}
 export function describeSaga(saga: CompiledSaga): string {
   const chain = saga.steps.map((step) => `${step.type}`).join(" → ");
   const gate =
-    saga.trigger === "rule" ? "runs when a rule triggers it" : `runs on every ${saga.operation}`;
+    saga.trigger === "rule"
+      ? "runs when a rule triggers it"
+      : saga.operation.startsWith("ENTER:")
+        ? `runs when a button moves the record to ${saga.operation.slice(6).toLowerCase().replace(/_/g, " ")}`
+        : `runs on every ${saga.operation}`;
   return `${saga.name}: ${saga.steps.length} steps · ${gate} · ${chain}`;
 }

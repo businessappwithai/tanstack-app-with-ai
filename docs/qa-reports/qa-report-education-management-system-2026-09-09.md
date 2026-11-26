@@ -445,7 +445,7 @@ the reader lands on nothing. `absolute_redirect off` keeps them relative.
 **How the rebuilt bundle was produced.** `html/assets/appwithai-wasm.js` is a
 `Bun.build` output, and this repository's `--check` refuses a rebuild on a
 different runtime because the bytes would be wrong for CI. It was therefore
-rebuilt in `oven/bun:1.4.0` — the version `.github/workflows/ci.yml` pins — on
+rebuilt in the `oven/bun` image of the version `.github/workflows/ci.yml` pins — on
 `linux-x64`, and all five `--check` comparisons pass afterwards.
 
 ## Regression Tests

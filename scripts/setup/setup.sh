@@ -56,13 +56,13 @@ else
     exit 1
 fi
 
-# Check Bun version (should be >= 1.1.0)
-REQUIRED_BUN_VERSION="1.1.0"
-if [ "$(printf '%s\n' "$REQUIRED_BUN_VERSION" "$BUN_VERSION" | sort -V | head -n1)" = "$REQUIRED_BUN_VERSION" ]; then
-    print_success "Bun version meets requirements (>= $REQUIRED_BUN_VERSION)"
+# Check Bun version (exactly 1.4.4, and no other)
+REQUIRED_BUN_VERSION="1.4.4"
+if [ "$BUN_VERSION" = "$REQUIRED_BUN_VERSION" ]; then
+    print_success "Bun version is $REQUIRED_BUN_VERSION"
 else
-    print_warning "Bun version $BUN_VERSION is older than recommended $REQUIRED_BUN_VERSION"
-    print_info "Consider upgrading: bun upgrade"
+    print_warning "Bun $BUN_VERSION is not $REQUIRED_BUN_VERSION, the only version this project uses"
+    print_info "Install it: curl -fsSL https://bun.sh/install | bash -s bun-v$REQUIRED_BUN_VERSION"
 fi
 
 # Check for Node.js (optional, but good to have)

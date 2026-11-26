@@ -18,8 +18,14 @@ import type { StackOption } from "../generators/stack-option";
 import { type CompiledHook, compileHooks } from "../hooks";
 import { type EntityCategory, resolveCategories } from "../parsers/category.parser";
 import { MermaidParser } from "../parsers/mermaid.parser";
+import { attachFormSections } from "../parsers/section.parser";
 import { type CompiledRbac, compileRbac } from "../rbac";
-import { type CompiledReport, compileReports } from "../reports";
+import {
+  type CompiledDashboard,
+  type CompiledReport,
+  compileDashboards,
+  compileReports,
+} from "../reports";
 import { type CompiledRule, compileRules } from "../rules";
 import {
   type CompiledSaga,
@@ -48,6 +54,8 @@ export interface ParsedModel {
   rbac: CompiledRbac;
   /** Questions declared by `%%report`, answered against the generated database. */
   reports: CompiledReport[];
+  /** Dashboards declared by `%%dashboard`, each a role's own reports grouped. */
+  dashboards: CompiledDashboard[];
 }
 
 export interface GenerationSettings {
@@ -141,6 +149,9 @@ export function parseModel(sources: string | string[]): ParsedModel {
   }
 
   const joined = list.join("\n");
+  // `%%section` lines are `%%` comments the ERD parser drops, so they are read
+  // from the raw text, like categories, and carried on each entity.
+  attachFormSections(joined, entities);
   const categories = resolveCategories(
     joined,
     entities.map((entity) => entity.name)
@@ -197,6 +208,13 @@ export function parseModel(sources: string | string[]): ParsedModel {
     warn
   );
 
+  // `%%dashboard` groups a role's reports; it can only name what was compiled above.
+  const dashboards = compileDashboards(
+    joined,
+    reports.map((report) => report.name),
+    warn
+  );
+
   return {
     entities,
     relationships,
@@ -208,5 +226,6 @@ export function parseModel(sources: string | string[]): ParsedModel {
     sagas,
     rbac,
     reports,
+    dashboards,
   };
 }

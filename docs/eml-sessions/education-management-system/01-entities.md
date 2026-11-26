@@ -1,6 +1,7 @@
 # Education Management System — Phase 2 entity roster
 
-Derived from the approved `00-research.md` under §10.2. Nineteen entities: the
+Derived from the approved `00-research.md` under §10.2. **Nineteen entities at Gate B; revision
+1.1.0 added five, and a later revision a twenty-fifth, `ConcernFeedback`** (the second table below, and `00-research.md` §10). The nineteen: the
 artefacts and actors from the research, the reference entities the described
 flow silently depends on (a room, a term, a department), and the one join
 entity a many-to-many needs (`StudentGuardian`, which is a real object because
@@ -38,6 +39,43 @@ in writing for every entity:
 | 17 | `FeeInvoiceLine` | One charge on an invoice — tuition, transport, examination entry, materials. | §1, §3 | **child** — `parent: FeeInvoice` | — | as `FeeInvoice` |
 | 18 | `Payment` | Money received against an invoice. Recorded once, never edited; a correction is a second, offsetting record. | §3 | standalone | Finance | finance_officer · principal · guardian |
 | 19 | `DisciplineIncident` | A recorded conduct event, its investigation and its outcome. Created when a member of staff reports it. | §3, §7 safeguarding | standalone | Conduct | counsellor · principal *(deliberately **not** every teacher)* |
+
+## Revision 1.1.0 — five entities added
+
+Not part of the Phase 2 roster above, and not walked through its gates. They were added to the
+model later; each is **standalone** (none declares `parent:`), and each answers §3.3.1's Q1 *yes*:
+there is a list someone opens away from any one student or payment.
+
+| # | Name | Role — and when a record comes into existence | Placement | Category | Read roles |
+|---|---|---|---|---|---|
+| 20 | `ConsentRecord` | One guardian's time-bounded decision about a student's participation, information use or emergency treatment. Created when a consent is recorded; `withdrawn` keeps the earlier authority and when it ended. | standalone | Student Support | principal · registrar · counsellor · guardian |
+| 21 | `SupportPlan` | The controlled summary of a student's learning, accessibility, medical or behaviour support, its owner and its review date. Created in `draft`, activated, reviewed, closed. | standalone | Student Support | principal · registrar · head_of_department · teacher · counsellor |
+| 22 | `SafeguardingConcern` | A confidential welfare or child-protection concern in factual language, triaged to an accountable owner. Separate from discipline because the student may be at risk rather than at fault. | standalone | Student Support | principal · counsellor *(a teacher may **create** one and cannot read it)* |
+| 23 | `CommunicationLog` | An auditable record of an operational message to a guardian about a student, including delivery failure — subject and outcome, not content. | standalone | Student Support | all eight roles |
+| 25 | `ConcernFeedback` | What a staff member who reported a safeguarding concern is told about it afterwards: case reference, a neutral outcome and a short message, never the student. Written by the concern's hooks. | standalone | Student Support | principal · head_of_department · teacher · counsellor |
+| 24 | `Refund` | A controlled reversal of money received, requested and approved by different staff where possible. Never edits or deletes the original `Payment`. | standalone | Finance | principal · finance_officer · guardian |
+
+Relationships these add (11, taking the model from 31 to 42):
+
+```
+Student   ||--o{ ConsentRecord        has consent
+Guardian  ||--o{ ConsentRecord        grants consent
+Student   ||--o{ SupportPlan          supported by
+Staff     ||--o{ SupportPlan          owns                  (support_plan.owner_id)
+Student   ||--o{ SafeguardingConcern  protected by
+Staff     ||--o{ SafeguardingConcern  reports and owns      (reported_by_id, owner_id)
+Student   ||--o{ CommunicationLog     concerns
+Guardian  ||--o{ CommunicationLog     receives
+Staff     ||--o{ CommunicationLog     sends                 (sent_by_id)
+Payment   ||--o{ Refund               reversed by
+Staff     ||--o{ Refund               requests and approves (requested_by_id, approved_by_id)
+```
+
+`owner_id` is not a name the generator resolves on its own (there is no `Owner` entity); it is a
+reference because the drawn `Staff ||--o{ …` edge covers it, which is the case the checker's
+`EML502` allows. The `_by_id` columns resolve to `Staff`, the model's person entity, as before.
+
+---
 
 ## The four placement decisions, answered
 
@@ -116,7 +154,8 @@ every role must end up with a `read` line and its own reports (§10.5.1).
 
 ---
 
-> **Gate B — roster approved.** Nineteen entities, four of them children, eight
+> **Gate B — roster approved** (the original nineteen; revision 1.1.0 later made it twenty-four and a further change twenty-five,
+> still four children and eight roles). Nineteen entities, four of them children, eight
 > roles. Self-approved by the running agent (no interactive user at the gate);
 > the question that would have been put — *what does this school have that is
 > not on here?* — is answered in the research's §8 out-of-scope list, and the

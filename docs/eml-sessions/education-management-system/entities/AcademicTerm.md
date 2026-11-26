@@ -16,6 +16,8 @@
 | `ends_on` | date | — | Last teaching day. Results for the term are expected within ten working days of it. |
 | `census_on` | date | — | The date enrolment is counted for billing. A student enrolled on this date is invoiced for the whole term whether or not they attend, so it is the date the finance office plans around. |
 | `status` | string | — | planned — timetabling in progress, nothing billed; current — teaching, registers open; closed — results published and invoices final, no further writes expected. |
+| `current_at` | datetime | OPTIONAL | When the move to current was recorded on this academic term. Recording it moves an academic term from planned to current: the workflows set the status, which nobody changes by hand. |
+| `closed_at` | datetime | OPTIONAL | When the move to closed was recorded on this academic term. Recording it moves an academic term from current to closed: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -40,7 +42,10 @@ closed --> [*]
 
 ## Rules
 
-None on this entity.
+### `academicTermStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `movePlannedToCurrent trigger-workflow when: status == "planned" and current_at != null workflow: AcademicTermCurrentMove`
+- `moveCurrentToClosed trigger-workflow when: status == "current" and closed_at != null workflow: AcademicTermClosedMove`
 
 ## Hooks
 
@@ -49,6 +54,14 @@ None.
 ## Cross-entity effects
 
 Closing a term is expected to close its sections and finalise its invoices. Neither is automated: both are decisions with money attached, and the closing checklist is the finance officer's `finance-drafts-past-census` report rather than a saga nobody watched run.
+
+Sagas that touch it:
+
+- **AcademicTermCurrentMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: current`
+  - `C UpdateEntity field: closed_at value: null`
+- **AcademicTermClosedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: closed`
 
 ## Access
 

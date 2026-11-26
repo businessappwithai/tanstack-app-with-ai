@@ -4,15 +4,19 @@ import React, {
   startTransition,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
-import { setUnauthorizedCallback } from "@/lib/api-client";
+import { isEmbedded, setUnauthorizedCallback } from "@/lib/api-client";
 import {
   signIn as authSignIn,
   signOut as authSignOut,
   signUp as authSignUp,
   getSession,
 } from "@/lib/auth";
+import { getClientLogger } from "@/lib/logger";
+
+const log = getClientLogger("auth");
 
 interface User {
   id: string;
@@ -41,10 +45,15 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
 
   const refreshSession = async () => {
     try {
-      const { data } = await getSession();
+      const { data, error } = await getSession();
+      // A read that failed (rate limited, backend restarting) says nothing about whether the
+      // person is signed in. Only an answer of "no session" may end the one they have.
+      if (error && data == null && userRef.current) return;
       // Typed as User rather than unknown: `unknown ?? null` widens to
       // `{} | null`, which does not assign to `User | null`.
       const next = (data as { user?: User } | null)?.user ?? null;
@@ -52,7 +61,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // load this resolves while the page is still hydrating.
       startTransition(() => setUser(next));
     } catch (error) {
-      console.error("Failed to refresh session:", error);
+      log.error("Failed to refresh session", error);
     }
   };
 
@@ -71,6 +80,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Register 401 unauthorized callback for API client
     setUnauthorizedCallback(async () => {
       setUser(null);
+      // Inside the chat assistant's frame the sign-in belongs to the assistant:
+      // tell it, and do not draw a sign-in page inside the frame or end the
+      // session the assistant itself is using.
+      if (isEmbedded()) {
+        window.parent.postMessage({ type: "app:signed-out" }, window.location.origin);
+        return;
+      }
       await authSignOut();
       window.location.href = "/auth/login";
     });

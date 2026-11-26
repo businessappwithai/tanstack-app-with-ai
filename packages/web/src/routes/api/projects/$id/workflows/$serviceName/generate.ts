@@ -1,9 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { requireProjectAccess } from "@/lib/project-access";
-
-const GENERATED_HOOKS_BASE_PATH = join(process.cwd(), "generated-projects");
 
 function generateHookCode(
   hook: { type: string; name: string; entity: string; code: string },
@@ -105,25 +101,21 @@ export const Route = createFileRoute("/api/projects/$id/workflows/$serviceName/g
           }
 
           const entityName = serviceName.replace("Service", "");
-          const hooksDir = join(
-            GENERATED_HOOKS_BASE_PATH,
-            projectId,
-            "src",
-            "modules",
-            entityName.toLowerCase(),
-            "hooks"
-          );
-
-          await mkdir(hooksDir, { recursive: true });
-
+          if (
+            !/^[a-zA-Z0-9_-]+$/.test(entityName) ||
+            hooks.some(
+              (hook: { type: string; name: string }) =>
+                !/^[a-zA-Z0-9_-]+$/.test(hook.type) || !/^[a-zA-Z0-9_-]+$/.test(hook.name)
+            )
+          )
+            return Response.json({ error: "Invalid hook name" }, { status: 400 });
+          const sources: Record<string, string> = {};
           const generatedFiles = await Promise.all(
             hooks.map(
               async (hook: { type: string; name: string; entity: string; code: string }) => {
                 const code = generateHookCode(hook, entityName);
                 const fileName = `${hook.type}.${hook.name}.ts`;
-                const filePath = join(hooksDir, fileName);
-
-                await writeFile(filePath, code, "utf-8");
+                sources[`src/modules/${entityName.toLowerCase()}/hooks/${fileName}`] = code;
 
                 return {
                   fileName,
@@ -150,8 +142,9 @@ export const Route = createFileRoute("/api/projects/$id/workflows/$serviceName/g
             indexCode += `export { ${hook.name}${entityName} as ${hook.name} } from './${hook.type}.${hook.name}';\n`;
           });
 
-          const indexFilePath = join(hooksDir, "index.ts");
-          await writeFile(indexFilePath, indexCode, "utf-8");
+          sources[`src/modules/${entityName.toLowerCase()}/hooks/index.ts`] = indexCode;
+          const { saveProjectFiles } = await import("@/lib/server/project-repository");
+          await saveProjectFiles(projectId, access.user.id, sources, body.requestId);
 
           return new Response(
             JSON.stringify({

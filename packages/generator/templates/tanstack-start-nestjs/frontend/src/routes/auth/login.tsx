@@ -15,13 +15,13 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Loader2, LogIn, AlertCircle, Mail, Lock, Shield } from 'lucide-react';
-import { toast } from 'sonner';
 import {
   ACCESS_IS_SCOPED,
   APP_NAME,
   SEEDED_ACCOUNTS,
   SEEDED_PASSWORD,
   TOTAL_ENTITIES,
+  LINE_ITEM_ENTITIES,
 } from "@/lib/app-meta";
 
 /**
@@ -73,9 +73,6 @@ function LoginPage() {
       if (signInError || !data) {
         const msg = signInError || 'Invalid email or password';
         setError(msg);
-        toast.error('Sign in failed', {
-          description: msg,
-        });
         setIsPending(false);
         return;
       }
@@ -89,9 +86,6 @@ function LoginPage() {
     } catch (err: any) {
       const errorMessage = err?.message || 'An unexpected error occurred';
       setError(errorMessage);
-      toast.error('Sign in failed', {
-        description: errorMessage,
-      });
       setIsPending(false);
     }
   };
@@ -120,7 +114,13 @@ function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Error Message */}
             {error && (
-              <div className="flex items-start gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/20">
+              /* The one place a failed sign-in is reported. A toast beside it said the
+                 same thing twice and vanished; this stays beside the fields it is about,
+                 and `role="alert"` is what makes a screen reader announce it. */
+              <div
+                role="alert"
+                className="flex items-start gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/20"
+              >
                 <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <p className="text-sm text-destructive font-medium">Sign in failed</p>
@@ -245,6 +245,8 @@ function LoginPage() {
                 {ACCESS_IS_SCOPED
                   ? " Each role sees only its own entities — pick one to try it."
                   : " Pick one to fill the form."}
+                {LINE_ITEM_ENTITIES.length > 0 &&
+                  ` Counts include ${LINE_ITEM_ENTITIES.length === 1 ? 'a line item' : 'line items'}, which open from the parent record rather than the sidebar.`}
               </p>
 
               <ul className="space-y-1.5">
@@ -260,7 +262,7 @@ function LoginPage() {
                     >
                       <span className="block text-sm font-semibold text-foreground">{account.role}</span>
                       <span className="block font-mono text-xs text-muted-foreground break-all">{account.email}</span>
-                      <span className="block text-xs text-muted-foreground/80">
+                      <span className="block text-xs text-muted-foreground">
                         {account.isAdmin
                           ? `all ${TOTAL_ENTITIES} entities`
                           : `${account.entities} of ${TOTAL_ENTITIES} entities`}

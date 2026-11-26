@@ -23,7 +23,12 @@
 #   docker build --build-arg HTTPS_PROXY="$HTTPS_PROXY" .
 #
 # ─── build ──────────────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0-alpine AS build
+# Node, not Bun, runs the front-end bundler: Bun ignores --max-old-space-size and
+# the build outgrows a default Docker VM. Bun is copied in for installs and the
+# backend build; the runtime stage is still the Bun image.
+FROM oven/bun:1.4.4-alpine AS bun
+FROM node:22-alpine AS build
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""
@@ -70,7 +75,8 @@ ENV VITE_API_URL=${VITE_API_URL} \
     VITE_APP_URL=${VITE_APP_URL}
 
 RUN cd backend && bun run build
-RUN cd frontend && bun run build
+ARG BUILD_HEAP_MB=8192
+RUN cd frontend && NODE_OPTIONS=--max-old-space-size=${BUILD_HEAP_MB} node ./node_modules/.bin/vinxi build
 
 # Drop the dev tree now that it has done its job. Pruning here rather than
 # re-installing in the runtime stage is what makes this work at all: the root
@@ -80,7 +86,7 @@ RUN if [ -f bun.lock ]; then bun install --frozen-lockfile --production; \
     else bun install --production; fi
 
 # ─── runtime ────────────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0-alpine
+FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 

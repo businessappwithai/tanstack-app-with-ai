@@ -9,38 +9,38 @@
   "scripts": {
     "dev": "bun scripts/ensure-packages-built.ts && bun --filter @appwithai/web dev",
     "dev:mastra": "bun --filter @appwithai/ai dev",
-    "build": "bun run lint && bun run build:core && bun run build:generator && bun run build:ai && bun run build:web",
+    "build": "bun run type-check && bun run build:core && bun run build:generator && bun run build:ai && bun run build:web",
     "build:core": "bun --filter @appwithai/core build",
     "build:generator": "bun --filter @appwithai/generator build",
     "build:ai": "bun --filter @appwithai/ai build",
     "build:web": "bun --filter @appwithai/web build",
     "start": "bun --filter @appwithai/web start",
     "start:mastra": "bun --filter @appwithai/ai start",
-    "lint": "biome lint .",
-    "lint:fix": "biome check --write .",
-    "type-check": "tsc --noEmit",
-    "type-check:language": "tsc -p tsconfig.language.json",
+    "type-check": "bun scripts/require-bun.ts && bun check",
+    "lint": "bun scripts/require-bun.ts && bun check",
+    "type-check:language": "bun scripts/require-bun.ts && bun check -p tsconfig.language.json",
     "clean": "rm -rf node_modules packages/*/node_modules packages/*/dist",
     "convert": "bun --filter @appwithai/ai convert",
     "generate:tanstack": "INIT_CWD=$PWD bun --filter @appwithai/generator generate -- --stack tanstackjs-nestjs",
     "test": "bun --filter @appwithai/web test",
     "test:watch": "bun --filter @appwithai/web test:watch",
-    "test:e2e:server": "playwright test",
-    "test:playwright": "playwright test",
-    "test:playwright:ui": "playwright test --ui",
-    "test:playwright:debug": "playwright test --debug",
-    "format": "biome format --write .",
-    "format:check": "biome format .",
+    "test:e2e:server": "bun --bun playwright test",
+    "test:e2e:rules-workflows": "bun scripts/e2e-rules-workflows/run.ts",
+    "test:playwright": "bun --bun playwright test",
+    "test:playwright:ui": "bun --bun playwright test --ui",
+    "test:playwright:debug": "bun --bun playwright test --debug",
     "seed:admin": "bun scripts/seed-admin-account.ts",
     "generate:wasm": "bun packages/generator/src/cli-wasm/generate.ts generate",
     "wasm": "bun packages/generator/src/cli-wasm/generate.ts",
     "build:wasm-runtime": "bun scripts/build-wasm-runtime.ts",
     "build:wasm-browser": "bun scripts/build-wasm-browser.ts",
     "vendor:pglite": "bun scripts/vendor-pglite.ts",
+    "vendor:webcontainer": "bun scripts/vendor-webcontainer.ts",
     "test:wasm": "playwright test --config tests/e2e/wasm/playwright.config.ts",
     "test:wasm:cli": "playwright test --config tests/e2e/wasm/playwright.config.ts --grep @cli",
     "test:wasm:browser": "playwright test --config tests/e2e/wasm/playwright.config.ts --grep @browser",
-    "build:stack-templates": "bun scripts/build-stack-templates.ts",
+    "vendor:editors": "bun scripts/vendor-editors.ts",
+    "build:stack-templates": "bun scripts/vendor-editors.ts && bun scripts/build-stack-templates.ts",
     "build:fullstack-browser": "bun scripts/build-fullstack-browser.ts",
     "build:language-tools": "bun scripts/build-language-tools.ts",
     "build:viewers": "bun scripts/build-viewers.ts",
@@ -48,18 +48,19 @@
     "test:llmtext": "bun scripts/ci/llmtext-claims.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.6",
     "@electric-sql/pglite": "^0.5.5",
     "@gorules/zen-engine-darwin-arm64": "0.54.0",
+    "@libredb/studio": "^1.3.0",
     "@nestjs/common": "^10",
     "@nestjs/config": "^3",
     "@playwright/test": "^1.62.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/bun": "^1.0.0",
+    "@types/bun": "^1.4.3",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.16.0",
+    "@webcontainer/api": "1.6.4",
     "kysely": "^0.29.4",
     "pg": "^8.17.1",
     "playwright": "^1.62.0",
@@ -68,7 +69,7 @@
     "typescript": "^7.0.2"
   },
   "engines": {
-    "bun": ">=1.4.0"
+    "bun": ">=1.4.4"
   },
   "preferredRuntime": "bun",
   "dependencies": {
@@ -91,5 +92,9 @@
     "critters": "^0.0.25",
     "openai": "^7.1.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "overrides": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  }
 }

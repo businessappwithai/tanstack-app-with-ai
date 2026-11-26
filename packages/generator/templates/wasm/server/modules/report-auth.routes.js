@@ -19,6 +19,7 @@ import {
   destroyReportSession,
   reportSessionCookie,
 } from "../lib/report-auth.js";
+import { logReportActivity } from "../lib/report-log.js";
 
 /** What a caller may know about itself. Never the token or the hash. */
 function present(reportUser) {
@@ -64,10 +65,18 @@ export function reportAuthRoutes(model) {
        * Two messages would say which addresses exist — and on this side of the
        * pair that is a longer list than a reader might expect, because every
        * `%%rbac` role has an account. The application's own sign-in makes the
-       * same choice.
+       * same choice. The log records the address that was tried, which is
+       * only ever shown to a reporting administrator.
        */
+      await logReportActivity(db, { email: identifier, action: "sign-in", outcome: "refused" });
       throw unauthorized("Invalid email or password");
     }
+    await logReportActivity(db, {
+      user: { id: user.rpt_user_id, email: user.email },
+      action: "sign-in",
+      outcome: "ok",
+      detail: user.role_name ? `as ${user.role_name}` : "holding no reporting role",
+    });
 
     const token = await createReportSession(db, user.rpt_user_id, request.headers.get("user-agent"));
     return json(

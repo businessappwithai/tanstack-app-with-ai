@@ -37,7 +37,7 @@ loadEnvFiles();
 
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { AppModule } from './app.module';
@@ -62,21 +62,21 @@ import { AuditService } from './modules/audit/audit.service';
  * is rejected at sign-in with "Invalid email or password", which reads as a
  * wrong password rather than a password the server never allowed.
  */
-function resolveAdminPassword(logger: Logger): { password: string; generated: boolean } {
+function resolveAdminPassword(): { password: string; generated: boolean } {
   const configured = process.env.ADMIN_PASSWORD;
   if (configured && configured.length >= 8) return { password: configured, generated: false };
 
   if (configured) {
-    logger.warn('ADMIN_PASSWORD is shorter than 8 characters and was ignored.');
+    getLogger('app').event('app.admin.password_ignored', { reason: 'shorter than 8 characters' });
   }
 
   return { password: randomBytes(18).toString('base64url'), generated: true };
 }
 
-async function ensureAdminUser(logger: Logger) {
+async function ensureAdminUser() {
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@admin.com';
   const { password: adminPassword, generated: adminPasswordGenerated } =
-    resolveAdminPassword(logger);
+    resolveAdminPassword();
 
   const pool = process.env.DATABASE_URL
     ? new Pool({ connectionString: process.env.DATABASE_URL })
@@ -112,12 +112,16 @@ async function ensureAdminUser(logger: Logger) {
        * once and only when this process invented it. A password the operator
        * supplied is never echoed: they already have it.
        */
-      logger.log(`Admin user created: ${adminEmail}`);
+      getLogger('app').event('app.admin.bootstrap', { email: adminEmail, step: 'created' });
       if (adminPasswordGenerated) {
-        logger.warn(
-          `No ADMIN_PASSWORD was set. Generated one for ${adminEmail}: ${adminPassword}\n` +
+        getLogger('app').event('app.admin.password_generated', { email: adminEmail });
+        // The one place a credential is printed, on purpose: the person who ran the
+        // application has no other way to learn it. It goes to stderr and not through
+        // the structured log, so it is never an event a collector indexes.
+        process.stderr.write(
+          `\nGenerated administrator password for ${adminEmail}: ${adminPassword}\n` +
             'This is shown once and is not recoverable. Sign in and change it, or set ' +
-            'ADMIN_PASSWORD before first boot.',
+            'ADMIN_PASSWORD before first boot.\n\n',
         );
       }
     }
@@ -145,7 +149,7 @@ async function ensureAdminUser(logger: Logger) {
         updated_by: 'system',
       }).execute();
       sysUser = { sys_user_id: newSysUserId };
-      logger.log(`sys_user created for ${adminEmail}`);
+      getLogger('app').event('app.admin.bootstrap', { email: adminEmail, step: 'sys_user created' });
     }
 
     // 3. Link sysUserId on the Better Auth user if not already set
@@ -174,13 +178,13 @@ async function ensureAdminUser(logger: Logger) {
           created_by: 'system',
           updated_by: 'system',
         }).execute();
-        logger.log(`Administrator role assigned to sys_user ${adminEmail}`);
+        getLogger('app').event('app.admin.bootstrap', { email: adminEmail, step: 'role assigned' });
       }
     }
 
-    logger.log(`Admin user ready: ${adminEmail} → sys_user ${sysUser.sys_user_id}`);
+    getLogger('app').event('app.admin.bootstrap', { email: adminEmail, step: 'ready' });
   } catch (err: any) {
-    logger.warn(`Could not ensure admin user: ${err?.message ?? err}`);
+    getLogger('app').event('app.admin.failed', { err });
   } finally {
     await db.destroy();
   }
@@ -277,7 +281,6 @@ function parseTrustProxy(value: string | undefined): boolean | number | string {
 }
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
   const log = getLogger('app');
 
   // Registered before anything can fail. An exception escaping an async
@@ -317,7 +320,11 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      logger: process.env.NODE_ENV === 'development',
+      // Fastify's own logger is off: it wrote an unstructured `incoming request` and
+      // `request completed` pair for every request in development, beside the
+      // `http.request.*` line the response hook already writes, with no event id,
+      // no level an operator controls and none of the spec's redaction.
+      logger: false,
       /*
        * Whether `X-Forwarded-For` may be believed.
        *
@@ -499,7 +506,7 @@ async function bootstrap() {
   });
 
   // Ensure the default admin user exists with the correct role
-  await ensureAdminUser(logger);
+  await ensureAdminUser();
 }
 
 bootstrap().catch((err) => {

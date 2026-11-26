@@ -216,6 +216,35 @@ describe("Zen Engine Integration", () => {
     });
   });
 
+  describe("A record the Record node's schema refuses", () => {
+    const graph = {
+      nodes: [
+        {
+          id: "in",
+          type: "inputNode",
+          name: "Record",
+          position: { x: 0, y: 0 },
+          content: {
+            schema: JSON.stringify({
+              type: "object",
+              properties: { status: { type: "string" } },
+            }),
+          },
+        },
+        { id: "out", type: "outputNode", name: "Response", position: { x: 1, y: 0 }, content: {} },
+      ],
+      edges: [{ id: "e", sourceId: "in", targetId: "out", type: "edge" }],
+    };
+
+    it("says which field failed, not that the graph is invalid", async () => {
+      const result = await zenEngine.evaluate(graph as never, { status: null });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain("/status");
+      expect(result.error?.message).not.toContain("invalid JDM structure");
+    });
+  });
+
   describe("Performance tests", () => {
     it("should complete 10 evaluations in under 1 second", async () => {
       const start = Date.now();

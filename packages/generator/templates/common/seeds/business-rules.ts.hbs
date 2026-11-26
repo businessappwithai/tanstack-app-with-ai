@@ -13,9 +13,14 @@ import { v4 as uuidv4 } from 'uuid';
 
 const JDM_DIR = path.join(__dirname, '..', 'src', 'modules', 'rules', 'jdm');
 
+// Each rule is named after the window it guards ("Fee Invoice validation"):
+// the rules list shows people this name, and a table name there is storage
+// showing through. `legacyRuleName` is what earlier generations called it; a
+// re-seed renames that row in place rather than adding a second rule that
+// makes every check twice.
 const RULES = [
   {{#each entities}}
-  { file: '{{tableName}}.jdm.json', entityName: '{{tableName}}', ruleName: '{{tableName}}_validation', operation: 'ALL' },
+  { file: '{{tableName}}.jdm.json', entityName: '{{tableName}}', ruleName: '{{displayName}} validation', legacyRuleName: '{{tableName}}_validation', operation: 'ALL' },
   {{/each}}
 ];
 
@@ -65,13 +70,21 @@ export async function seed(db: Kysely<any>): Promise<void> {
       .select('id')
       .where('entity_name', '=', rule.entityName)
       .where('operation', '=', rule.operation)
-      .where('rule_name', '=', rule.ruleName)
+      .where((eb) =>
+        eb.or([eb('rule_name', '=', rule.ruleName), eb('rule_name', '=', rule.legacyRuleName)])
+      )
       .executeTakeFirst();
 
     if (existing) {
       await db
         .updateTable('sys_rule_definitions')
-        .set({ jdm_content: jdmContent, is_active: true, updated_by: 'seed', updated_at: now })
+        .set({
+          rule_name: rule.ruleName,
+          jdm_content: jdmContent,
+          is_active: true,
+          updated_by: 'seed',
+          updated_at: now,
+        })
         .where('id', '=', (existing as any).id)
         .execute();
       console.log(`  ↻ Updated business rule: ${rule.entityName} (${rule.operation})`);

@@ -12,6 +12,7 @@ import {
 import { apiClient, type PaginatedResponse, type ApiError } from '@/lib/api-client';
 import { toast } from 'sonner';
 import { translate } from '@/lib/translations';
+import { ifMatchHeader } from '@/lib/version-conflict';
 
 // ============================================================================
 // Types
@@ -47,6 +48,8 @@ export interface FieldMetadata {
   is_displayed: boolean;
   is_displayed_grid: boolean;
   is_read_only: boolean;
+  /** Description (the field's, else its column's) — the short line the form shows beneath it. */
+  description?: string | null;
   /**
    * The dictionary's display value (§3.7) — the columns that name a record,
    * and whether this one is the key. `use-bus-entity-level` picks the record
@@ -55,6 +58,12 @@ export interface FieldMetadata {
    */
   is_identifier?: boolean;
   is_key?: boolean;
+  /**
+   * The column the entity's state machine drives. System-managed: the record
+   * header shows it read-only (StateBadge), the list grid always shows it, and
+   * the form never offers it as an input.
+   */
+  is_state_field?: boolean;
   col_span?: number;
   row_span?: number;
   field_group_id?: string;
@@ -78,6 +87,45 @@ export interface FieldMetadata {
   options?: { value: string; label: string }[]; // Static options list for inline enums
   tab_name?: string; // Tab name for i18n field labels
   help?: string; // Contextual help text shown via ? icon
+  /**
+   * Compiere's field logic — `@column@=value` conditions over the record being
+   * edited, joined by `&`/`|` (lib/field-logic.ts). The form re-evaluates them
+   * on every change: display hides the field, read-only locks it, mandatory
+   * requires it. The API enforces the last two on save.
+   */
+  display_logic?: string | null;
+  read_only_logic?: string | null;
+  mandatory_logic?: string | null;
+  /** Set by the form when read-only logic, not the dictionary flag, locks the field. */
+  logic_read_only?: boolean;
+  /*
+   * The rest of the Field window, as the API serves it (bus.service
+   * getEntityMetadata). Reference Type Override and Active arrive already
+   * applied — to sys_reference_id and is_displayed / is_displayed_grid.
+   */
+  /** Display Length — the input's width and the grid column's, in characters. */
+  display_length?: number | null;
+  /** Num Lines — a text field with more than one is drawn as a box that many rows tall. */
+  num_lines?: number | null;
+  /** Same Line — sits beside the field before it; otherwise the field starts a new row. */
+  is_same_line?: boolean;
+  /** Heading — drawn as a heading across the section, with no input. */
+  is_heading?: boolean;
+  /** Field Only — the input with no label. */
+  is_field_only?: boolean;
+  /** Encrypted — masked wherever it is shown, typed into a password input. */
+  is_encrypted?: boolean;
+  /** Obscure Type — 904 / 944 / A04 / A44 (lib/field-values.ts). */
+  obscure_type?: string | null;
+  /** Sort Number — the list's default order: smallest magnitude first, negative = descending. */
+  sort_no?: number | null;
+  /** Included Tab — another tab's rows for this record, drawn at this field's place. */
+  included_tab?: {
+    sys_tab_id: string;
+    name: string;
+    table_name: string;
+    link_column: string;
+  } | null;
 }
 
 export interface TableMetadata {
@@ -243,7 +291,7 @@ export interface WindowHelpData {
 export function useWindowHelp(tableName: string) {
   return useQuery<WindowHelpData | null>({
     queryKey: ['window-help', tableName],
-    queryFn: () => apiClient.get<WindowHelpData>(`/sys/window-help/${tableName}`),
+    queryFn: () => apiClient.get<WindowHelpData>(`/sys/window-help/${encodeURIComponent(tableName)}`),
     staleTime: 30 * 60 * 1000,
     enabled: !!tableName,
   });
@@ -355,7 +403,7 @@ export function useUpdateEntity<T extends EntityRecord = EntityRecord>(
   return useMutation<T, ApiError, MutationVariables, MutationContext>({
     mutationFn: ({ id, data, version }) =>
       apiClient.patch<T>(`/bus/${entity}/${id}`, data, {
-        headers: version ? { 'If-Match': `"v${version}"` } : undefined,
+        headers: ifMatchHeader(version),
       }),
     onMutate: async ({ id, data, version }) => {
       // Cancel outgoing refetches

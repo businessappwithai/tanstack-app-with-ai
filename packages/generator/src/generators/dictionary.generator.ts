@@ -32,6 +32,7 @@ import {
   type SysTable,
   type SysWindow,
 } from "@appwithai/core/types";
+import { formLayoutFor } from "../parsers/section.parser";
 
 export interface DictionaryGeneratorOptions {
   databaseType: "postgresql" | "mysql" | "sqlite";
@@ -69,10 +70,19 @@ export interface DictionaryContext {
       _tempId: string;
       _tabRef: string;
       _columnRef: string;
+      /** The `%%section` group this field sits in, when the entity declares sections. */
+      _groupRef?: string;
     }
   >;
   sysFieldGroups: Array<
-    Omit<SysFieldGroup, "sys_field_group_id" | "created_at" | "updated_at"> & { _tempId: string }
+    Omit<SysFieldGroup, "sys_field_group_id" | "created_at" | "updated_at"> & {
+      _tempId: string;
+      /** The tab a `%%section` group belongs to. Unset on the generic groups. */
+      _tabRef?: string;
+      /** Grid columns: 2 for every `%%section`. */
+      columns?: number;
+      seq_no?: number;
+    }
   >;
   references: typeof ReferenceType;
   relationships: Relationship[];
@@ -142,7 +152,7 @@ export class DictionaryGenerator {
 
       // Generate sys_column entries. Which columns identify a record is the
       // dictionary's own question, answered once for the whole table.
-      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey));
+      const identifiers = new Set(identifierColumnNames(busAttrs, entity.primaryKey, entity.name));
       const columnEntries = busAttrs.map((attr, _index) => {
         const colId = `col_${++columnCounter}`;
         return {
@@ -173,8 +183,10 @@ export class DictionaryGenerator {
           is_allow_copy: attr.name !== entity.primaryKey,
           seq_no: attr.seqNo,
           callout: undefined,
-          read_only_logic: undefined,
-          mandatory_logic: undefined,
+          /* `%%field <E>.<c> readonly: | mandatory:` — Compiere's column
+             logic, inherited by every window over this table. */
+          read_only_logic: attr.readOnlyLogic,
+          mandatory_logic: attr.mandatoryLogic,
           format_pattern: undefined,
           entity_type: this.config.defaultEntityType,
           is_active: true,
@@ -251,12 +263,60 @@ export class DictionaryGenerator {
         description: col.description,
       }));
       const fields = generateSysFields(tabId, columnRefs, this.config);
-      const fieldEntries = fields.map((field, idx) => ({
+      const fieldEntries: DictionaryContext["sysFields"] = fields.map((field, idx) => ({
         ...field,
         _tempId: `field_${++fieldCounter}`,
         _tabRef: tabId,
         _columnRef: columnEntries[idx]?._tempId ?? "",
+        /* Field logic: display belongs to the field alone; read-only and
+           mandatory are the column's, repeated on the field so this window
+           states what it does without a join (see fieldLogic.columnAndField). */
+        display_logic: busAttrs[idx]?.displayLogic,
+        read_only_logic: busAttrs[idx]?.readOnlyLogic,
+        mandatory_logic: busAttrs[idx]?.mandatoryLogic,
       }));
+
+      /*
+       * `%%section` — the model's own form layout. One group per section on
+       * this tab, and each field placed in its row: the order on the form, the
+       * column it sits in, whether it shares the row, and whether it spans it.
+       * The key stays outside every group, as it is outside every form.
+       */
+      const layout = formLayoutFor(entity);
+      if (layout) {
+        const groupIds = new Map<string, string>();
+        for (const group of layout.groups) {
+          const groupId = `fg_${++fieldGroupCounter}`;
+          groupIds.set(group.name, groupId);
+          sysFieldGroups.push({
+            name: group.name,
+            description: group.description,
+            field_group_type: "C",
+            is_collapsed_by_default: group.collapsed,
+            entity_type: this.config.defaultEntityType,
+            is_active: true,
+            created_by: this.config.createdBy,
+            updated_by: this.config.createdBy,
+            _tempId: groupId,
+            _tabRef: tabId,
+            columns: group.columns,
+            seq_no: group.seqNo,
+          });
+        }
+        const keyed = new Map(busAttrs.map((attr, idx) => [attr.columnName, fieldEntries[idx]]));
+        for (const [column, place] of layout.fields) {
+          const field = keyed.get(column);
+          if (!field) continue;
+          field._groupRef = groupIds.get(place.group);
+          field.seq_no = place.seqNo;
+          field.is_same_line = place.sameLine;
+          field.column_span = place.columnSpan;
+        }
+        /* The key is on no form; ordering it first keeps it out of the way of
+           the first section's opening field rather than sharing its seq_no. */
+        const key = keyed.get(entity.primaryKey);
+        if (key) key.seq_no = 0;
+      }
       sysFields.push(...fieldEntries);
     }
 

@@ -5,7 +5,9 @@
  * for, because none of them change what a `GET` returns:
  *
  *   - it *promotes* the row after a write, running the model's rules and
- *     workflows and setting `doc_status` to `final` or leaving it `draft`;
+ *     workflows: accepted, it moves into its flow (`doc_status` `active`) or to
+ *     Final; refused, it goes to Error with the reason. The end of a flow is
+ *     locked until it is reopened; a record with no flow stays editable;
  *   - it bumps `version`, which is what makes a concurrent update detectable;
  *   - it deletes softly, so the row leaves the listing but stays for the audit;
  *   - it records the write, and lets a reader attach notes to the record.
@@ -69,13 +71,17 @@ describe("record lifecycle", () => {
         const promotion = created.promotion;
         if (!promotion) return;
 
-        // A record whose rules all passed is `final`. One that a rule stopped
-        // is legitimately still `draft` — assert the two agree rather than
-        // demanding an outcome the model may not permit.
+        // A record whose rules all passed has moved on — into its flow, or to
+        // Final; a flow whose own first status is a draft keeps it in Draft. One
+        // that a rule stopped is in Error, with the reason on it — assert the two
+        // agree rather than demanding an outcome the model may not permit.
         if (promotion.promoted === true) {
-          expect(created.doc_status).toBe("final");
+          expect(["active", "final", "draft"]).toContain(created.doc_status);
         } else {
-          expect(created.doc_status).toBe("draft");
+          // A refusing rule sends the record to Error; a workflow that failed leaves it
+          // a draft. Either way the reason is on the record.
+          expect(["error", "draft"]).toContain(created.doc_status);
+          expect(String(created.doc_status_message ?? "")).not.toBe("");
         }
       });
 

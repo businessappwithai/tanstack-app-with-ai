@@ -178,16 +178,11 @@ export const Route = createFileRoute("/api/projects/")({
           // accepted and dropped, so a project created with a complete EML
           // document came back with nothing to design against.
           if (typeof erdCode === "string" && erdCode.trim()) {
-            const { erdVersionDb } = await import("@appwithai/core/services");
-            const { parseModel } = await import("@appwithai/generator");
-            const model = parseModel(erdCode);
-            await erdVersionDb.createVersion({
-              project_id: projectId,
-              mermaid_code: erdCode,
-              is_current: true,
+            const { saveProject } = await import("@/lib/server/project-repository");
+            await saveProject(projectId, user.id, {
+              model: erdCode,
+              mode: "version",
               description: "Initial model",
-              entity_count: model.entities.length,
-              relationship_count: model.relationships.length,
             });
           }
 

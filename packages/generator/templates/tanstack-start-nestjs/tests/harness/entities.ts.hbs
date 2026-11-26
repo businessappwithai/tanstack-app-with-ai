@@ -10,6 +10,8 @@
  * Project: {{project.name}}
  */
 
+import { refusals, stateMachines, transforms } from "./model.ts";
+
 export type FieldType =
   | "string"
   | "integer"
@@ -41,6 +43,11 @@ export interface FieldMeta {
    * not offer and no state machine has an edge out of.
    */
   enumValues?: string[];
+  /**
+   * A ceiling the model's own rules put on this column: a `validation-error`
+   * rule refuses any save above it, so a number the factory invents stays under.
+   */
+  maxValue?: number;
 }
 
 export interface EntityMeta {
@@ -62,6 +69,11 @@ export interface EntityMeta {
   parentEntity?: string;
   /** The child's foreign key back to `parentEntity`. */
   parentLinkColumn?: string;
+  /**
+   * Each unique index over more than one column, from `%%index E(a, b) unique`.
+   * The pair is unique, not either column, so a suite has to vary one of them.
+   */
+  uniqueTogether?: string[][];
   fields: FieldMeta[];
 }
 
@@ -107,6 +119,9 @@ export const entities: EntityMeta[] = [
 {{#if parentLinkColumn}}
     parentLinkColumn: "{{parentLinkColumn}}",
 {{/if}}
+{{#if uniqueTogether}}
+    uniqueTogether: [{{#each uniqueTogether}}[{{#each this}}"{{this}}"{{#unless @last}}, {{/unless}}{{/each}}]{{#unless @last}}, {{/unless}}{{/each}}],
+{{/if}}
     fields: [
 {{#each attributes}}
       {
@@ -121,6 +136,9 @@ export const entities: EntityMeta[] = [
 {{/if}}
 {{#if enumValues}}
         enumValues: [{{#each enumValues}}"{{this}}"{{#unless @last}}, {{/unless}}{{/each}}],
+{{/if}}
+{{#if maxValue}}
+        maxValue: {{maxValue}},
 {{/if}}
       },
 {{/each}}
@@ -143,9 +161,24 @@ export const relationships: RelationshipMeta[] = [
 {{/each}}
 ];
 
-/** Fields a client is allowed to write. */
+/**
+ * The state field of every entity with a state machine, as `table.column`.
+ * System-managed: only the application's workflows write it, so no client does.
+ */
+const STATE_FIELDS = new Set(
+  stateMachines.map((machine) => `${machine.tableName}.${machine.statusField}`)
+);
+
+/** Is this the entity's state field — the column only workflows may change? */
+export function isStateField(entity: EntityMeta, field: string): boolean {
+  return STATE_FIELDS.has(`${entity.tableName}.${field}`);
+}
+
+/** Fields a client is allowed to write. A state field is not one of them. */
 export function writableFields(entity: EntityMeta): FieldMeta[] {
-  return entity.fields.filter((f) => !SERVER_MANAGED_FIELDS.has(f.name));
+  return entity.fields.filter(
+    (f) => !SERVER_MANAGED_FIELDS.has(f.name) && !isStateField(entity, f.name)
+  );
 }
 
 /** Writable fields excluding foreign keys — safe to populate without existing parents. */
@@ -155,6 +188,36 @@ export function scalarFields(entity: EntityMeta): FieldMeta[] {
 
 export function foreignKeyFields(entity: EntityMeta): FieldMeta[] {
   return writableFields(entity).filter((f) => f.isForeignKey || f.name.endsWith("_id"));
+}
+
+/** Every column that is part of a unique index spanning several columns. */
+export function compositeUniqueColumns(entity: EntityMeta): Set<string> {
+  return new Set((entity.uniqueTogether ?? []).flat());
+}
+
+/**
+ * The reference columns that must point at a record of their own.
+ *
+ * `BookingShipment(booking_id, shipment_id) unique` made of references alone is
+ * only satisfied by a pair no earlier record used, and the cheapest way to get
+ * one is a new parent for the first column. A pair that includes a plain column
+ * (`VoyageCall(voyage_id, sequence_number)`) is satisfied by varying that column
+ * instead — the factory does — unless the caller has pinned it, in which case
+ * the parent is what has to differ.
+ */
+export function distinctParentColumns(
+  entity: EntityMeta,
+  overrides: Record<string, unknown> = {}
+): Set<string> {
+  const references = new Set(foreignKeyFields(entity).map((field) => field.name));
+  const distinct = new Set<string>();
+  for (const columns of entity.uniqueTogether ?? []) {
+    const first = columns.find((column) => references.has(column));
+    if (!first) continue;
+    const pinned = columns.some((column) => !references.has(column) && column in overrides);
+    if (pinned || columns.every((column) => references.has(column))) distinct.add(first);
+  }
+  return distinct;
 }
 
 /**
@@ -183,12 +246,26 @@ const FORMATTED_TEXT_COLUMNS = /email|url|website|link|phone|mobile|tel|slug|sig
  * dictionary refuses.
  */
 export function firstTextField(entity: EntityMeta): FieldMeta | undefined {
+  const overwritten = new Set(
+    transforms.filter((t) => t.tableName === entity.tableName).map((t) => t.column)
+  );
   const textish = scalarFields(entity).filter(
     (f) =>
       (f.type === "string" || f.type === "text") &&
-      !(f.enumValues && f.enumValues.length > 0)
+      !(f.enumValues && f.enumValues.length > 0) &&
+      // A transform rule rewrites this column after the write, so a value stored
+      // here is not the value read back.
+      !overwritten.has(f.name)
   );
+  // A column a refusing rule reads is not safe to overwrite with an invented
+  // string: `status == "pending" and final_grade != null` is refused, so a suite
+  // that patches `final_grade` on a pending record is testing the rule, not the
+  // update. Prefer a column no refusal mentions.
+  const ruled = columnsNamedByRefusals(entity.tableName);
+  const calm = textish.filter((f) => !ruled.has(f.name));
   return (
+    calm.find((f) => !FORMATTED_TEXT_COLUMNS.test(f.name)) ??
+    calm[0] ??
     textish.find((f) => !FORMATTED_TEXT_COLUMNS.test(f.name)) ??
     // Every remaining text column is format-constrained — fall back rather
     // than skip the assertion entirely; a create that trips a format rule is a
@@ -197,8 +274,51 @@ export function firstTextField(entity: EntityMeta): FieldMeta | undefined {
   );
 }
 
+/** Every identifier the model's refusing rules for a table mention. */
+export function columnsNamedByRefusals(tableName: string): Set<string> {
+  const named = new Set<string>();
+  for (const refusal of refusals) {
+    if (refusal.tableName !== tableName) continue;
+    for (const word of refusal.when.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []) named.add(word);
+  }
+  return named;
+}
+
 export function numericFields(entity: EntityMeta): FieldMeta[] {
   return scalarFields(entity).filter((f) => f.type === "integer" || f.type === "decimal");
+}
+
+/**
+ * Column names that are signed by nature — coordinates, variances, balances. Mirrors
+ * SIGNED_COLUMN in the generator (packages/generator/src/templates/loader.ts), whose
+ * isSignedColumn helper leaves them out of the application's "must not be negative" rule.
+ */
+export const SIGNED_COLUMN =
+  /(^|_)(lat|latitude|lng|lon|long|longitude|variance|delta|adjustment|balance|offset|elevation|altitude|temperature)(_|$)/i;
+
+/** Numbers the application refuses when negative: every numeric column except the signed ones. */
+export function unsignedNumericFields(entity: EntityMeta): FieldMeta[] {
+  return numericFields(entity).filter((f) => !SIGNED_COLUMN.test(f.name));
+}
+
+/**
+ * A number a suite may pin to an exact value.
+ *
+ * A column a refusing rule reads is not safe to overwrite: `planned_packages !=
+ * delivered_packages + short_packages` is refused, so pinning one of the four
+ * quantities on a delivery line makes the record the rule refuses, and no
+ * choice of the others is guaranteed to put it right. Undefined when every
+ * numeric column is ruled — the assertion that needs one skips, as it does for
+ * an entity with no free-text column.
+ */
+export function firstUnruledNumericField(entity: EntityMeta): FieldMeta | undefined {
+  const ruled = columnsNamedByRefusals(entity.tableName);
+  // A column a transform computes is rewritten after every write (`net_amount` from `quantity *
+  // unit_price` on the airport model's Charge), so a value pinned there is not the value read back.
+  const overwritten = new Set(
+    transforms.filter((t) => t.tableName === entity.tableName).map((t) => t.column)
+  );
+  return numericFields(entity).find((f) => !ruled.has(f.name) && !overwritten.has(f.name));
 }
 
 export function getEntity(name: string): EntityMeta {

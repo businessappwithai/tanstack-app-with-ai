@@ -235,7 +235,12 @@ async function render() {
 
     if (admin) {
       setCrumbs([{ label: admin[0] }]);
-      return void (await admin[1](outlet));
+      /* The admin screens are read-only except one: the dictionary offers the
+         field-visibility toggle, which is administrator-only. The server
+         refuses a non-admin write regardless (`sys.routes.js` guards on the
+         method), so this decides whether the control is *offered*, not whether
+         it is allowed. */
+      return void (await admin[1](outlet, { user: state.user }));
     }
 
     setCrumbs([{ label: "Not found" }]);

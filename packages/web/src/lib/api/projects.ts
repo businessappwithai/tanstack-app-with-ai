@@ -44,6 +44,7 @@ export interface UpdateProjectInput {
 }
 
 export interface ERDVersion {
+  git_commit?: string | null;
   id: string;
   project_id: string;
   version_number: number;
@@ -56,6 +57,9 @@ export interface ERDVersion {
 }
 
 export interface CreateERDVersionInput {
+  mode?: "draft" | "version";
+  requestId?: string;
+  expectedCommit?: string | null;
   mermaidCode: string;
   description?: string;
   createdBy?: string;
@@ -172,6 +176,9 @@ export const projectsApi = {
  * ERD Versions API
  */
 export const erdVersionsApi = {
+  async saveDraft(projectId: string, input: CreateERDVersionInput): Promise<void> {
+    await apiClient.post(`/projects/${projectId}/erd-versions`, { ...input, mode: "draft" });
+  },
   /**
    * Get all ERD versions for a project
    */

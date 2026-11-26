@@ -9,9 +9,11 @@
 import { type Kysely, sql } from "kysely";
 import { type Database, destroyDb, getDb } from "../config/db.config.js";
 import { getLogger } from "../logging/index.js";
+import { migrateProjectGit } from "./git-migration";
 
 // Re-export types consumed by other packages
 export type { Database };
+export { sql };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -428,6 +430,8 @@ async function _runMigrationsImpl(db: Kysely<Database>): Promise<void> {
     noteMigrationFailure(failures, "add column projects.target_db_connection", err);
   }
 
+  await migrateProjectGit(db);
+
   for (const failure of failures) {
     log.event("db.migration.failed", { name: failure.step, err: failure.err });
   }
@@ -527,9 +531,15 @@ export const projectDb = {
         deploymentDb.getDeployment(id),
       ]);
 
+    const gitState = await db
+      .selectFrom("project_git_state")
+      .selectAll()
+      .where("project_id", "=", id)
+      .executeTakeFirst();
     return {
       ...project,
-      erdCode: currentErdVersion?.mermaid_code,
+      gitCommit: gitState?.model_commit ?? null,
+      erdCode: gitState?.model_code ?? currentErdVersion?.mermaid_code,
       erdVersions,
       parsedSchema: currentErdVersion?.parsed_schema
         ? JSON.parse(currentErdVersion.parsed_schema)

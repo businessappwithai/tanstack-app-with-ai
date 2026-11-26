@@ -8,7 +8,6 @@ import {
   EyeOff,
   FileCode2,
   Globe,
-  HelpCircle,
   Loader2,
   Plus,
   Rocket,
@@ -17,7 +16,6 @@ import {
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { JourneyArc } from "@/components/JourneyArc";
-import { ProgressStepper } from "@/components/ProgressStepper";
 import { WizardStepHeader } from "@/components/WizardStepHeader";
 import { requestContext } from "@/lib/request-context";
 import { useProjectStore } from "@/store/projectStore";
@@ -41,6 +39,8 @@ export const Route = createFileRoute("/projects/$id/deploy")({
   component: DeployPage,
 });
 
+type DeployTarget = "local" | "aws" | "gcp" | "azure" | "oracle";
+
 interface EnvVariable {
   key: string;
   value: string;
@@ -52,6 +52,19 @@ interface LogEntry {
   level: "info" | "success" | "error" | "warning";
   message: string;
 }
+
+interface AWSCreds { accessKeyId: string; secretAccessKey: string; region: string; }
+interface GCPCreds { projectId: string; region: string; credentials: string; }
+interface AzureCreds { clientId: string; clientSecret: string; tenantId: string; subscriptionId: string; location: string; }
+interface OracleCreds { tenancyOcid: string; userOcid: string; fingerprint: string; privateKey: string; region: string; compartmentOcid: string; }
+
+const PROVIDER_LABELS: Record<DeployTarget, string> = {
+  local: "Local",
+  aws: "AWS",
+  gcp: "GCP",
+  azure: "Azure",
+  oracle: "Oracle",
+};
 
 function DeployPage() {
   const navigate = useNavigate();
@@ -67,15 +80,9 @@ function DeployPage() {
     }
   }, [projectId, getProject, currentProject, loadProject]);
 
-  const [envVars, setEnvVars] = useState<EnvVariable[]>([
-    { key: "DATABASE_URL", value: "", isSecret: true },
-    { key: "DATABASE_NAME", value: "taskflow", isSecret: false },
-    { key: "API_KEY", value: "", isSecret: true },
-    { key: "PORT", value: (project?.port || 4001).toString(), isSecret: false },
-    { key: "NODE_ENV", value: "production", isSecret: false },
-  ]);
+  const [envVars, setEnvVars] = useState<EnvVariable[]>([]);
   const [showSecrets, setShowSecrets] = useState<{ [key: string]: boolean }>({});
-  const [deploymentTarget] = useState<"local">("local");
+  const [deploymentTarget, setDeploymentTarget] = useState<DeployTarget>("local");
   const [isDeploying, setIsDeploying] = useState(false);
   const [deploymentComplete, setDeploymentComplete] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -88,6 +95,12 @@ function DeployPage() {
   const [serverPid, setServerPid] = useState<number | null>(null);
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
 
+  // Cloud credential state
+  const [awsCreds, setAwsCreds] = useState<AWSCreds>({ accessKeyId: "", secretAccessKey: "", region: "us-east-1" });
+  const [gcpCreds, setGcpCreds] = useState<GCPCreds>({ projectId: "", region: "us-central1", credentials: "" });
+  const [azureCreds, setAzureCreds] = useState<AzureCreds>({ clientId: "", clientSecret: "", tenantId: "", subscriptionId: "", location: "East US" });
+  const [oracleCreds, setOracleCreds] = useState<OracleCreds>({ tenancyOcid: "", userOcid: "", fingerprint: "", privateKey: "", region: "us-ashburn-1", compartmentOcid: "" });
+
   const logsEndRef = useRef<HTMLDivElement>(null);
   const liveLogsEndRef = useRef<HTMLDivElement>(null);
 
@@ -98,13 +111,7 @@ function DeployPage() {
         setDeploymentUrl(project.deploymentUrl);
         setDeploymentComplete(true);
       }
-      if (project.databaseUrl) {
-        setEnvVars((vars) =>
-          vars.map((v) =>
-            v.key === "DATABASE_URL" ? { ...v, value: project.databaseUrl || "" } : v
-          )
-        );
-      }
+
     }
   }, [project, setCurrentStep]);
 
@@ -121,16 +128,20 @@ function DeployPage() {
 
     const pollServerStatus = async () => {
       try {
-        const response = await fetch(`/api/projects/${projectId}/logs`);
+        const response = await fetch(`/api/projects/${projectId}/deployment`);
         if (response.ok) {
           const data = await response.json();
-          if (data.status === "running") {
+          const dep = (data.deployments as Array<{ status: string; process_id?: string }> | undefined)?.[0];
+          if (dep?.status === "running") {
             setServerStatus("running");
-            setServerPid(data.processId);
+            setServerPid(null);
           } else {
             setServerStatus("stopped");
             setServerPid(null);
           }
+        } else {
+          setServerStatus("stopped");
+          setServerPid(null);
         }
       } catch (err) {
         console.error("Failed to poll server status:", err);
@@ -192,6 +203,66 @@ function DeployPage() {
     setShowSecrets((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const streamDeploy = async (endpoint: string, body: Record<string, unknown>) => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as { error?: string };
+      throw new Error(err.error ?? `HTTP ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let finalUrl = "";
+    let streamError = "";
+
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n").filter((line) => line.trim());
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6)) as {
+                log?: string; level?: string; complete?: boolean; url?: string; error?: string;
+              };
+              if (data.log) {
+                addLog((data.level as LogEntry["level"]) || "info", data.log);
+              }
+              if (data.complete) {
+                finalUrl = data.url ?? "";
+                setDeploymentComplete(true);
+                setDeploymentUrl(data.url ?? "");
+                setServerStatus("starting");
+                updateProject(projectId, {
+                  deploymentUrl: data.url ?? "",
+                  uptime: "0s",
+                });
+              }
+              if (data.error) {
+                streamError = data.error;
+                setError(data.error);
+                addLog("error", data.error);
+              }
+            } catch (e) {
+              console.error("Failed to parse log:", e);
+            }
+          }
+        }
+      }
+    }
+
+    return { finalUrl, streamError };
+  };
+
   const handleDeploy = async () => {
     setIsDeploying(true);
     setDeploymentComplete(false);
@@ -210,61 +281,35 @@ function DeployPage() {
         );
       }
 
-      const response = await fetch("/api/deploy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      if (deploymentTarget === "local") {
+        const { streamError, finalUrl } = await streamDeploy("/api/deploy", {
           projectId,
           target: deploymentTarget,
           envVars: envVars.filter((v) => v.key && v.value),
           generatedPath: project?.generatedPath,
-        }),
-      });
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      let finalUrl = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n").filter((line) => line.trim());
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.log) {
-                  addLog(data.level || "info", data.log);
-                }
-                if (data.complete) {
-                  finalUrl = data.url;
-                  setDeploymentComplete(true);
-                  setDeploymentUrl(data.url);
-                  updateProject(projectId, {
-                    deploymentUrl: data.url,
-                    uptime: "0s",
-                  });
-                }
-                if (data.error) {
-                  setError(data.error);
-                  addLog("error", data.error);
-                }
-              } catch (e) {
-                console.error("Failed to parse log:", e);
-              }
-            }
-          }
+        });
+        if (!streamError) {
+          addLog("success", "Deployment completed successfully!");
+          if (finalUrl) addLog("info", `Your application is live at: ${finalUrl}`);
         }
-      }
+      } else {
+        // Cloud deployment via Pulumi
+        let cloudCredentials: Record<string, string> = {};
+        if (deploymentTarget === "aws") cloudCredentials = awsCreds as unknown as Record<string, string>;
+        else if (deploymentTarget === "gcp") cloudCredentials = gcpCreds as unknown as Record<string, string>;
+        else if (deploymentTarget === "azure") cloudCredentials = azureCreds as unknown as Record<string, string>;
+        else if (deploymentTarget === "oracle") cloudCredentials = oracleCreds as unknown as Record<string, string>;
 
-      addLog("success", "Deployment completed successfully!");
-      if (finalUrl) {
-        addLog("info", `Your application is live at: ${finalUrl}`);
+        const { streamError, finalUrl } = await streamDeploy("/api/cloud-deploy", {
+          projectId,
+          provider: deploymentTarget,
+          envVars: envVars.filter((v) => v.key && v.value),
+          cloudCredentials,
+        });
+        if (!streamError) {
+          addLog("success", `Deployment to ${PROVIDER_LABELS[deploymentTarget]} completed!`);
+          if (finalUrl) addLog("info", `Live URL: ${finalUrl}`);
+        }
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error occurred";
@@ -328,11 +373,11 @@ function DeployPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div role="main" className="min-h-screen bg-background flex flex-col">
       <header className="bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <WizardStepHeader
-            stepNumber={6}
+            stepNumber={5}
             title="Deploy Your Application"
             description="Your application is ready to deploy. Configure your environment variables and watch your app go live with a live preview URL."
             estimatedTime="1-2 min"
@@ -344,15 +389,13 @@ function DeployPage() {
                 <button
                   type="button"
                   onClick={handleViewApp}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/25 transition-all active:scale-[0.98]"
+                  disabled={!deploymentUrl}
+                  title={deploymentUrl ? undefined : "Deploy the application first"}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/25 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
                 >
                   <Globe className="w-4 h-4" />
-                  Open Local App
+                  Open App
                 </button>
-                {/* The model is the artifact worth keeping: everything designed
-                    here — the ERD, the rules, the workflows built in the editor
-                    — is merged back into one document, and this is where it
-                    leaves as the same kind of file it could be imported from. */}
                 <a
                   href={`/api/projects/${projectId}/eml/download`}
                   className="flex items-center gap-2 px-4 py-2 border border-border hover:bg-muted font-semibold rounded-xl transition-all active:scale-[0.98]"
@@ -363,7 +406,7 @@ function DeployPage() {
                 <button
                   type="button"
                   onClick={handleBackToProjects}
-                  className="flex items-center gap-2 px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
+                  className="flex items-center gap-2 px-6 py-2 bg-primary hover:bg-primary/90 text-slate-900 font-bold rounded-xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
                   style={{ backgroundColor: "#FF8400" }}
                 >
                   <CheckCircle2 className="w-4 h-4" />
@@ -373,115 +416,243 @@ function DeployPage() {
             </div>
           </div>
 
-          <ProgressStepper
-            currentStep="deploy"
-            onStepClick={(step) => {
-              if (step === "init") {
-                navigate({ to: "/projects/$id/init", params: { id: projectId } });
-              } else if (step === "design") {
-                navigate({ to: "/projects/$id/design", params: { id: projectId } });
-              } else if (step === "logic") {
-                navigate({ to: "/projects/$id/logic", params: { id: projectId } });
-              } else if (step === "generate") {
-                navigate({ to: "/projects/$id/generate", params: { id: projectId } });
-              } else if (step === "enhance") {
-                navigate({ to: "/projects/$id/enhance", params: { id: projectId } });
-              }
-            }}
-          />
 
-          <JourneyArc currentStep="deploy" />
+          <JourneyArc currentStep="deploy" projectId={projectId} />
         </div>
       </header>
 
       <div className="flex-1 py-8">
         <div className="max-w-7xl mx-auto px-6">
           {!isDeploying && !deploymentComplete && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="space-y-6">
+              {/* Provider tab strip */}
               <div className="bg-card border border-border rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-foreground">Environment Variables</h2>
-                  <button
-                    type="button"
-                    onClick={handleAddEnvVar}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-primary hover:bg-primary/90 text-white text-sm font-medium rounded-lg transition-colors"
-                    style={{ backgroundColor: "#FF8400" }}
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add
-                  </button>
-                </div>
-
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {envVars.map((envVar, index) => (
-                    <div key={index} className="flex items-center gap-2 p-3 bg-muted rounded-xl">
-                      <input
-                        type="text"
-                        value={envVar.key}
-                        onChange={(e) => handleEnvVarChange(index, "key", e.target.value)}
-                        placeholder="KEY"
-                        className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        style={{ "--tw-ring-color": "#FF8400" } as React.CSSProperties}
-                      />
-                      <div className="relative flex-1">
-                        <input
-                          type={envVar.isSecret && !showSecrets[envVar.key] ? "password" : "text"}
-                          value={envVar.value}
-                          onChange={(e) => handleEnvVarChange(index, "value", e.target.value)}
-                          placeholder="value"
-                          className="w-full px-3 py-2 pr-10 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          style={{ "--tw-ring-color": "#FF8400" } as React.CSSProperties}
-                        />
-                        {envVar.isSecret && (
-                          <button
-                            type="button"
-                            onClick={() => toggleSecretVisibility(envVar.key)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded transition-colors"
-                          >
-                            {showSecrets[envVar.key] ? (
-                              <EyeOff className="w-4 h-4 text-muted-foreground" />
-                            ) : (
-                              <Eye className="w-4 h-4 text-muted-foreground" />
-                            )}
-                          </button>
-                        )}
-                      </div>
-                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <input
-                          type="checkbox"
-                          checked={envVar.isSecret}
-                          onChange={(e) => handleEnvVarChange(index, "isSecret", e.target.checked)}
-                          className="rounded"
-                        />
-                        Secret
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveEnvVar(index)}
-                        className="p-2 hover:bg-red-500/10 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </button>
-                    </div>
+                <h2 className="text-xl font-bold text-foreground mb-4">Deployment Target</h2>
+                <div className="flex flex-wrap gap-2">
+                  {(["local", "aws", "gcp", "azure", "oracle"] as DeployTarget[]).map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      onClick={() => setDeploymentTarget(provider)}
+                      className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.98] border ${
+                        deploymentTarget === provider
+                          ? "text-slate-900 border-transparent shadow-lg"
+                          : "border-border hover:bg-muted text-foreground"
+                      }`}
+                      style={deploymentTarget === provider ? { backgroundColor: "#FF8400" } : undefined}
+                    >
+                      {PROVIDER_LABELS[provider]}
+                    </button>
                   ))}
                 </div>
+                {deploymentTarget !== "local" && (
+                  <p className="mt-3 text-xs text-emerald-600">
+                    Pulumi is installed automatically on first cloud deploy — nothing to configure.
+                  </p>
+                )}
               </div>
 
-              <div className="bg-card border border-border rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-foreground mb-2">Local Deployment</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Deploy and run the application on your local machine
-                </p>
+              {/* Auto-provisioned badge — local only */}
+              {deploymentTarget === "local" && (
+                <div className="flex items-start gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 mb-6">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Infrastructure is auto-provisioned</p>
+                    <div className="flex flex-wrap gap-4 mt-1.5">
+                      {[
+                        "Postgres container started",
+                        "Docker network created",
+                        "DATABASE_URL wired automatically",
+                      ].map((item) => (
+                        <span key={item} className="text-xs text-emerald-600 dark:text-emerald-500 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
-                <button
-                  type="button"
-                  onClick={handleDeploy}
-                  className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg rounded-2xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
-                  style={{ backgroundColor: "#FF8400" }}
-                >
-                  <Rocket className="w-5 h-5" />
-                  Deploy Locally
-                </button>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Environment variables panel */}
+                <div className="bg-card border border-border rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <h2 className="text-xl font-bold text-foreground">
+                      Additional Variables
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">(optional)</span>
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={handleAddEnvVar}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-primary hover:bg-primary/90 text-slate-900 text-sm font-medium rounded-lg transition-colors"
+                      style={{ backgroundColor: "#FF8400" }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    App-specific secrets your code reads from <code className="font-mono bg-muted px-1 rounded">process.env</code> — e.g.{" "}
+                    <code className="font-mono bg-muted px-1 rounded">STRIPE_SECRET_KEY</code>,{" "}
+                    <code className="font-mono bg-muted px-1 rounded">SENDGRID_API_KEY</code>.
+                  </p>
+
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {envVars.map((envVar, index) => (
+                      <div key={index} className="flex items-center gap-2 p-3 bg-muted rounded-xl">
+                        <input
+                          type="text"
+                          value={envVar.key}
+                          onChange={(e) => handleEnvVarChange(index, "key", e.target.value)}
+                          placeholder="KEY"
+                          aria-label={`Variable ${index + 1} name`}
+                          className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          style={{ "--tw-ring-color": "#FF8400" } as React.CSSProperties}
+                        />
+                        <div className="relative flex-1">
+                          <input
+                            type={envVar.isSecret && !showSecrets[envVar.key] ? "password" : "text"}
+                            value={envVar.value}
+                            onChange={(e) => handleEnvVarChange(index, "value", e.target.value)}
+                            placeholder="value"
+                            aria-label={`${envVar.key || `Variable ${index + 1}`} value`}
+                            className="w-full px-3 py-2 pr-10 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            style={{ "--tw-ring-color": "#FF8400" } as React.CSSProperties}
+                          />
+                          {envVar.isSecret && (
+                            <button
+                              type="button"
+                              onClick={() => toggleSecretVisibility(envVar.key)}
+                              aria-label={`${showSecrets[envVar.key] ? "Hide" : "Show"} ${envVar.key} value`}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded transition-colors"
+                            >
+                              {showSecrets[envVar.key] ? (
+                                <EyeOff className="w-4 h-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="w-4 h-4 text-muted-foreground" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={envVar.isSecret}
+                            onChange={(e) => handleEnvVarChange(index, "isSecret", e.target.checked)}
+                            className="rounded"
+                          />
+                          Secret
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEnvVar(index)}
+                          aria-label={`Remove ${envVar.key || `variable ${index + 1}`}`}
+                          className="p-2 hover:bg-red-500/10 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right panel: deploy button + cloud credentials */}
+                <div className="bg-card border border-border rounded-2xl p-6 space-y-6">
+                  {/* Cloud credential forms */}
+                  {deploymentTarget === "aws" && (
+                    <div className="space-y-3">
+                      <h3 className="font-semibold text-foreground">AWS Credentials</h3>
+                      <CredField label="Access Key ID" value={awsCreds.accessKeyId} secret
+                        onChange={(v) => setAwsCreds((c) => ({ ...c, accessKeyId: v }))} />
+                      <CredField label="Secret Access Key" value={awsCreds.secretAccessKey} secret
+                        onChange={(v) => setAwsCreds((c) => ({ ...c, secretAccessKey: v }))} />
+                      <CredField label="Region" value={awsCreds.region} placeholder="us-east-1"
+                        onChange={(v) => setAwsCreds((c) => ({ ...c, region: v }))} />
+                    </div>
+                  )}
+
+                  {deploymentTarget === "gcp" && (
+                    <div className="space-y-3">
+                      <h3 className="font-semibold text-foreground">GCP Credentials</h3>
+                      <CredField label="Project ID" value={gcpCreds.projectId}
+                        onChange={(v) => setGcpCreds((c) => ({ ...c, projectId: v }))} />
+                      <CredField label="Region" value={gcpCreds.region} placeholder="us-central1"
+                        onChange={(v) => setGcpCreds((c) => ({ ...c, region: v }))} />
+                      <label className="block text-sm font-medium text-foreground">
+                        Service Account JSON
+                        <textarea
+                          value={gcpCreds.credentials}
+                          onChange={(e) => setGcpCreds((c) => ({ ...c, credentials: e.target.value }))}
+                          placeholder='{"type":"service_account",...}'
+                          rows={4}
+                          className="mt-1 w-full px-3 py-2 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2 resize-none"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {deploymentTarget === "azure" && (
+                    <div className="space-y-3">
+                      <h3 className="font-semibold text-foreground">Azure Credentials</h3>
+                      <CredField label="Client ID" value={azureCreds.clientId}
+                        onChange={(v) => setAzureCreds((c) => ({ ...c, clientId: v }))} />
+                      <CredField label="Client Secret" value={azureCreds.clientSecret} secret
+                        onChange={(v) => setAzureCreds((c) => ({ ...c, clientSecret: v }))} />
+                      <CredField label="Tenant ID" value={azureCreds.tenantId}
+                        onChange={(v) => setAzureCreds((c) => ({ ...c, tenantId: v }))} />
+                      <CredField label="Subscription ID" value={azureCreds.subscriptionId}
+                        onChange={(v) => setAzureCreds((c) => ({ ...c, subscriptionId: v }))} />
+                      <CredField label="Location" value={azureCreds.location} placeholder="East US"
+                        onChange={(v) => setAzureCreds((c) => ({ ...c, location: v }))} />
+                    </div>
+                  )}
+
+                  {deploymentTarget === "oracle" && (
+                    <div className="space-y-3">
+                      <h3 className="font-semibold text-foreground">Oracle Cloud Credentials</h3>
+                      <CredField label="Tenancy OCID" value={oracleCreds.tenancyOcid}
+                        onChange={(v) => setOracleCreds((c) => ({ ...c, tenancyOcid: v }))} />
+                      <CredField label="User OCID" value={oracleCreds.userOcid}
+                        onChange={(v) => setOracleCreds((c) => ({ ...c, userOcid: v }))} />
+                      <CredField label="API Key Fingerprint" value={oracleCreds.fingerprint}
+                        onChange={(v) => setOracleCreds((c) => ({ ...c, fingerprint: v }))} />
+                      <label className="block text-sm font-medium text-foreground">
+                        Private Key (PEM)
+                        <textarea
+                          value={oracleCreds.privateKey}
+                          onChange={(e) => setOracleCreds((c) => ({ ...c, privateKey: e.target.value }))}
+                          placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                          rows={4}
+                          className="mt-1 w-full px-3 py-2 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2 resize-none"
+                        />
+                      </label>
+                      <CredField label="Region" value={oracleCreds.region} placeholder="us-ashburn-1"
+                        onChange={(v) => setOracleCreds((c) => ({ ...c, region: v }))} />
+                      <CredField label="Compartment OCID" value={oracleCreds.compartmentOcid}
+                        onChange={(v) => setOracleCreds((c) => ({ ...c, compartmentOcid: v }))} />
+                    </div>
+                  )}
+
+                  {deploymentTarget === "local" && (
+                    <div>
+                      <h2 className="text-xl font-bold text-foreground mb-2">Local Deployment</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Deploy and run the application on your local machine using Docker.
+                      </p>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleDeploy}
+                    className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary/90 text-slate-900 font-bold text-lg rounded-2xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
+                    style={{ backgroundColor: "#FF8400" }}
+                  >
+                    <Rocket className="w-5 h-5" />
+                    Deploy to {PROVIDER_LABELS[deploymentTarget]}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -495,7 +666,7 @@ function DeployPage() {
                       <Loader2 className="w-6 h-6 animate-spin" style={{ color: "#FF8400" }} />
                       <div className="flex-1">
                         <h2 className="text-xl font-bold text-foreground">
-                          Deploying Application...
+                          Deploying to {PROVIDER_LABELS[deploymentTarget]}…
                         </h2>
                         <p className="text-sm text-muted-foreground">This may take a few moments</p>
                       </div>
@@ -556,7 +727,7 @@ function DeployPage() {
                         {serverStatus === "running" && (
                           <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-lg">
                             <Clock className="w-4 h-4" style={{ color: "#FF8400" }} />
-                            <span className="font-medium" style={{ color: "#FF8400" }}>
+                            <span className="text-brand font-medium">
                               {uptime}
                             </span>
                           </div>
@@ -569,7 +740,7 @@ function DeployPage() {
                           </div>
                         )}
                       </div>
-                      {serverStatus === "running" && (
+                      {serverStatus === "running" && deploymentTarget === "local" && (
                         <button
                           type="button"
                           onClick={handleStopServer}
@@ -579,6 +750,14 @@ function DeployPage() {
                           Stop Server
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => { setDeploymentComplete(false); setLogs([]); setError(null); }}
+                        className="ml-4 flex items-center gap-2 px-4 py-2 border border-border hover:bg-muted text-foreground font-semibold rounded-xl transition-all active:scale-[0.98]"
+                      >
+                        <Rocket className="w-4 h-4" />
+                        Deploy again
+                      </button>
                     </>
                   )}
                   {error && (
@@ -588,6 +767,19 @@ function DeployPage() {
                         <h2 className="text-xl font-bold text-foreground">Deployment Failed</h2>
                         <p className="text-sm text-red-400">{error}</p>
                       </div>
+                      {error.includes("Regenerate") && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate({ to: "/projects/$id/generate", params: { id: projectId } })
+                          }
+                          className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-slate-900 font-bold rounded-xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98]"
+                          style={{ backgroundColor: "#FF8400" }}
+                        >
+                          <Rocket className="w-4 h-4" />
+                          Regenerate App
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -600,8 +792,7 @@ function DeployPage() {
                         href={deploymentUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 font-mono text-sm hover:underline"
-                        style={{ color: "#FF8400" }}
+                        className="text-brand flex-1 font-mono text-sm hover:underline"
                       >
                         {deploymentUrl}
                       </a>
@@ -625,8 +816,8 @@ function DeployPage() {
                   <span className="ml-4 text-muted-foreground">Deployment Logs</span>
                   {isDeploying && (
                     <span
-                      className="ml-auto px-3 py-1 text-xs rounded-full font-sans"
-                      style={{ backgroundColor: "rgba(255, 132, 0, 0.2)", color: "#FF8400" }}
+                      className="text-brand ml-auto px-3 py-1 text-xs rounded-full font-sans"
+                      style={{ backgroundColor: "rgba(255, 132, 0, 0.2)" }}
                     >
                       IN PROGRESS
                     </span>
@@ -705,13 +896,57 @@ function DeployPage() {
         </div>
       </div>
 
-      <button
-        type="button"
-        className="fixed bottom-6 right-6 w-14 h-14 text-white rounded-full shadow-lg shadow-primary/50 flex items-center justify-center transition-all active:scale-95 z-40"
-        style={{ backgroundColor: "#FF8400" }}
-      >
-        <HelpCircle className="w-6 h-6" />
-      </button>
+      <footer className="border-t border-border bg-background/80 backdrop-blur-md sticky bottom-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/projects/$id/enhance", params: { id: projectId } })}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-secondary text-foreground font-medium transition-all"
+          >
+            ← Back
+          </button>
+          <span />
+        </div>
+      </footer>
     </div>
+  );
+}
+
+interface CredFieldProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  secret?: boolean;
+  placeholder?: string;
+}
+
+function CredField({ label, value, onChange, secret, placeholder }: CredFieldProps) {
+  const [show, setShow] = useState(false);
+  return (
+    <label className="block text-sm font-medium text-foreground">
+      {label}
+      <div className="relative mt-1">
+        <input
+          type={secret && !show ? "password" : "text"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full px-3 py-2 pr-10 bg-background border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:ring-2"
+        />
+        {secret && (
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded transition-colors"
+          >
+            {show ? (
+              <EyeOff className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <Eye className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+        )}
+      </div>
+    </label>
   );
 }

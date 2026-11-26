@@ -11,7 +11,7 @@
  * Project: {{project.name}}
  */
 
-import { Controller, Get, Post, Param, Query, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -29,7 +29,6 @@ import { WorkflowService } from './workflow.service';
 @UseGuards(SessionAuthGuard, RolesGuard, EntityAccessGuard)
 @Controller('workflows')
 export class WorkflowController {
-  private readonly logger = new Logger(WorkflowController.name);
 
   constructor(private readonly workflowService: WorkflowService) {}
 

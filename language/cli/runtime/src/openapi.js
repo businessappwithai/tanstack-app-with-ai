@@ -45,8 +45,25 @@ export function buildOpenApi() {
       },
       put: {
         summary: `Update ${entity.name}`,
+        parameters: [
+          {
+            name: "If-Match",
+            in: "header",
+            required: false,
+            description:
+              'The version you read (the ETag of GET), e.g. "3". The save is refused with 409 VERSION_CONFLICT if the record has changed since.',
+            schema: { type: "string" },
+          },
+        ],
         requestBody: { content: { "application/json": { schema: ref } } },
-        responses: { 200: { description: "OK" }, 409: { description: "Illegal transition" } },
+        responses: {
+          200: { description: "OK" },
+          400: { description: "Validation error, or an If-Match that names no version" },
+          409: {
+            description:
+              "Illegal transition, or VERSION_CONFLICT: the record changed since the If-Match version",
+          },
+        },
       },
       delete: { summary: `Delete ${entity.name}`, responses: { 204: { description: "Deleted" } } },
     };

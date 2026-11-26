@@ -5,15 +5,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vinxi dev --port {{config.frontendPort}}",
-    "build": "vinxi build",
-    "start": "PORT={{config.frontendPort}} vinxi start",
-    "lint": "biome lint --write src",
-    "lint:fix": "biome lint --write src",
-    "format": "biome format --write src",
-    "routes:generate": "tsr generate",
+    "dev": "HOST=127.0.0.1 bun --bun vinxi dev --port {{config.frontendPort}}",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 vinxi build",
+    "start": "PORT={{config.frontendPort}} bun --bun vinxi start",
+    "routes:generate": "bun --bun tsr generate",
     "pretype-check": "bun run routes:generate",
-    "type-check": "tsc --noEmit",
+    "type-check": "bun check",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage"
@@ -55,12 +52,21 @@
     "@tanstack/react-db": "^0.2.1",
     "@tanstack/electric-db-collection": "^0.3.18",
     "@electric-sql/client": "^1.5.26",
-    "@copilotkit/react-core": "^1.68.1",
-    "@copilotkit/react-ui": "^1.68.1",
-    "@copilotkit/runtime": "^1.68.1",
+    "@copilotkit/react-core": "1.68.1",
+    "@copilotkit/react-ui": "1.68.1",
+    "@copilotkit/runtime": "1.68.1",
     "openai": "^7.1.0",
+    "@gorules/jdm-editor": "^1.52.0",
+    "dayjs": "^1.11.20",
+    "rc-picker": "~4.6.15",
+    "@gorules/zen-engine-wasm": "0.23.1",
+    "@monaco-editor/loader": "^1.7.0",
+    "monaco-editor": "^0.57.0",
     "bpmn-js": "^18.21.0",
     "reactflow": "^11.11.4",
+    "@xyflow/react": "^12.11.2",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "ankareport": "0.1.0-beta.19"
   },
   "devDependencies": {
@@ -68,10 +74,10 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "vinxi": "0.5.1",
+    "vite": "^6.0.0",
     "@tanstack/router-cli": "1.97.1",
     "@tanstack/react-query-devtools": "^5.17.0",
     "autoprefixer": "^10.4.17",
-    "@biomejs/biome": "^1.9.4",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.0",
@@ -84,6 +90,6 @@
   },
   "engines": {
     "node": ">=18.0.0",
-    "bun": ">=1.4.0"
+    "bun": ">=1.4.4"
   }
 }

@@ -265,8 +265,22 @@ async function forward(base, request) {
   );
 
   const result = await answer;
-  return new Response(result.body, { status: result.status, headers: result.headers });
+  /* A 204, 205 or 304 may not carry a body, and the constructor throws rather
+     than ignoring one. The host answers every request with an ArrayBuffer — a
+     zero-byte one for a 204 — which is still a body as far as `new Response`
+     is concerned, so passing it through rejected the fetch handler and the
+     browser reported `net::ERR_FAILED`: a request that never reached the
+     application, on a route that was answering correctly. Every DELETE in the
+     administrator section failed this way, and the same routes returned 204
+     without complaint over the Node host, which has no such boundary. */
+  return new Response(NULL_BODY_STATUS.has(result.status) ? null : result.body, {
+    status: result.status,
+    headers: result.headers,
+  });
 }
+
+/** Statuses the Response constructor refuses to pair with a body. */
+const NULL_BODY_STATUS = new Set([204, 205, 304]);
 
 /**
  * Ask every page under this scope to hand over a fresh port.

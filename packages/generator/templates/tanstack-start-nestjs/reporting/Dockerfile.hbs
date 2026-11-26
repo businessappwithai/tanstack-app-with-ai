@@ -30,7 +30,7 @@
 # deploy rather than something you are looking at.
 
 # syntax=docker/dockerfile:1.7
-FROM oven/bun:1.3 AS source
+FROM oven/bun:1.4.4 AS source
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
@@ -46,7 +46,7 @@ RUN git clone --depth 1 --branch "${REPORT_REF}" "${REPORT_REPO}" . \
     || (git clone "${REPORT_REPO}" . && git checkout "${REPORT_REF}")
 
 # ─── build ──────────────────────────────────────────────────────────────────
-FROM oven/bun:1.3 AS builder
+FROM oven/bun:1.4.4 AS builder
 
 WORKDIR /app
 COPY --from=source /src .
@@ -64,7 +64,7 @@ RUN bun install && bun pm cache rm
 RUN bun run build
 
 # ─── runtime ────────────────────────────────────────────────────────────────
-FROM oven/bun:1.3-slim
+FROM oven/bun:1.4.4-slim
 
 WORKDIR /app
 
@@ -78,14 +78,28 @@ COPY --from=builder /app/server-static-wrapper.mjs ./server-static-wrapper.mjs
 # The seeder and what it imports. `scripts/seed-reporting-pack.ts` is the
 # platform's own script — it writes eleven of its tables and uses its own
 # `getDb`, `encrypt` and `introspectAndCacheSchema`, so it cannot be a copy
-# living here. `src/lib/{db,security,sql,mastra}` and `src/types` are what it
-# resolves through `@/`.
+# living here. It resolves its imports through `@/`, which is `src/`.
+#
+# The whole of `src/`, deliberately, and not the handful of directories the
+# seeder happens to import today. That list was maintained by hand —
+# `src/lib/{db,security,sql,mastra}` and `src/types` — and it went stale the
+# first time the platform added an import to something already on it:
+# `src/lib/db/bootstrap.ts` began importing `@/lib/auth/bcrypt-cost`, no line
+# here copied `src/lib/auth`, and every `docker compose up` of a generated
+# project ended with
+#
+#   report-seeder-1  | error: Cannot find module '@/lib/auth/bcrypt-cost'
+#
+# Two things make that worth a blanket copy rather than a sixth line. Nothing
+# fails at build time — the image builds, the platform serves, and only the
+# one-shot seeder dies, so a generated project comes up looking healthy with
+# an unseeded reporting side. And the platform is fetched at REPORT_REF, which
+# defaults to `main`: the list has to stay correct against a moving ref this
+# project does not control, so it is wrong the moment somebody else adds an
+# import. `src/` is about four megabytes beside a `node_modules` already
+# copied above.
 COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/src/lib/db ./src/lib/db
-COPY --from=builder /app/src/lib/security ./src/lib/security
-COPY --from=builder /app/src/lib/sql ./src/lib/sql
-COPY --from=builder /app/src/lib/mastra ./src/lib/mastra
-COPY --from=builder /app/src/types ./src/types
+COPY --from=builder /app/src ./src
 
 EXPOSE 3000
 
@@ -94,7 +108,7 @@ ENV NODE_ENV=production \
     PUBLIC_DIR=/app/dist/client
 
 # The probe is bun rather than curl, which is why there is no apt-get in this
-# stage: `oven/bun:1.3-slim` ships no curl, and installing one buys exactly one
+# stage: `oven/bun:1.4.4-slim` ships no curl, and installing one buys exactly one
 # healthcheck. `127.0.0.1`, never `localhost` — inside the container localhost
 # also resolves to `::1`, the server listens on IPv4 only, and the probe then
 # reports a refused connection against a server answering 200 to the host.

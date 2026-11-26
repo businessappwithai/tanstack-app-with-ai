@@ -94,7 +94,7 @@ export const config = {
    * request that never answers; both stay tight. This number only has to exceed
    * their sum for the largest model the suite is generated from.
    */
-  suiteTimeoutMs: int("E2E_SUITE_TIMEOUT_MS", 180_000),
+  suiteTimeoutMs: int("E2E_SUITE_TIMEOUT_MS", {{config.suiteTimeoutMs}}),
 
   /** Milliseconds to wait for an async workflow run to reach a terminal state. */
   workflowTimeoutMs: int("E2E_WORKFLOW_TIMEOUT_MS", 20_000),

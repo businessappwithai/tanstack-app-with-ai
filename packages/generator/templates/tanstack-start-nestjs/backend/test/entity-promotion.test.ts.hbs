@@ -203,15 +203,15 @@ describe('EntityPromotion — associated work fails', () => {
     },
   };
 
-  it('keeps the record draft and rolls the transaction back', async () => {
+  it('puts the record in Error and rolls the transaction back', async () => {
     const mock = createMockDb();
     const result = await makeService(mock, failingRules).promote('bus_patient', 'p1', 'create', { id: 'p1' });
 
     expect(result.promoted).toBe(false);
-    expect(result.docStatus).toBe('draft');
+    expect(result.docStatus).toBe('error');
     expect(mock.rolledBack).toBe(true);
     // The only surviving write is the failure note — never a doc_status: final.
-    expect(mock.docStatusWrites().every((w) => w.fields.doc_status === 'draft')).toBe(true);
+    expect(mock.docStatusWrites().every((w) => w.fields.doc_status === 'error')).toBe(true);
   });
 
   it('records the failure on the row so it survives the response', async () => {
@@ -219,7 +219,7 @@ describe('EntityPromotion — associated work fails', () => {
     await makeService(mock, failingRules).promote('bus_patient', 'p1', 'create', { id: 'p1' });
 
     const note = mock.docStatusWrites().at(-1)!;
-    expect(note.fields.doc_status).toBe('draft');
+    expect(note.fields.doc_status).toBe('error');
     expect(String(note.fields.doc_status_message)).toContain('could not be finalised');
     // Written outside the rolled-back transaction, or it would vanish with it.
     expect(note.inTransaction).toBe(false);
@@ -239,7 +239,7 @@ describe('EntityPromotion — associated work fails', () => {
     const mock = createMockDb();
     const result = await makeService(mock, failingRules).promote('bus_patient', 'p1', 'create', { id: 'p1' });
 
-    expect(result.message).toContain('kept as a draft');
+    expect(result.message).toContain('Your changes are saved');
     expect(result.message).toContain('rolled back');
     expect(result.message).toContain('retry');
   });
@@ -252,7 +252,7 @@ describe('EntityPromotion — associated work fails', () => {
 
     expect(result.failedStep).toBe('running the associated workflows');
     expect(result.message).toContain('broken-flow');
-    expect(result.docStatus).toBe('draft');
+    expect(result.docStatus).toBe('error');
   });
 
   it('never throws — a failed promotion is a result, not an exception', async () => {
@@ -278,14 +278,14 @@ describe('EntityPromotion — associated work fails', () => {
 // ── 4. The job runner itself fails ───────────────────────────────────────────
 
 describe('EntityPromotion — dispatch failure', () => {
-  it('keeps the record draft and blames the job runner, not the data', async () => {
+  it('puts the record in Error and blames the job runner, not the data', async () => {
     const mock = createMockDb();
     const result = await makeService(mock, noActions).recordDispatchFailure(
       'bus_patient', 'p1', 'create', 'connect ECONNREFUSED api.trigger.dev:443',
     );
 
     expect(result.promoted).toBe(false);
-    expect(result.docStatus).toBe('draft');
+    expect(result.docStatus).toBe('error');
     expect(result.failedStep).toContain('Trigger.dev');
     expect(result.message).toContain('ECONNREFUSED');
   });

@@ -307,8 +307,6 @@ interface SysField {
   seq_no: number;                 // Display sequence (ORDER BY THIS!)
   seq_no_grid: number;            // Grid/table column sequence
   display_length?: number;        // Display width in characters
-  x_position?: number;            // X coordinate (1-6 grid)
-  y_position?: number;            // Y position (row number)
   column_span?: number;           // Number of columns to span
   num_lines?: number;             // Number of lines (for text areas)
   sort_no?: number;               // Default sort order

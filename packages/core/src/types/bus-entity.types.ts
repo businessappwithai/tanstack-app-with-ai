@@ -148,7 +148,8 @@ export function entityToBusEntity(entity: Entity, declared?: Map<string, string>
       entity.attributes.map((attr, index) =>
         attributeToBusAttribute(attr, index, entity.primaryKey, declared)
       ),
-      entity.primaryKey
+      entity.primaryKey,
+      entity.name
     ),
   };
 }
@@ -156,9 +157,10 @@ export function entityToBusEntity(entity: Entity, declared?: Map<string, string>
 /** Mark the columns that make up the record's display value. */
 function withIdentifiers(
   attributes: BusEntityAttribute[],
-  primaryKey?: string
+  primaryKey?: string,
+  entityName?: string
 ): BusEntityAttribute[] {
-  const identifiers = new Set(identifierColumnNames(attributes, primaryKey));
+  const identifiers = new Set(identifierColumnNames(attributes, primaryKey, entityName));
   return attributes.map((attribute) => ({
     ...attribute,
     isIdentifier: identifiers.has(attribute.name),
@@ -234,16 +236,46 @@ const SEMANTIC_REFERENCE = {
  * Returns the names in the order they should be concatenated.
  */
 export function identifierColumnNames(
-  attributes: Array<{ name: string; type?: string; unique?: boolean; isForeignKey?: boolean }>,
-  primaryKey?: string
+  attributes: Array<{
+    name: string;
+    type?: string;
+    unique?: boolean;
+    isForeignKey?: boolean;
+    enumReferenceId?: number;
+  }>,
+  primaryKey?: string,
+  entityName?: string
 ): string[] {
-  const names = new Set(attributes.map((attribute) => attribute.name));
-  const has = (name: string) => names.has(name);
+  const byName = new Map(attributes.map((attribute) => [attribute.name, attribute]));
+  const has = (name: string) => byName.has(name);
+
+  /* The entity's own name, as its columns are prefixed with it: `department_name`
+     and `department_code` on `Department`, whose key is `department_id`. A model that
+     prefixes every column this way has no bare `name` or `code`, and without this the
+     record fell through to the join-entity rule and was called by its parents —
+     `FACILITY 3 · FACILITY 3` for a department. Never a reference, never an enum. */
+  const prefixes = [
+    primaryKey?.endsWith("_id") ? primaryKey.slice(0, -3) : undefined,
+    entityName ? entityName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase() : undefined,
+  ].filter((prefix, i, all): prefix is string => !!prefix && all.indexOf(prefix) === i);
+  const prefixed = (...suffixes: string[]): string | undefined => {
+    for (const prefix of prefixes) {
+      for (const suffix of suffixes) {
+        const attribute = byName.get(`${prefix}_${suffix}`);
+        if (attribute && !attribute.isForeignKey && !attribute.enumReferenceId) {
+          return attribute.name;
+        }
+      }
+    }
+    return undefined;
+  };
 
   /* One column that names the record outright. */
   for (const candidate of ["name", "full_name", "display_name", "title", "label", "subject"]) {
     if (has(candidate)) return [candidate];
   }
+  const ownName = prefixed("name", "title", "label");
+  if (ownName) return [ownName];
 
   /* A person: two columns that only mean anything together. This is the case
      the concatenation exists for, and the one the old rule could not express. */
@@ -254,6 +286,8 @@ export function identifierColumnNames(
   for (const candidate of ["code", "reference", "number"]) {
     if (has(candidate)) return [candidate];
   }
+  const ownCode = prefixed("code", "reference", "number");
+  if (ownCode) return [ownCode];
 
   /* A join entity, whose identity is the pair of records it joins.
      `CampaignMember` is a campaign and a contact; nothing else about it names
@@ -272,15 +306,34 @@ export function identifierColumnNames(
   if (references.length >= 2) return references.slice(0, 2).map((attribute) => attribute.name);
 
   /* Failing all of that, the first plain text column the model declared that is
-     neither the key nor a pointer at another record. */
+     neither the key, a pointer at another record, nor a closed vocabulary. A column
+     bound to a `%%enum` (a `status`, a `stage`) says what the record is *doing*, not
+     which record it is: every pack read "active", and a lifecycle owns the column, so
+     no form even offers it. */
   const readable = attributes.find(
     (attribute) =>
       attribute.name !== primaryKey &&
       !attribute.isForeignKey &&
+      !attribute.enumReferenceId &&
       !attribute.name.endsWith("_id") &&
       (attribute.type === "string" || attribute.type === "text")
   );
-  return readable ? [readable.name] : [];
+  if (readable) return [readable.name];
+
+  /* No text of its own: a record with one parent and a date is told apart by whose
+     it is and when — a class pack is "Dennis Lindgren · 2026-08-26". The reference
+     holds a uuid, so whoever renders this resolves it through the parent's own label,
+     as for a join entity above. */
+  const parent = attributes.find(
+    (attribute) =>
+      attribute.name !== primaryKey &&
+      attribute.isForeignKey &&
+      isForeignKeyColumnName(attribute.name)
+  );
+  const when = attributes.find(
+    (attribute) => attribute.type === "date" || attribute.type === "datetime"
+  );
+  return parent && when ? [parent.name, when.name] : [];
 }
 
 export function attributeReferenceId(attr: EntityAttribute, entityPrimaryKey?: string): number {
@@ -784,8 +837,6 @@ export function generateSysFields(
     seq_no: seqNumbers[index] ?? (index + 1) * 10,
     seq_no_grid: (index + 1) * 10,
     display_length: undefined,
-    x_position: undefined,
-    y_position: undefined,
     column_span: undefined,
     num_lines: undefined,
     is_displayed: true,

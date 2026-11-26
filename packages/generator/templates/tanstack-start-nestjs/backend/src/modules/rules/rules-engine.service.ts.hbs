@@ -21,10 +21,11 @@
  * Project: {{project.name}}
  */
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ZenEngine } from '@gorules/zen-engine';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { getLogger } from '../../common/logging/logger.service';
 
 export interface RuleAction {
   type: 'validate' | 'notify' | 'prevent' | 'transform' | 'cascade-update' | 'cascade-delete' | 'cascade-create' | 'trigger-workflow';
@@ -65,9 +66,23 @@ interface JdmViolation {
   transformData?: Record<string, unknown> | string;
 }
 
+/**
+ * A record as zen reads it.
+ *
+ * What reaches a rule is often a row read back from the database, whose date
+ * columns are Date objects — and a Date reaches zen as `{}`. A rule whose schema
+ * types `due_on` as a string then failed on every such record ("/due_on: {} is
+ * not of types null, string"), the failure was logged as a warning, and the
+ * write went through: every rule on an entity with a date column was silently
+ * off. The JSON form is what zen reads — a Date becomes its ISO string.
+ */
+function asZenInput(data: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(data ?? {})) as Record<string, unknown>;
+}
+
 @Injectable()
 export class RulesEngine implements OnModuleDestroy {
-  private readonly logger = new Logger(RulesEngine.name);
+  private readonly log = getLogger('rules');
 
   /** Single ZenEngine instance — thread-safe, reused across requests */
   private readonly engine: ZenEngine;
@@ -103,10 +118,18 @@ export class RulesEngine implements OnModuleDestroy {
     action: 'create' | 'update' | 'delete',
     dbRuleName?: string,
   ): Promise<RuleEvaluationResult[]> {
-    this.logger.log(`Evaluating rules for ${entityType}:${action}`);
+
+    // A %%rule drawn as a flowchart with no %%action rows is documentation: its
+    // switch and expression nodes carry no `content`, which the engine rejects
+    // with "missing field `content`". It decides nothing, so say nothing —
+    // rather than logging an error on every write to the entity.
+    if (this.isDiagramOnly(jdmContent)) {
+      this.log.event('rules.engine.skipped', { entity: entityType, reason: 'the rule is a diagram only' });
+      return [];
+    }
 
     try {
-      const decision = this.engine.createDecision(Buffer.from(jdmContent));
+      const decision = this.engine.createDecision(Buffer.from(this.asJdmGraph(jdmContent)));
       // `_operation` carries the CRUD verb. It is deliberately not called
       // `action`: that name belongs to the record. A model with an `action`
       // column could never fire its own rules against it, because the engine
@@ -115,7 +138,7 @@ export class RulesEngine implements OnModuleDestroy {
       // injected value made the field look present even when it was omitted.
       // Rules read the operation from `_operation`; the payload is passed
       // through untouched.
-      const result = await decision.evaluate({ ...data, _operation: action });
+      const result = await decision.evaluate({ ...asZenInput(data), _operation: action });
 
       let violations: JdmViolation[] = [];
 
@@ -129,11 +152,11 @@ export class RulesEngine implements OnModuleDestroy {
         ruleId: dbRuleName || v.ruleId || v.rule_id || 'unknown',
         ruleName: dbRuleName || v.ruleId || v.rule_id || 'unknown',
         matched: true,
-        actions: [{ type: v.action as RuleAction['type'], config: this.toActionConfig(v) }],
+        actions: [{ type: this.actionType(v.action), config: this.toActionConfig(v) }],
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error evaluating rules for ${entityType}: ${message}`);
+      this.log.event('rules.evaluation.failed', { entity: entityType, rule: null, err: error });
       return [
         {
           ruleId: 'engine-error',
@@ -159,11 +182,10 @@ export class RulesEngine implements OnModuleDestroy {
     data: Record<string, unknown>,
     action: 'create' | 'update' | 'delete',
   ): Promise<RuleEvaluationResult[]> {
-    this.logger.log(`Evaluating rules for ${entityType}:${action}`);
 
     const jdmFile = this.jdmFiles[entityType];
     if (!jdmFile) {
-      this.logger.debug(`No JDM rules configured for entity: ${entityType}`);
+      this.log.event('rules.engine.skipped', { entity: entityType, reason: 'no rules configured' });
       return [];
     }
 
@@ -172,7 +194,7 @@ export class RulesEngine implements OnModuleDestroy {
     try {
       content = readFileSync(jdmPath);
     } catch {
-      this.logger.warn(`JDM file not found for ${entityType}: ${jdmPath}`);
+      this.log.event('rules.definition.missing', { entity: entityType, path: jdmPath });
       return [];
     }
 
@@ -187,7 +209,7 @@ export class RulesEngine implements OnModuleDestroy {
       // injected value made the field look present even when it was omitted.
       // Rules read the operation from `_operation`; the payload is passed
       // through untouched.
-      const result = await decision.evaluate({ ...data, _operation: action });
+      const result = await decision.evaluate({ ...asZenInput(data), _operation: action });
 
       // hitPolicy "collect" returns an array; single-match returns an object or null
       if (Array.isArray(result.result)) {
@@ -197,7 +219,7 @@ export class RulesEngine implements OnModuleDestroy {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error evaluating rules for ${entityType}: ${message}`);
+      this.log.event('rules.evaluation.failed', { entity: entityType, rule: null, err: error });
       return [
         {
           ruleId: 'engine-error',
@@ -213,8 +235,306 @@ export class RulesEngine implements OnModuleDestroy {
       ruleId: v.ruleId,
       ruleName: v.ruleId,
       matched: true,
-      actions: [{ type: v.action as RuleAction['type'], config: this.toActionConfig(v) }],
+      actions: [{ type: this.actionType(v.action), config: this.toActionConfig(v) }],
     }));
+  }
+
+  /**
+   * A stored rule, as the graph the engine evaluates.
+   *
+   * The rule editor saves what it edits — a bare decision table, `{ inputs,
+   * outputs, rules }` — while the engine needs a JDM graph with `nodes`. Every
+   * rule created in the editor, and every model rule re-saved there, was
+   * therefore reported as "missing field `nodes`" and refused nothing. A graph
+   * is passed through untouched; a table is wrapped in one here, which also
+   * mends the rows already saved that way.
+   *
+   * The editor writes cells as an author reads them: `"cancelled"` or `> 0`
+   * under an input, and plain words under an outcome — `validation-error`, a
+   * sentence of message. An input cell is a unary test against its field, so
+   * a bare word is quoted to mean equality. An outcome cell is an expression,
+   * where `validation-error` is a subtraction, so text is written as a string
+   * literal unless it already is one or is a number, a boolean or an object.
+   */
+  /** True for a graph whose logic nodes carry no `content` (a drawn, inert rule). */
+  isDiagramOnly(jdmContent: string): boolean {
+    try {
+      const nodes = (JSON.parse(jdmContent) as { nodes?: Array<{ type?: string; content?: unknown }> })
+        .nodes;
+      if (!Array.isArray(nodes)) return false;
+      return nodes.some(
+        (node) =>
+          node.type !== 'inputNode' && node.type !== 'outputNode' && node.content === undefined,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /** A stored rule as the graph the engine runs — what every reader goes through. */
+  prepare(jdmContent: string): string {
+    return this.asJdmGraph(jdmContent);
+  }
+
+  /** Source the function sandbox must never be handed. */
+  private static readonly FORBIDDEN_FUNCTION_SOURCE = /\b(?:import|require|fetch|eval|process|globalThis)\b/;
+
+  /**
+   * Why a graph the rule editor drew cannot run, one sentence each.
+   *
+   * The same checks the modelling tool's compiler makes, so a graph refused
+   * there is refused here: a function with no handler, or one reaching for the
+   * network, the module system or the process; a node with no content; an edge
+   * to a node that is not there.
+   */
+  graphProblems(jdmContent: string): string[] {
+    let graph: { nodes?: Array<Record<string, any>>; edges?: Array<Record<string, any>> };
+    try {
+      graph = JSON.parse(jdmContent);
+    } catch {
+      return ['the rule is not valid JSON'];
+    }
+    if (!graph || !Array.isArray(graph.nodes)) return [];
+    const problems: string[] = [];
+    const ids = new Set<string>();
+    for (const node of graph.nodes) {
+      const label = String(node.name ?? node.id);
+      ids.add(String(node.id));
+      if (node.type === 'inputNode' || node.type === 'outputNode') continue;
+      if (node.content === undefined || node.content === null) {
+        problems.push(`${node.type} "${label}" has no content, so the engine would reject it`);
+      }
+      if (node.type === 'functionNode') {
+        const content = node.content;
+        const source =
+          typeof content === 'string'
+            ? content
+            : typeof content?.source === 'string'
+              ? content.source
+              : '';
+        if (!/\bhandler\b/.test(source)) {
+          problems.push(
+            `functionNode "${label}" defines no handler; write export const handler = async (input) => ({ ... })`,
+          );
+        }
+        if (RulesEngine.FORBIDDEN_FUNCTION_SOURCE.test(source)) {
+          problems.push(
+            `functionNode "${label}" uses import, require, fetch, eval, process or globalThis, which the sandbox does not allow`,
+          );
+        }
+      }
+    }
+    for (const edge of graph.edges ?? []) {
+      if (!ids.has(String(edge.sourceId)) || !ids.has(String(edge.targetId))) {
+        problems.push(`edge "${String(edge.id)}" joins a node that is not in the graph`);
+      }
+    }
+    return problems;
+  }
+
+  /**
+   * Keep the Record node's schema from refusing a record the application holds.
+   *
+   * The editor writes each enumerated field as `{ type: ["string", "null"], enum:
+   * [...] }`, so the Simulator offers the model's values. JSON Schema judges `enum`
+   * apart from `type`, and the application writes records that are not in that list:
+   * an optional field left blank (`industry: null`) and a state column during a save
+   * (the lifecycle holds a record as `draft`, or `error`, whatever the model's
+   * vocabulary says). Either made zen raise a NodeError, the engine reported it and
+   * let the write through — a rule that refuses a hot lead refused nothing on any
+   * lead with a blank industry. The API already refuses a value outside an enum at
+   * the write, so the schema is not where that is judged: the `enum` is dropped from
+   * what is evaluated, and the type is kept. What is stored is left as the author drew it.
+   */
+  private relaxEnums(node: Record<string, any>): Record<string, any> {
+    const raw = node.content?.schema;
+    if (typeof raw !== 'string') return node;
+    try {
+      const schema = JSON.parse(raw) as {
+        properties?: Record<string, { type?: unknown; enum?: unknown[] }>;
+      };
+      let changed = false;
+      for (const property of Object.values(schema.properties ?? {})) {
+        if (Array.isArray(property.enum)) {
+          delete property.enum;
+          changed = true;
+        }
+      }
+      return changed ? { ...node, content: { ...node.content, schema: JSON.stringify(schema) } } : node;
+    } catch {
+      return node;
+    }
+  }
+
+  /**
+   * Speak the runtime's vocabulary in a graph the editor drew.
+   *
+   * zen runs a function node only from `content: { source }`: a bare string is
+   * refused, or returns {} and decides nothing. A transform row needs the one
+   * `transformData` object the runtime applies — the editor's Field and Value
+   * columns are for the author to read, not for the runtime.
+   */
+  private normalizeGraph(graph: { nodes: Array<Record<string, any>> }): unknown {
+    const literal = (cell: unknown): string | null => {
+      const match = String(cell ?? '')
+        .trim()
+        .match(/^(?:'(.*)'|"(.*)")$/s);
+      return match ? (match[1] ?? match[2] ?? '') : null;
+    };
+    return {
+      ...graph,
+      nodes: graph.nodes.map((node) => {
+        if (node.type === 'functionNode' && typeof node.content === 'string') {
+          return { ...node, content: { source: node.content } };
+        }
+        if (node.type === 'inputNode') return this.relaxEnums(node);
+        const original = node.content as
+          | {
+              outputs?: Array<{ id: string; name?: string; field?: string }>;
+              rules?: Array<Record<string, unknown>>;
+            }
+          | undefined;
+        if (node.type !== 'decisionTableNode' || !Array.isArray(original?.rules)) return node;
+        // The editor's word for a refusal is `validation-error`; this engine's is
+        // `prevent`. The Simulator should show the answer the application acts on,
+        // so the cells are put in the engine's word here, as the compiler does.
+        // An input cell that says only "is empty" (`null`) or "is not empty" (`!= null`) is
+        // widened to cover a blank string too: a text field a person cleared arrives as "".
+        const inputIds = new Set(((original as { inputs?: Array<{ id: string }> }).inputs ?? []).map((c) => c.id));
+        const widen = (key: string, cell: string): string => {
+          if (!inputIds.has(key)) return cell;
+          const text = cell.trim();
+          if (text === 'null') return 'null, ""';
+          if (text === '!= null') return '!= null and != ""';
+          return cell;
+        };
+        const table = {
+          ...original,
+          rules: original.rules.map((row) =>
+            Object.fromEntries(
+              Object.entries(row).map(([key, cell]) => [
+                key,
+                typeof cell === 'string' ? widen(key, cell.replace(/(["'])validation-error\1/g, '$1prevent$1')) : cell,
+              ]),
+            ),
+          ),
+        };
+        const outputs = table.outputs ?? [];
+        const fieldColumn = outputs.find((c) => c.field === 'field');
+        const valueColumn = outputs.find((c) => c.field === 'value');
+        const actionColumn = outputs.find((c) => c.field === 'action');
+        if (
+          !fieldColumn ||
+          !valueColumn ||
+          !actionColumn ||
+          outputs.some((c) => c.field === 'transformData')
+        ) {
+          return { ...node, content: table };
+        }
+        const dataColumn = { id: 'transformData-auto', name: 'Transform Data', field: 'transformData' };
+        return {
+          ...node,
+          content: {
+            ...table,
+            outputs: [...outputs, dataColumn],
+            rules: table.rules.map((row) => {
+              const target = literal(row[fieldColumn.id])?.trim();
+              const isTransform = literal(row[actionColumn.id])?.trim() === 'transform';
+              // Every row needs a cell in the new column: zen skips a row that has none.
+              if (!isTransform || !target) return { ...row, [dataColumn.id]: row[dataColumn.id] ?? '' };
+              const value = literal(row[valueColumn.id]) ?? String(row[valueColumn.id] ?? '');
+              const data = JSON.stringify({ [target]: value }).replace(/'/g, "\\'");
+              return { ...row, [dataColumn.id]: `'${data}'` };
+            }),
+          },
+        };
+      }),
+    };
+  }
+
+  private asJdmGraph(jdmContent: string): string {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jdmContent);
+    } catch {
+      return jdmContent;
+    }
+    const table = parsed as {
+      nodes?: unknown;
+      hitPolicy?: string;
+      inputs?: Array<{ id: string; name?: string; field?: string }>;
+      outputs?: Array<{ id: string; name?: string; field?: string }>;
+      rules?: Array<Record<string, string>>;
+    };
+    if (table && typeof table === 'object' && table.nodes) {
+      return JSON.stringify(this.normalizeGraph(parsed as { nodes: Array<Record<string, any>> }));
+    }
+    if (!table || typeof table !== 'object') return jdmContent;
+    if (!Array.isArray(table.inputs) || !Array.isArray(table.outputs) || !Array.isArray(table.rules)) {
+      return jdmContent;
+    }
+
+    const quote = (text: string) => `'${text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+    const isLiteral = (text: string) =>
+      /^'.*'$|^".*"$/.test(text) ||
+      /^-?\d+(\.\d+)?$/.test(text) ||
+      /^(true|false|null)$/.test(text) ||
+      /^[[{]/.test(text);
+    const inputCell = (raw: string) => {
+      const text = (raw ?? '').trim();
+      if (!text || isLiteral(text)) return text;
+      return /^[A-Za-z_][\w-]*$/.test(text) ? quote(text) : text;
+    };
+    const outputCell = (raw: string) => {
+      const text = (raw ?? '').trim();
+      if (!text) return "''";
+      return isLiteral(text) ? text : quote(text);
+    };
+
+    const rules = table.rules.map((row) => {
+      const next: Record<string, string> = { _id: row._id ?? '' };
+      for (const column of table.inputs ?? []) next[column.id] = inputCell(row[column.id] ?? '');
+      for (const column of table.outputs ?? []) next[column.id] = outputCell(row[column.id] ?? '');
+      return next;
+    });
+
+    return JSON.stringify({
+      nodes: [
+        { id: 'input', type: 'inputNode', name: 'Input', position: { x: 0, y: 0 } },
+        {
+          id: 'table',
+          type: 'decisionTableNode',
+          name: 'Decision table',
+          position: { x: 300, y: 0 },
+          content: {
+            hitPolicy: table.hitPolicy === 'first' ? 'first' : 'collect',
+            inputs: table.inputs.map((c) => ({ id: c.id, name: c.name ?? c.field ?? c.id, field: c.field ?? '' })),
+            outputs: table.outputs.map((c) => ({ id: c.id, name: c.name ?? c.field ?? c.id, field: c.field || c.name || c.id })),
+            rules,
+          },
+        },
+        { id: 'output', type: 'outputNode', name: 'Output', position: { x: 600, y: 0 } },
+      ],
+      edges: [
+        { id: 'e1', sourceId: 'input', targetId: 'table', type: 'edge' },
+        { id: 'e2', sourceId: 'table', targetId: 'output', type: 'edge' },
+      ],
+    });
+  }
+
+  /**
+   * A row's action, in this engine's vocabulary.
+   *
+   * The rule editor offers EML's words — the ones a model is written in and
+   * the modelling tool's editor writes — and EML says `validation-error` where
+   * this engine says `prevent`. The generator translates when it compiles a
+   * model's rules, but a rule written in this application's own editor goes
+   * straight into `sys_rule_definitions`, so an untranslated row matched and
+   * was then dropped by `validate()`: the rule refused nothing. Accept both.
+   */
+  private actionType(raw: unknown): RuleAction['type'] {
+    const type = typeof raw === 'string' ? raw.trim() : '';
+    return (type === 'validation-error' ? 'prevent' : type) as RuleAction['type'];
   }
 
   /**
@@ -245,7 +565,7 @@ export class RulesEngine implements OnModuleDestroy {
       const parsed = JSON.parse(value);
       return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
     } catch {
-      this.logger.warn(`Rule action data is not valid JSON: ${value}`);
+      this.log.event('rules.engine.skipped', { entity: null, reason: 'rule action data is not valid JSON' });
       return undefined;
     }
   }

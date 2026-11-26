@@ -223,7 +223,7 @@ lucide icon name.
 | `bun run type-check` | clean |
 | `bun run test` | 810 passed, 6 skipped, 69 files |
 | `bun run build:wasm-runtime -- --check` | up to date |
-| `bun run build:fullstack-browser --check` | rebuilt (bun 1.4.0 / linux-x64, matching CI) and re-checked clean; `grep pino` still 0 |
+| `bun run build:fullstack-browser --check` | rebuilt (linux-x64, on the bun CI pins) and re-checked clean; `grep pino` still 0 |
 | `bun run build:wasm-browser -- --check` | up to date |
 | `bun run build:language-tools --check` | up to date |
 | `bun run test:language-tools` | agrees with the CLI on 5 models |

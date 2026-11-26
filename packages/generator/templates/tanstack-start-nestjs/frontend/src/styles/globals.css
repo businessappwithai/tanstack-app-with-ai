@@ -11,7 +11,7 @@
  * - Destructive: Orange (#E07B54)
  * - Backgrounds: Light (#FAFAFA, #FFFFFF)
  * - Borders: Refined (#E5E5E5)
- * - Text: Dark (#1A1A1A, #666666, #888888)
+ * - Text: Dark (#1A1A1A, #666666, #6B6B6B)
  *
  */
 
@@ -38,7 +38,7 @@
     --secondary-foreground: 0 0% 10%; /* #1A1A1A */
 
     --muted: 0 0% 96%; /* #F5F5F5 */
-    --muted-foreground: 0 0% 53%; /* #888888 */
+    --muted-foreground: 0 0% 42%; /* #6B6B6B — 5.1:1 on the page background (WCAG AA); #888888 was 3.4:1 */
 
     --accent: 180 79% 24%; /* #0D6E6E - Teal */
     --accent-foreground: 0 0% 100%; /* #FFFFFF */
@@ -206,7 +206,7 @@
   }
 
   .swiss-badge-muted {
-    @apply swiss-badge bg-[#FAFAFA] text-[#888888];
+    @apply swiss-badge bg-[#FAFAFA] text-[#6B6B6B];
   }
 
   /* Swiss Clean Link */

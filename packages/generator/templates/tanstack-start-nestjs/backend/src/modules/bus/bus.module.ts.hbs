@@ -16,11 +16,12 @@ import { BusController } from './bus.controller';
 import { BusService } from './bus.service';
 import { EntityPromotionService } from './entity-promotion.service';
 import { PromotionDispatcher } from './promotion-dispatcher.service';
+import { TransitionService } from './transition.service';
 
 @Module({
   imports: [DatabaseModule, WorkflowModule, AuditModule, RulesModule],
   controllers: [BusController],
-  providers: [BusService, EntityPromotionService, PromotionDispatcher],
-  exports: [BusService, EntityPromotionService],
+  providers: [BusService, EntityPromotionService, PromotionDispatcher, TransitionService],
+  exports: [BusService, EntityPromotionService, TransitionService],
 })
 export class BusModule {}

@@ -328,8 +328,8 @@ export class SysController {
 
   @Get('field-groups')
   @ApiOperation({ summary: 'List all field groups' })
-  async findAllFieldGroups(@Query('entity') entity?: string) {
-    return this.sysService.findAllFieldGroups(entity);
+  async findAllFieldGroups(@Query('entity') entity?: string, @Query('tabId') tabId?: string) {
+    return this.sysService.findAllFieldGroups(entity, tabId);
   }
 
   @Get('field-groups/:id')
@@ -553,6 +553,36 @@ export class SysController {
     return this.sysService.createSysUser(body);
   }
 
+  /**
+   * Change an account: name, email, whether it is active, its roles, and —
+   * when one is given — a new password. Administrators only.
+   */
+  @Patch('users/:id')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Update a user account (administrators only)' })
+  async updateSysUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      name?: string;
+      email?: string;
+      password?: string;
+      isActive?: boolean;
+      roleNames?: string[];
+    },
+    @CurrentUser() user: CurrentUser,
+  ) {
+    return this.sysService.updateSysUser(id, body, user?.sysUserId);
+  }
+
+  /** Delete an account and its sign-in. Never your own, never the last administrator. */
+  @Delete('users/:id')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Delete a user account (administrators only)' })
+  async deleteSysUser(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: CurrentUser) {
+    return this.sysService.deleteSysUser(id, user?.sysUserId);
+  }
+
   // ============================================================================
   // SYS_ROLE Endpoints
   // ============================================================================
@@ -561,6 +591,35 @@ export class SysController {
   @ApiOperation({ summary: 'List all system roles' })
   async findAllSysRoles() {
     return this.sysService.findAllSysRoles();
+  }
+
+  /** Create a role. Administrators only, as account creation is. */
+  @Post('roles')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Create a role (administrators only)' })
+  async createSysRole(
+    @Body() body: { name: string; description?: string; isMasterRole?: boolean }
+  ) {
+    return this.sysService.createSysRole(body);
+  }
+
+  /** Change a role's name, description or master flag. Administrators only. */
+  @Patch('roles/:id')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Update a role (administrators only)' })
+  async updateSysRole(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { name?: string; description?: string; isMasterRole?: boolean },
+  ) {
+    return this.sysService.updateSysRole(id, body);
+  }
+
+  /** Delete a role nobody holds. Administrators only. */
+  @Delete('roles/:id')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Delete a role (administrators only)' })
+  async deleteSysRole(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sysService.deleteSysRole(id);
   }
 
   // ============================================================================
@@ -613,6 +672,10 @@ export class SysController {
     return {
       name: this.systemConfigService.getAppName(),
       description: this.systemConfigService.getAppDescription(),
+      // The administrator's two switches for the chat assistant. The assistant
+      // reads them here, with the session of whoever is using it.
+      chatEnabled: this.systemConfigService.getBoolean('CHAT_ENABLED', true),
+      chatOnlyMode: this.systemConfigService.getBoolean('CHAT_ONLY_MODE', false),
     };
   }
 
@@ -661,5 +724,47 @@ export class SysController {
   async deleteSystemConfig(@Param('id', ParseUUIDPipe) id: string) {
     await this.systemConfigService.remove(id);
     return { success: true };
+  }
+
+  // ============================================================================
+  // Access Grants — role × entity × operation (administrators only)
+  // ============================================================================
+
+  @Get('access-grants/summary')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Role and grant counts for the dashboard (administrators only)' })
+  async getAccessGrantsSummary() {
+    return this.sysService.getAccessGrantsSummary();
+  }
+
+  @Get('access-grants')
+  @Roles('admin')
+  @ApiOperation({ summary: 'List access grants (administrators only)' })
+  async findAllAccessGrants(
+    @Query('roleId') roleId?: string,
+    @Query('tableName') tableName?: string,
+  ) {
+    return this.sysService.findAllAccessGrants({ roleId, tableName });
+  }
+
+  @Post('access-grants')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Create an access grant (administrators only)' })
+  async createAccessGrant(
+    @Body() body: {
+      tableName: string;
+      action: string;
+      roleName: string;
+      kind?: string;
+    },
+  ) {
+    return this.sysService.createAccessGrant(body);
+  }
+
+  @Delete('access-grants/:id')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Delete an access grant (administrators only)' })
+  async deleteAccessGrant(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sysService.deleteAccessGrant(id);
   }
 }

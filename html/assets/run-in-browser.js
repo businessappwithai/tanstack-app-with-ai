@@ -20,7 +20,7 @@
  */
 
 // The published validator, not the copy inside the generator bundle. Same engine
-// either way — but this is the file `llms-full.txt` §10 tells a model to validate
+// either way — but this is the file `llms.txt` §1.3 tells a model to validate
 // against, so the page and the protocol cannot drift into disagreeing about
 // whether a document is acceptable. `fixer.js` carries the checker with it,
 // which is what lets it re-check what it repaired.
@@ -560,9 +560,21 @@ function fail(html) {
  * whole point is that it has no dependencies. A single self-extracting shell
  * script is the honest trade: it is readable before it is run, which a zip is
  * not.
+ *
+ * It cannot carry PGlite's seventeen megabytes of WebAssembly, so the download
+ * is generated again without this page's PGlite URL — which would point the
+ * application at this host — and is started with `npm install && npm start`:
+ * the application's own server then serves the installed package.
  */
 $("download").addEventListener("click", () => {
   if (!state.files) return;
+  const { files } = generateFromSource({
+    source: state.source,
+    name: $("app-name").value.trim() || "Generated App",
+    adminEmail: $("admin-email").value.trim() || "admin@admin.com",
+    adminPassword: $("admin-password").value || "admin",
+    adminName: ($("admin-email").value.split("@")[0] || "admin").trim(),
+  });
   const name = ($("app-name").value.trim() || "generated-app")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -576,16 +588,16 @@ $("download").addEventListener("click", () => {
     `mkdir -p "${name}"`,
     `cd "${name}"`,
     "",
-    ...Object.entries(state.files).flatMap(([path, contents]) => [
+    ...Object.entries(files).flatMap(([path, contents]) => [
       `mkdir -p "$(dirname "${path}")"`,
       `cat > "${path}" <<'ERDWITHAI_EOF'`,
       contents.replace(/\r/g, ""),
       "ERDWITHAI_EOF",
       "",
     ]),
-    `echo "Wrote ${Object.keys(state.files).length} files into ${name}/"`,
-    `echo "Serve it over http (a Service Worker cannot start from file://):"`,
-    `echo "  npx serve ${name}"`,
+    `echo "Wrote ${Object.keys(files).length} files into ${name}/"`,
+    `echo "Start it (npm install fetches PostgreSQL, which ships as an npm package):"`,
+    `echo "  cd ${name} && npm install && npm start"`,
     "",
   ].join("\n");
 
@@ -605,6 +617,13 @@ $("reset").addEventListener("click", () => run(true));
 async function run(fresh) {
   if (!state.files) {
     fail("Generate the application first.");
+    return;
+  }
+  if (!state.pgliteUrl) {
+    fail(
+      "PostgreSQL (PGlite) is not beside this page, and it is never fetched from a CDN. " +
+        "Run `bun run vendor:pglite`, reload, and run again — or download the application."
+    );
     return;
   }
 
@@ -851,24 +870,31 @@ function escapeHtml(value) {
 const titleCase = (value) => value.replace(/\b\w/g, (character) => character.toUpperCase());
 
 /**
- * Prefer a locally served PGlite when one has been placed beside this page.
+ * Find the PGlite served beside this page.
  *
- * Seventeen megabytes of WebAssembly does not belong in a documentation folder,
- * so the default is the CDN — but `bun run vendor:pglite` puts a copy under
- * `assets/vendor/`, and a page that finds one should use it: it is faster, and
- * it makes the whole demonstration work with the network off.
+ * Postgres is never fetched from a CDN. `bun run vendor:pglite` puts a copy
+ * under `assets/vendor/pglite/` — not in git, it is seventeen megabytes — and a
+ * deployment of this page carries it the same way. Without it the page still
+ * generates an application, and says before the run step why it cannot start
+ * one here.
  */
 async function findLocalPglite() {
+  const url = new URL("assets/vendor/pglite/index.js", window.location.href).href;
   try {
-    const url = new URL("assets/vendor/pglite/index.js", window.location.href).href;
     const response = await fetch(url, { method: "HEAD" });
     if (response.ok) {
       state.pgliteUrl = url;
       say(`Using the local PostgreSQL build at ${url}`);
+      return;
     }
   } catch {
-    // The CDN default stands.
+    // Reported below, the same as a 404.
   }
+  say(
+    `PostgreSQL (PGlite) is not beside this page at ${url}. Run \`bun run vendor:pglite\` ` +
+      "to put it there; until then an application can be generated and downloaded, not run here.",
+    "warn"
+  );
 }
 
 await findLocalPglite();

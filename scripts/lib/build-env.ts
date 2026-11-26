@@ -9,7 +9,7 @@
  *                     Produced by `Bun.build`, whose output depends on the bun
  *                     version *and* the platform — the full-stack bundle is
  *                     807407 bytes built on macOS and 807697 on Linux, same
- *                     bun 1.4.0, same frozen lockfile.
+ *                     bun version, same frozen lockfile.
  *
  *   verbatim copies   runtime-assets.generated.ts, overlay-assets.generated.ts,
  *                     html/wasm-app/sw.js
@@ -33,7 +33,7 @@ const WORKFLOW = ".github/workflows/ci.yml";
 /** Every CI job runs on `ubuntu-latest`; the workflow holds no variable for it. */
 const CI_PLATFORM = "linux-x64";
 
-/** e.g. `bun 1.4.0 on linux-x64` — or node, if somehow run without Bun. */
+/** e.g. `bun 1.4.4 on linux-x64` — or node, if somehow run without Bun. */
 function runtimeLabel(): string {
   const runtime =
     typeof Bun === "undefined" ? `node ${process.versions.node}` : `bun ${Bun.version}`;

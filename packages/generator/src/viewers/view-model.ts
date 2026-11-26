@@ -104,8 +104,15 @@ export interface ViewStateMachine extends CompiledWorkflow {
   declaredValues?: string[];
   /** States the machine names that the enum does not declare. */
   undeclaredStates: string[];
-  /** Roles allowed to cross each transition, keyed by `from>to`. */
-  transitionRoles: Record<string, string[]>;
+  /**
+   * The sagas whose UpdateEntity step writes each state, keyed by state.
+   *
+   * A record moves by its action buttons; a saga that writes a state moves it
+   * too, along a drawn edge. This is that second kind: who besides the buttons
+   * puts a record in each state. The initial state is the system's to set and
+   * never appears.
+   */
+  stateWriters: Record<string, string[]>;
 }
 
 /** One step of a saga, with what it needs and whether the model supplied it. */
@@ -337,11 +344,15 @@ export function readModel(source: string): ViewModel {
   const workflowSections: EmlWorkflowSection[] = extractWorkflowSections(text);
   const titleOf = new Map(workflowSections.map((section) => [section.name, section.title]));
 
-  const transitionRoles = new Map<string, Record<string, string[]>>();
-  for (const rule of parsed.rbac.transitions) {
-    const forEntity = transitionRoles.get(rule.entity) ?? {};
-    for (const edge of rule.edges) forEntity[`${edge.from}>${edge.to}`] = rule.roles;
-    transitionRoles.set(rule.entity, forEntity);
+  /** `Entity.field=value` → the sagas whose UpdateEntity step writes it. */
+  const sagaWrites = new Map<string, string[]>();
+  for (const saga of parsed.sagas) {
+    for (const step of saga.steps) {
+      if (step.type !== "UpdateEntity" || !step.props.field || step.props.value === undefined) continue;
+      const target = (step.props.entity ?? saga.entity).trim();
+      const key = `${target}.${step.props.field.trim()}=${step.props.value.trim()}`;
+      sagaWrites.set(key, [...(sagaWrites.get(key) ?? []), saga.name]);
+    }
   }
 
   const workflows: ViewStateMachine[] = parsed.workflows.map((workflow) => {
@@ -356,7 +367,14 @@ export function readModel(source: string): ViewModel {
       undeclaredStates: declared.size
         ? workflow.states.map((state) => state.name).filter((name) => !declared.has(name))
         : [],
-      transitionRoles: transitionRoles.get(workflow.entity) ?? {},
+      stateWriters: Object.fromEntries(
+        workflow.states
+          .map((state): [string, string[]] => [
+            state.name,
+            column ? (sagaWrites.get(`${workflow.entity}.${column}=${state.name}`) ?? []) : [],
+          ])
+          .filter(([, writers]) => writers.length > 0)
+      ),
     };
   });
 

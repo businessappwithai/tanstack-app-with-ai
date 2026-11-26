@@ -16,15 +16,40 @@ initDb(collections);
 
 const byCollection = new Map((MODEL.entities ?? []).map((e) => [e.collection, services[e.name]]));
 
-function send(res, status, body, type = "application/json") {
+function send(res, status, body, type = "application/json", extra = {}) {
   const payload = type === "application/json" ? JSON.stringify(body, null, 2) : body;
   res.writeHead(status, {
     "Content-Type": type === "application/json" ? "application/json" : type,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, If-Match",
+    "Access-Control-Expose-Headers": "ETag",
+    ...extra,
   });
   res.end(payload);
+}
+
+/** A record answered with its version as an ETag, for the next If-Match. */
+function sendRecord(res, status, row) {
+  const extra = row?.version != null ? { ETag: `"${row.version}"` } : {};
+  return send(res, status, row, "application/json", extra);
+}
+
+/**
+ * The record version an If-Match header names — "3", 3, W/"3" or "v3".
+ * Absent or `*` means an unconditional save; anything else is a 400, because
+ * a client that sent a header meant it to be checked.
+ */
+function parseIfMatch(header) {
+  if (header === undefined || header === "" || header === "*") return undefined;
+  const match = /^(?:W\/)?"?v?(\d+)"?$/i.exec(String(header).trim());
+  if (!match) {
+    throw Object.assign(
+      new Error(`If-Match must name a record version, such as "3"; got ${header}`),
+      { status: 400 }
+    );
+  }
+  return Number(match[1]);
 }
 
 function readBody(req) {
@@ -78,14 +103,15 @@ const server = createServer(async (req, res) => {
 
       if (req.method === "GET" && !id) return send(res, 200, await svc.list());
       if (req.method === "POST" && !id)
-        return send(res, 201, await svc.create(await readBody(req)));
+        return sendRecord(res, 201, await svc.create(await readBody(req)));
       if (req.method === "GET" && id) {
         const row = await svc.get(id);
-        return row ? send(res, 200, row) : send(res, 404, { error: "Not found" });
+        return row ? sendRecord(res, 200, row) : send(res, 404, { error: "Not found" });
       }
       if (req.method === "PUT" && id) {
-        const row = await svc.update(id, await readBody(req));
-        return row ? send(res, 200, row) : send(res, 404, { error: "Not found" });
+        const expected = parseIfMatch(req.headers["if-match"]);
+        const row = await svc.update(id, await readBody(req), expected);
+        return row ? sendRecord(res, 200, row) : send(res, 404, { error: "Not found" });
       }
       if (req.method === "DELETE" && id) {
         const ok = await svc.remove(id);

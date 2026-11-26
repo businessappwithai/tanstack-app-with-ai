@@ -112,6 +112,17 @@ function nodeify(_name: string, script: string): string {
   // version of this left `bun run dev:backend` sitting untouched, because it
   // only ever looked at the start of the string.
   result = result
+    // `bun check` is Bun's own type checker; the browser application has no Bun,
+    // so it type-checks with the TypeScript compiler, as it always did. Before the
+    // bare-`bun` rule below, which would make it `node check`.
+    .replace(/\bbun check\b/g, "tsc --noEmit")
+    // `bun --bun <bin>` runs a package's bin on Bun's runtime instead of the Node its
+    // shebang names; on Node that is just the bin. First, before the bare-`bun` rule
+    // below turns it into `node --bun <bin>`, which Node refuses. The dev server's
+    // `HOST=127.0.0.1` goes with it: it is there because Bun, unlike Node, will not fall
+    // back to IPv4 when `::` cannot be bound, and a WebContainer keeps its own address.
+    .replace(/\bHOST=127\.0\.0\.1 bun --bun /g, "")
+    .replace(/\bbun --bun /g, "")
     .replace(/\bbunx --bun /g, "npx ")
     .replace(/\bbunx /g, "npx ")
     .replace(/\bbun x /g, "npx ")

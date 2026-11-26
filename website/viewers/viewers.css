@@ -467,7 +467,7 @@
 }
 
 .awv-edge.is-branch .awv-edge-line,
-.awv-edge.is-restricted .awv-edge-line {
+.awv-edge.is-unwritten .awv-edge-line {
   stroke: var(--awv-ink-faint);
 }
 
@@ -1468,7 +1468,7 @@
   color: var(--awv-ink-faint);
 }
 
-.awv-edge.is-restricted .awv-edge-line {
+.awv-edge.is-unwritten .awv-edge-line {
   stroke: var(--awv-decision);
   stroke-dasharray: 6 4;
 }

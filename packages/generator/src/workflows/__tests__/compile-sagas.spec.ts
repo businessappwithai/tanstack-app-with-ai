@@ -33,6 +33,33 @@ const CHAIN = `flowchart TD
     %%step E UpdateEntity field: status value: escalated
 `;
 
+describe("a saga bound to a status", () => {
+  it("is stored under ENTER:<STATE>, which the runner selects on the move into it", () => {
+    const [saga] = compileSagas(
+      [section(CHAIN, { trigger: "automatic", operation: "UPDATE", status: "to_be_reviewed" })],
+      ENTITIES
+    );
+    expect(saga?.operation).toBe("ENTER:TO_BE_REVIEWED");
+    expect(describeSaga(saga!)).toContain("moves the record to to be reviewed");
+  });
+
+  it("drops the status on a rule-triggered saga, which a rule resolves by name", () => {
+    const warnings: string[] = [];
+    const [saga] = compileSagas(
+      [section(CHAIN, { trigger: "rule", operation: "UPDATE", status: "approved" })],
+      ENTITIES,
+      (message) => warnings.push(message)
+    );
+    expect(saga?.operation).toBe("UPDATE");
+    expect(warnings.join(" ")).toMatch(/status is ignored/);
+  });
+
+  it("is untouched when no status is bound", () => {
+    const [saga] = compileSagas([section(CHAIN, { operation: "UPDATE" })], ENTITIES);
+    expect(saga?.operation).toBe("UPDATE");
+  });
+});
+
 describe("parseStepProps", () => {
   it("splits on the next key, so a value may contain spaces", () => {
     const props = parseStepProps("target: capaTitle operation: set value: CAPA for a deviation");

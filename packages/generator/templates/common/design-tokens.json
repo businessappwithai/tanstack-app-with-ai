@@ -25,7 +25,7 @@
     "surface": "#FFFFFF",
     "foreground": "#1A1A1A",
     "muted": "#F5F5F5",
-    "mutedForeground": "#888888",
+    "mutedForeground": "#6B6B6B",
     "primary": "#0D6E6E",
     "primaryForeground": "#FFFFFF",
     "destructive": "#E07B54",

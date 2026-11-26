@@ -122,10 +122,27 @@ LastState  --> [*]
 ```
 
 - States are treated as a **status enum** for the bound entity.
-- Transitions define the **allowed status changes**; the transition label is the
-  triggering event/action.
-- Bind with `%%workflow ... kind: state` and (optionally) restrict transitions
-  by role with `%%rbac`.
+- Transitions define the **moves a record makes**; the label is the event's name
+  and the button's.
+- Bind with `%%workflow ... kind: state`.
+- **The record lifecycle** (`language/state-field.ts`): a save puts a record in
+  Draft and runs its rules and workflows; accepted, it moves to the machine's
+  first state (or to Final when the entity has no machine); refused, it goes to
+  Error with the reason and stays editable. From there it moves only by its
+  **action buttons**, along drawn edges; every end state (`x --> [*]`) is Final
+  and locked, and Reopen takes it back to Draft. `final` and `error` are reserved
+  (`EML509`).
+- **The state field is never typed**: the column the machine drives — `status`,
+  else `state`, else `stage` — is never changed through a form or a direct API
+  write. A saga may write a state too, but only along a drawn edge, and only one
+  the machine draws (`EML508`). A rule and saga pair that only moves a record its
+  buttons move is retired (`EML512`, auto-fixed).
+- **Each move is a role's**: `%%rbac role:<roles> on <Entity>.<event>` (or
+  `from->to`, or `reopen`). A move no line names is open to whoever may update
+  the record (`EML511`, an info); Reopen no line names is the administrator's.
+- **Where it is shown.** The generated form shows the state read-only in its top
+  header, beside the record's title; the list grid always shows it as a column.
+  It is never an input, and no `%%section` row places it (`EML178`).
 
 ### What a state workflow generates
 
@@ -145,31 +162,25 @@ in the definition's description, so the Workflow Designer shows what was drawn.
 Without the definitions, every write logged *"No active workflow named … —
 nothing to trigger"* and no run was ever recorded.
 
-**Transition topology enforcement.** Every declared edge is also seeded into
-`sys_workflow_transitions`. The entity-access guard checks this table on every
-status-field write: a move from `StateA` to `StateC` when the diagram declares
-no such edge returns **403 Forbidden** with a message naming the current state
-and the states it may legally reach, and the record stays where it was. A table
-with no rows in `sys_workflow_transitions` is unconstrained — only models that
-declare a `kind: state` workflow have their transitions enforced.
+**Who writes a state.** Every declared edge is seeded into
+`sys_workflow_transitions`, and the entity-access guard reads the state field
+from it. A person's request is handled the same way in both stacks, for every
+caller, the master role included:
 
-This binds **every caller, the master role included**, which is what makes it
-topology rather than access. The two questions are asked independently:
+| Request | What happens |
+|---|---|
+| create carrying the state | the value is dropped; the record starts in the initial state |
+| update carrying the stored state | the value is dropped, so a whole-record save still works |
+| update carrying any other state | **403** with `details.code: "STATE_FIELD_SYSTEM_MANAGED"`; the record stays where it was |
 
-| Question | Answered from | Master role |
-|---|---|---|
-| Does this edge exist? | `sys_workflow_transitions`, from the diagram | bound by it |
-| Who may cross it? | `sys_transition_access`, from `%%rbac` | bypasses it |
-
-So an edge no `%%rbac` names is open to any authenticated caller, while an edge
-the diagram omits is refused to everyone. Asking them together — checking
-topology only where a role rule happened to cover it — leaves every unguarded
-edge open, which is the failure this separation exists to prevent.
+A saga's `UpdateEntity` step writes the state through the workflow executor,
+never through `/bus`, so it is the only writer. Earlier generated applications
+compiled `%%rbac … .<transition>` into `sys_transition_access` and let a role
+move a record by writing its status; nothing writes that table now.
 
 **Reading the edges.** `GET /api/workflows/transitions` returns them, narrowable
-by `?table=` and `?from=`. A screen offering a status change should ask this and
-offer only the moves that exist, rather than offering every state and letting
-the save be refused.
+by `?table=` and `?from=`. A screen uses it to say where a record can go next; no
+screen offers a person the move.
 
 ### Complete state workflow — order fulfilment
 
@@ -186,11 +197,32 @@ stateDiagram-v2
     approved  --> shipped   : ship
     approved  --> cancelled : cancel
     shipped   --> [*]
+    cancelled --> [*]
 
     %%rbac role:sales|manager on Order.update
-    %%rbac role:manager on Order.approve
     %%trigger webhook:carrier -> markShipped on Order
 ```
+
+Each move is made by a saga a rule starts when the fact it depends on is
+recorded — `submitted_at`, `approved_by_id`, `shipped_at`, `cancelled_at`:
+
+```mermaid
+%%rule orderProgress on Order event: beforeUpdate priority: 10
+flowchart TD
+    A([Order updated]) --> B{Which fact was recorded?}
+    B --> C([End])
+    %%action submitOrder trigger-workflow when: status == "draft" and submitted_at != null workflow: OrderSubmission
+    %%action approveOrder trigger-workflow when: status == "submitted" and approved_by_id != null workflow: OrderApproval
+
+%%workflow OrderApproval entity: Order kind: saga trigger: rule
+flowchart TD
+    A([Approver recorded]) --> B[Mark the order approved]
+    B --> C([Approved])
+    %%step B UpdateEntity field: status value: approved
+```
+
+`%%rbac role:manager on Order.update` says who may record the approver; there is
+no `Order.approve` permission, because nobody sets `approved` by hand.
 
 ## 3. Saga workflows — multi-step processes
 

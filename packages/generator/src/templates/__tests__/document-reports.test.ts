@@ -41,11 +41,14 @@ describe("the record screen finds the design that was seeded for it", () => {
   });
 });
 
-describe("the designer is fed the entity's real columns", () => {
+describe("the designer is fed the window's own fields", () => {
   const route = read("tanstack-start-nestjs/frontend/src/routes/admin/reports.$tableName.tsx");
 
-  it("asks an endpoint that exists", () => {
-    expect(route).toContain("`/bus/${tableName}/meta`");
+  // The data-source tree is the window's fields under their labels — the view
+  // layer — not the table's columns with labels guessed from their names.
+  it("reads the dictionary's windows, tabs and fields", () => {
+    expect(route).toContain("useDictionaryTabs()");
+    expect(route).toContain("tabForTable(tabs, tableName)");
     // Matched as a call rather than as a string, so the comment above the fix
     // naming the dead path does not itself fail this.
     expect(route).not.toMatch(/apiClient\.get[^)]*sys\/entity-metadata/);

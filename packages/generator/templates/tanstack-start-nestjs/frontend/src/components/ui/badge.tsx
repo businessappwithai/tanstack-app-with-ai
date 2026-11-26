@@ -15,7 +15,7 @@ const badgeVariants = cva(
         outline: "text-foreground border border-border",
         success: "bg-[#F0FDF4] text-[#0D6E6E]",
         warning: "bg-[#FEF3F2] text-[#E07B54]",
-        muted: "bg-[#FAFAFA] text-[#888888]",
+        muted: "bg-[#FAFAFA] text-[#6B6B6B]",
       },
     },
     defaultVariants: {

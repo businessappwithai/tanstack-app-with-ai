@@ -186,9 +186,15 @@ export const Route = createFileRoute("/api/projects/$id/")({
             .orderBy("created_at", "desc")
             .executeTakeFirst();
 
+          const gitState = await db
+            .selectFrom("project_git_state")
+            .selectAll()
+            .where("project_id", "=", id)
+            .executeTakeFirst();
           const project = {
+            gitCommit: gitState?.model_commit ?? null,
             ...toProjectResponse(dbProject as Record<string, any>),
-            erdCode: currentVersion?.mermaid_code ?? "",
+            erdCode: gitState?.model_code ?? currentVersion?.mermaid_code ?? "",
           };
 
           return new Response(JSON.stringify({ project }), {

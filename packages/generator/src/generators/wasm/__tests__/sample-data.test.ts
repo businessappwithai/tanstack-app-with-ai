@@ -315,3 +315,44 @@ erDiagram
     }
   });
 });
+
+describe("a required reference whose parent the model never declares", () => {
+  /* `Document.document_type_id` with no `DocumentType` — the checker's EML502.
+     Left null it fails NOT NULL, every row of the table is refused, and the
+     entity gets no sample data. */
+  const dangling = parseModel([
+    `%%meta name: Dangling Reference Probe
+%%meta kind: erd
+erDiagram
+    Party {
+        string id PK
+        string name
+    }
+    Document {
+        string id PK
+        string party_id FK
+        string document_type_id FK
+        string review_note_id FK OPTIONAL
+        string file_name
+    }
+    Party ||--o{ Document : "holds"
+`,
+  ]);
+
+  it("takes a uuid rather than null when the column is required", () => {
+    const generated = buildSampleData(dangling, { records: 4, seed: "test" });
+    const documents = generated.bus_document as Array<Record<string, unknown>>;
+    expect(documents).toHaveLength(4);
+    for (const row of documents) {
+      expect(row.document_type_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(row.party_id).not.toBeNull();
+    }
+  });
+
+  it("leaves an optional dangling reference null", () => {
+    const generated = buildSampleData(dangling, { records: 4, seed: "test" });
+    for (const row of generated.bus_document as Array<Record<string, unknown>>) {
+      expect(row.review_note_id).toBeNull();
+    }
+  });
+});

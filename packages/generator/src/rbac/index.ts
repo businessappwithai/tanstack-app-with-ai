@@ -31,6 +31,8 @@
  * so operation rules live in `sys_operation_access`.
  */
 
+import { LIFECYCLE_DRAFT, normalizeEvent, REOPEN_EVENT } from "../../../../language/state-field";
+
 /** The CRUD operations an `%%rbac` directive may restrict. */
 export const RBAC_OPERATIONS = ["create", "read", "update", "delete"] as const;
 
@@ -62,8 +64,12 @@ const OPERATION_ALIASES: Record<string, RbacOperation | "*"> = {
   destroy: "delete",
 };
 
-/** `%%rbac <roleExpr> on <Entity>.<op>` */
-const DIRECTIVE = /^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*]\w*)\s*$/;
+/**
+ * `%%rbac <roleExpr> on <Entity>.<target>` — the target is an operation, a move's
+ * event (`close_won`), an edge the diagram did not label (`negotiation->closed_won`),
+ * or `reopen`.
+ */
+const DIRECTIVE = /^%%rbac\s+(\S+)\s+on\s+([A-Za-z_]\w*)\.([A-Za-z_*][\w-]*(?:->[A-Za-z_]\w*)?)\s*$/;
 
 /** One state change a transition rule covers: `from` → `to` on the status column. */
 export interface RbacTransitionEdge {
@@ -112,6 +118,8 @@ export interface CompiledRbac {
 export interface RbacStateMachine {
   entity: string;
   transitions: Array<{ from: string; to: string; trigger?: string }>;
+  /** The states the diagram ends (`x --> [*]`) — the Final states a `reopen` leaves. */
+  terminal?: string[];
 }
 
 /**
@@ -176,20 +184,38 @@ export function compileRbac(
     { entity: string; transition: string; edges: RbacTransitionEdge[]; roles: Set<string> }
   >();
 
-  /** Every `from -> to` edge an event names on an entity's machines. */
-  const edgesFor = (entity: string, event: string): RbacTransitionEdge[] => {
+  /**
+   * Every `from -> to` edge a target names on an entity's machines.
+   *
+   * - an event: every edge it labels — a model's own `reopen` edge included, which
+   *   wins over the lifecycle's;
+   * - `from->to`: that drawn edge, or a Final state back to Draft (`closed_won->draft`);
+   * - `reopen`, when no edge is labelled so: one edge from each Final state to Draft.
+   */
+  const edgesFor = (entity: string, target: string): RbacTransitionEdge[] => {
     const found: RbacTransitionEdge[] = [];
+    const arrow = /^([A-Za-z_]\w*)->([A-Za-z_]\w*)$/.exec(target);
     for (const machine of stateMachines) {
       if (machine.entity !== entity) continue;
+      const draft =
+        machine.transitions
+          .flatMap((edge) => [edge.from, edge.to])
+          .find((state) => state.toLowerCase() === LIFECYCLE_DRAFT) ?? LIFECYCLE_DRAFT;
       for (const edge of machine.transitions) {
-        if (!edge.trigger) continue;
-        // Events are written as they read in a diagram (`close won`,
-        // `counter-signed`); a directive spells the same thing in one token.
-        const normalized = edge.trigger
-          .trim()
-          .toLowerCase()
-          .replace(/[\s-]+/g, "_");
-        if (normalized === event.toLowerCase()) found.push({ from: edge.from, to: edge.to });
+        if (arrow) {
+          if (edge.from === arrow[1] && edge.to === arrow[2]) found.push({ from: edge.from, to: edge.to });
+        } else if (edge.trigger && normalizeEvent(edge.trigger) === normalizeEvent(target)) {
+          // Events are written as they read in a diagram (`close won`,
+          // `counter-signed`); a directive spells the same thing in one token.
+          found.push({ from: edge.from, to: edge.to });
+        }
+      }
+      const finals = machine.terminal ?? [];
+      if (arrow && found.length === 0 && finals.includes(arrow[1]!) && arrow[2] === draft) {
+        found.push({ from: arrow[1]!, to: draft });
+      }
+      if (!arrow && found.length === 0 && normalizeEvent(target) === REOPEN_EVENT) {
+        for (const from of finals) found.push({ from, to: draft });
       }
     }
     return found;
@@ -235,21 +261,25 @@ export function compileRbac(
       continue;
     }
 
+    // A move: the roles that may press the button for these edges. The record's
+    // lifecycle moves only along a drawn edge, so a target that draws none says
+    // something the application cannot act on.
     const edges = edgesFor(entity, rawTarget);
     if (edges.length === 0) {
       onWarn(
         `%%rbac on ${entity}.${rawTarget} names neither a CRUD operation ` +
-          `(${RBAC_OPERATIONS.join(", ")}, *) nor a transition in ${entity}'s state machine — skipped.`
+          `(${RBAC_OPERATIONS.join(", ")}, *), a move in ${entity}'s state machine, nor ` +
+          `${REOPEN_EVENT} — skipped.`
       );
       continue;
     }
-
-    const key = `${entity}:${rawTarget.toLowerCase()}`;
+    const transition = rawTarget.includes("->") ? rawTarget : normalizeEvent(rawTarget);
+    const key = `${entity}:${transition}`;
     const existing = transitions.get(key);
     if (existing) {
       for (const role of roles) existing.roles.add(role);
     } else {
-      transitions.set(key, { entity, transition: rawTarget, edges, roles: new Set(roles) });
+      transitions.set(key, { entity, transition, edges, roles: new Set(roles) });
     }
   }
 

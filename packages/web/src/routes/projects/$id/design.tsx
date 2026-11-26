@@ -1,6 +1,6 @@
 import { useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
 import { CopilotSidebar } from "@copilotkit/react-ui";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,21 +11,19 @@ import {
   Clock,
   Database,
   Download,
+  ExternalLink,
   FileCode2,
   FileText,
   FolderOpen,
   GitCommit,
-  HelpCircle,
   History,
   Library,
-  List,
   Loader2,
   Maximize2,
   Minimize2,
   RefreshCw,
   RotateCcw,
   Save,
-  Search,
   Send,
   Sparkles,
   Upload,
@@ -39,14 +37,17 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CopilotProvider } from "@/components/CopilotProvider";
 import { DbOperationsModal } from "@/components/DbOperationsModal";
+import { SeedDataModal } from "@/components/SeedDataModal";
 import { ErdFlowViewer } from "@/components/ErdFlowViewer";
 import { JourneyArc } from "@/components/JourneyArc";
-import { ProgressStepper } from "@/components/ProgressStepper";
+import { ProjectGitHistory } from "@/components/project/ProjectGitHistory";
 import { WizardStepHeader } from "@/components/WizardStepHeader";
 import { useModelAssistant } from "@/hooks/useModelAssistant";
 import type { ERDVersion } from "@/lib/api/projects";
 import { erdVersionsApi } from "@/lib/api/projects";
+import { useCopilotInputLabel } from "@/hooks/useCopilotInputLabel";
 import { toRenderableMermaid } from "@/lib/mermaid-render";
+import type { EmlSummary } from "@/routes/api/eml/validate";
 import { requestContext } from "@/lib/request-context";
 import { useProjectStore } from "@/store/projectStore";
 
@@ -57,6 +58,9 @@ async function checkAuthMe() {
 }
 
 export const Route = createFileRoute("/projects/$id/design")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: (search.view as string) || "mermaid",
+  }),
   beforeLoad: async () => {
     try {
       const data = await checkAuthMe();
@@ -68,6 +72,12 @@ export const Route = createFileRoute("/projects/$id/design")({
   },
   component: DesignRoute,
 });
+
+/** Lines as `wc -l` and the model's own file contract count them: a trailing newline ends a line. */
+function countLines(text: string): number {
+  if (text === "") return 0;
+  return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+}
 
 // CopilotProvider must sit ABOVE the component that calls useCopilotReadable /
 // useCopilotAction. Rendering it inside DesignPage's own JSX puts the context
@@ -82,6 +92,7 @@ function DesignRoute() {
 }
 
 function DesignPage() {
+  useCopilotInputLabel();
   const navigate = useNavigate();
   const { id: projectId } = Route.useParams();
 
@@ -105,8 +116,16 @@ function DesignPage() {
   const [erdCode, setErdCode] = useState("");
   // null = never validated in this session; [] = last run was clean.
   const [validationErrors, setValidationErrors] = useState<string[] | null>(null);
+  // What the checker said at the last Validate; cleared on the next edit, so a
+  // report is never shown against text it was not run on.
+  const [checkReport, setCheckReport] = useState<{
+    check?: EmlSummary["check"];
+    failure?: string;
+  } | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveNotice, setSaveNotice] = useState("");
+  const [gitRefresh, setGitRefresh] = useState(0);
   const [aiInput, setAiInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<{
@@ -166,12 +185,13 @@ function DesignPage() {
   const [versions, setVersions] = useState<ERDVersion[]>([]);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
-  const [entitySearch, setEntitySearch] = useState("");
   const [showEntityList, setShowEntityList] = useState(false);
   const [autoRetryCount, setAutoRetryCount] = useState(0);
   const [isAutoRetrying, setIsAutoRetrying] = useState(false);
-  const [showFlowView, setShowFlowView] = useState(false);
+  const search = useSearch({ from: "/projects/$id/design" });
+  const showFlowView = search.view === "flow";
   const [showDbModal, setShowDbModal] = useState(false);
+  const [showSeedModal, setShowSeedModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTab, setImportTab] = useState<"local" | "library">("local");
   const [libraryFiles, setLibraryFiles] = useState<
@@ -445,15 +465,8 @@ function DesignPage() {
     ),
   });
 
-  const filteredEntities = useMemo(() => {
-    if (!entitySearch) return entities;
-    const searchLower = entitySearch.toLowerCase();
-    return entities.filter(
-      (e) =>
-        e.name.toLowerCase().includes(searchLower) ||
-        e.attributes.some((a) => a.toLowerCase().includes(searchLower))
-    );
-  }, [entities, entitySearch]);
+  const [studioUrl, setStudioUrl] = useState("http://localhost:3002");
+  const [studioStatus, setStudioStatus] = useState<"idle" | "starting" | "ready" | "error">("idle");
 
   useEffect(() => {
     mermaid.initialize({
@@ -469,24 +482,7 @@ function DesignPage() {
   useEffect(() => {
     if (project) {
       setCurrentStep("design");
-      // Try loading canonical .mmd first, fall back to DB erdCode
-      const loadCanonical = async () => {
-        try {
-          const res = await fetch(`/api/mermaid?projectId=${projectId}&canonical=true`);
-          if (res.ok) {
-            const data = await res.json();
-            const canonicalFile = data.files?.[0];
-            if (canonicalFile?.content) {
-              setErdCode(canonicalFile.content);
-              return;
-            }
-          }
-        } catch {
-          // fall through to DB value
-        }
-        setErdCode(project.erdCode || "erDiagram\n");
-      };
-      loadCanonical();
+      setErdCode(project.erdCode || "erDiagram\n");
     }
   }, [project, setCurrentStep, projectId]);
 
@@ -690,8 +686,16 @@ function DesignPage() {
     }
   }, [showVersions, projectId]);
 
+  /**
+   * Draw the ERD, then run the EML checker over the whole document.
+   *
+   * Drawing only proves Mermaid can read the `erDiagram` block; the checker is what
+   * reads the rules, workflows and dictionary directives, and it is the same engine
+   * generation runs, so what it reports here is what Generate would report.
+   */
   const handleValidate = async () => {
     setIsValidating(true);
+    setCheckReport(null);
     try {
       const id = `validate-${Date.now()}`;
       await mermaid.render(id, toRenderableMermaid(erdCode));
@@ -700,56 +704,69 @@ function DesignPage() {
       setValidationErrors([
         error instanceof Error ? error.message : "The diagram could not be parsed.",
       ]);
+    }
+    try {
+      const response = await fetch("/api/eml/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eml: erdCode }),
+      });
+      if (!response.ok) throw new Error(`The checker answered ${response.status}`);
+      const summary = (await response.json()) as EmlSummary;
+      setCheckReport({ check: summary.check, failure: summary.checkFailure });
+      const check = summary.check;
+      setSaveNotice(
+        check
+          ? `Checked: ${check.errors} errors, ${check.warnings} warnings, ${check.infos} notes.`
+          : "The checker could not run: see the report above the editor."
+      );
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : "The checker could not run";
+      setCheckReport({ failure });
+      setSaveNotice("The checker could not run: see the report above the editor.");
     } finally {
       setIsValidating(false);
     }
   };
 
+  // A report describes the text it was run on; the next edit makes it stale.
+  useEffect(() => {
+    setCheckReport(null);
+  }, [erdCode]);
+
   const handleSave = async (saveAsVersion = false) => {
     setIsSaving(true);
+    setSaveNotice("Saving to local Git…");
     try {
-      await updateErdCode(projectId, erdCode);
-
-      // Save canonical .mmd file
-      try {
-        const version = `v${Date.now()}`;
-        const sanitizedName = (project?.name ?? "export").replace(/[^a-z0-9]/gi, "_").toLowerCase();
-        await fetch("/api/mermaid", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            projectName: project?.name ?? "export",
-            filename: `${sanitizedName}-erd-canonical.mmd`,
-            type: "erd",
-            content: erdCode,
-            canonical: true,
-          }),
-        });
-        void version; // suppress unused warning
-      } catch {
-        // Non-blocking — .mmd save failure should not block the UI save
-        console.error("Failed to save canonical .mmd file");
-      }
-
       if (saveAsVersion) {
         await saveErdVersion(projectId, erdCode, commitMessage || "Manual save");
         setCommitMessage("");
-        if (showVersions) {
-          await loadVersions();
-        }
+        await loadVersions();
+      } else {
+        await updateErdCode(projectId, erdCode);
       }
-
-      setTimeout(() => setIsSaving(false), 500);
+      setSaveNotice(saveAsVersion ? "Version saved to local Git" : "Draft saved to local Git");
+      setGitRefresh((value) => value + 1);
     } catch (error) {
-      console.error("Save error:", error);
+      setSaveNotice(
+        error instanceof Error
+          ? error.message
+          : "Save failed. Your edits are still here. Retry to recover."
+      );
+    } finally {
       setIsSaving(false);
     }
   };
 
   const handleRestoreVersion = async (versionId: string) => {
+    if (erdCode !== (project?.erdCode || "erDiagram\n")) {
+      setSaveNotice("Save your draft before restoring a version.");
+      return;
+    }
     try {
       await restoreErdVersion(projectId, versionId);
+      setGitRefresh((value) => value + 1);
+      setSaveNotice("Model restored in a new Git commit. Regenerate the application to match.");
       await loadVersions();
 
       const version = versions.find((v) => v.id === versionId);
@@ -757,7 +774,7 @@ function DesignPage() {
         setErdCode(version.mermaid_code);
       }
     } catch (error) {
-      console.error("Restore error:", error);
+      setSaveNotice(error instanceof Error ? error.message : "Restore failed");
     }
   };
 
@@ -796,7 +813,7 @@ function DesignPage() {
   const handleGenerate = async () => {
     await handleSave();
     goToNextStep();
-    navigate({ to: "/projects/$id/logic", params: { id: projectId } });
+    navigate({ to: "/projects/$id/generate", params: { id: projectId } });
   };
 
   const handleAiSubmit = async () => {
@@ -1102,6 +1119,36 @@ function DesignPage() {
   const handleZoomOut = () => setZoom((z) => Math.max(z - 10, 50));
   const handleZoomReset = () => setZoom(100);
 
+  const handleOpenStudio = async () => {
+    if (showEntityList) {
+      setShowEntityList(false);
+      return;
+    }
+    setStudioStatus("starting");
+    try {
+      const databaseUrl = (project as { database_url?: string } | undefined)?.database_url;
+      const res = await fetch("/api/db/studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ databaseUrl }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? "Failed to start studio");
+      if (data.url) setStudioUrl(data.url);
+      setStudioStatus("ready");
+      setShowEntityList(true);
+    } catch {
+      setStudioStatus("error");
+      setShowEntityList(true);
+    }
+  };
+
+  const handleOpenStudioInBrowser = () => {
+    // Opens via /api/db/studio-open which bridges the auth cookie so the user
+    // lands on the studio without seeing the login page.
+    window.open("/api/db/studio-open", "_blank", "noopener,noreferrer");
+  };
+
   const handleExportMrd = async () => {
     if (!erdCode.trim()) {
       alert("No ERD code to export");
@@ -1232,31 +1279,18 @@ function DesignPage() {
       instructions="You are an ERD design assistant. You can see the current ERD diagram (via the 'Current ERD' context). Use the 'updateERD' action to make surgical changes: add entities, modify attributes, change relationships. For bulk AI generation, use the bottom bar. Ask the user what they'd like to change."
       defaultOpen={false}
     >
-      <div className="min-h-screen bg-background flex flex-col">
+      <div role="main" className="min-h-screen bg-background flex flex-col">
+        {saveNotice && (
+          <p role="status" className="px-6 py-2 text-sm border-b">
+            {saveNotice}
+          </p>
+        )}
         {!isFullscreen && (
           <header className="bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-50">
             <div className="max-w-[1800px] mx-auto px-6 py-3">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowEntityList(!showEntityList)}
-                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
-                        showEntityList
-                          ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
-                      }`}
-                      title="Browse entities"
-                    >
-                      <List className="w-4 h-4" />
-                      Entities
-                      {entities.length > 0 && (
-                        <span className="px-1.5 py-0.5 text-xs bg-purple-500 text-white rounded-full">
-                          {entities.length}
-                        </span>
-                      )}
-                    </button>
                     <button
                       type="button"
                       onClick={() => setShowVersions(!showVersions)}
@@ -1275,52 +1309,12 @@ function DesignPage() {
                       Versions
                       {versions.length > 0 && (
                         <span
-                          className="px-1.5 py-0.5 text-xs text-white rounded-full"
+                          className="px-1.5 py-0.5 text-xs text-slate-900 rounded-full"
                           style={{ backgroundColor: "#FF8400" }}
                         >
                           {versions.length}
                         </span>
                       )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowFlowView(!showFlowView)}
-                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
-                        showFlowView
-                          ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
-                      }`}
-                      title="Toggle React Flow view"
-                    >
-                      <Zap className="w-4 h-4" />
-                      {showFlowView ? "Mermaid View" : "Flow View"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowDbModal(true)}
-                      className="flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
-                      title="Database operations"
-                    >
-                      <Database className="w-4 h-4" />
-                      DB Ops
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleValidate}
-                      disabled={isValidating}
-                      className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      {isValidating ? "Validating..." : "Validate"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSave(false)}
-                      disabled={isSaving}
-                      className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      <Save className="w-4 h-4" />
-                      {isSaving ? "Saving..." : "Save Draft"}
                     </button>
                     <button
                       type="button"
@@ -1342,36 +1336,87 @@ function DesignPage() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => {
+                        const newView = showFlowView ? "mermaid" : "flow";
+                        navigate({ to: "/projects/$id/design", params: { id: projectId }, search: (prev) => ({ ...prev, view: newView }) });
+                      }}
+                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
+                        showFlowView
+                          ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Toggle React Flow view"
+                    >
+                      <Zap className="w-4 h-4" />
+                      {showFlowView ? "Mermaid View" : "Flow View"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleValidate}
+                      disabled={isValidating}
+                      className="flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground font-medium rounded-xl transition-colors disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      {isValidating ? "Validating..." : "Validate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDbModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      title="Database operations"
+                    >
+                      <Database className="w-4 h-4" />
+                      DB Ops
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSeedModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      title="Load sample data into tables"
+                    >
+                      <Zap className="w-4 h-4" />
+                      Seed Data
+                    </button>
+                    <button
+                      type="button"
+                      onClick={
+                        studioStatus === "ready"
+                          ? handleOpenStudioInBrowser
+                          : handleOpenStudio
+                      }
+                      disabled={studioStatus === "starting"}
+                      className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-colors ${
+                        showEntityList
+                          ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                          : "bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                      } disabled:opacity-50`}
+                      title="Open LibreDB Studio"
+                    >
+                      {studioStatus === "starting" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Database className="w-4 h-4" />
+                      )}
+                      {studioStatus === "starting" ? "Starting…" : "Entities"}
+                      {entities.length > 0 && studioStatus !== "starting" && (
+                        <span className="px-1.5 py-0.5 text-xs bg-purple-700 text-white rounded-full">
+                          {entities.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleGenerate}
-                      className="flex items-center gap-2 px-6 py-2 text-white font-bold rounded-xl shadow-lg transition-all active:scale-[0.98]"
+                      className="flex items-center gap-2 px-6 py-2 text-slate-900 font-bold rounded-xl shadow-lg transition-all active:scale-[0.98]"
                       style={{ backgroundColor: "#FF8400" }}
                     >
                       <Zap className="w-4 h-4" />
-                      Continue to Step 3
+                      Continue →
                     </button>
                   </div>
                 </div>
               </div>
 
-              <ProgressStepper
-                currentStep="design"
-                completedSteps={["init", "design"]}
-                onStepClick={(step) => {
-                  if (step === "init") {
-                    navigate({ to: "/projects/$id/init", params: { id: projectId } });
-                  } else if (step === "design") {
-                    // Already on design
-                  } else if (step === "logic") {
-                    navigate({ to: "/projects/$id/logic", params: { id: projectId } });
-                  } else if (step === "generate") {
-                    navigate({ to: "/projects/$id/generate", params: { id: projectId } });
-                  } else if (step === "enhance") {
-                    navigate({ to: "/projects/$id/enhance", params: { id: projectId } });
-                  } else if (step === "deploy") {
-                    navigate({ to: "/projects/$id/deploy", params: { id: projectId } });
-                  }
-                }}
-              />
             </div>
           </header>
         )}
@@ -1381,10 +1426,10 @@ function DesignPage() {
             <WizardStepHeader
               stepNumber={2}
               title="Discover Your Data Model"
-              description="Review the Entity-Relationship Diagram that our AI extracted from your business description. Each entity represents a key concept in your domain. Edit relationships as needed before generating code."
+              description="Review the entities and relationships our AI extracted from your business description. Each entity represents a key concept in your domain. Use DB Ops to explore your data before generating code."
               estimatedTime="3-5 min"
             />
-            <JourneyArc currentStep="design" />
+            <JourneyArc currentStep="design" projectId={projectId} />
           </div>
         )}
 
@@ -1392,68 +1437,59 @@ function DesignPage() {
           className={`${isFullscreen ? "fixed inset-0" : "flex-1"} flex overflow-hidden ${isFullscreen ? "z-50" : ""}`}
         >
           {showEntityList && !isFullscreen && (
-            <div className="w-96 border-r border-border bg-card flex flex-col">
-              <div className="p-4 border-b border-border">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-purple-400" />
-                    <h3 className="font-semibold text-foreground">Entity Browser</h3>
+            <div className="w-72 border-r border-border bg-card flex flex-col shrink-0">
+              <div className="p-3 border-b border-border flex items-center gap-2">
+                <Database className="w-4 h-4 text-purple-400 shrink-0" />
+                <span className="font-semibold text-sm text-foreground flex-1">LibreDB Studio</span>
+                <button
+                  type="button"
+                  onClick={() => setShowEntityList(false)}
+                  className="p-1.5 hover:bg-secondary rounded-lg transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+              {studioStatus === "error" ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+                  <Database className="w-10 h-10 text-muted-foreground opacity-40" />
+                  <p className="text-sm font-medium text-foreground">Could not start LibreDB Studio</p>
+                  <p className="text-xs text-muted-foreground">
+                    On first launch it downloads the release archive from GitHub. Check your network and try again.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenStudio}
+                    className="mt-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded-lg transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-purple-500/10 flex items-center justify-center">
+                    <Database className="w-7 h-7 text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">LibreDB Studio</p>
+                    <p className="text-xs text-muted-foreground mt-1 font-mono">{studioUrl}</p>
+                    <p className="text-xs text-green-400 mt-2 flex items-center justify-center gap-1">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
+                      Running
+                    </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowEntityList(false)}
-                    className="p-1.5 hover:bg-secondary rounded-lg transition-colors"
+                    onClick={handleOpenStudioInBrowser}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-xl transition-colors"
                   >
-                    <X className="w-4 h-4 text-muted-foreground" />
+                    <ExternalLink className="w-4 h-4" />
+                    Open in Browser
                   </button>
+                  <p className="text-xs text-muted-foreground">
+                    Opens pre-authenticated — no login required.
+                  </p>
                 </div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                  <input
-                    type="text"
-                    value={entitySearch}
-                    onChange={(e) => setEntitySearch(e.target.value)}
-                    placeholder="Search entities..."
-                    className="w-full pl-9 pr-4 py-2 bg-muted border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto">
-                {entities.length === 0 ? (
-                  <div className="p-4 text-center text-muted-foreground text-sm">
-                    <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>No entities found</p>
-                    <p className="text-xs mt-1">Add entities to see them here</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {filteredEntities.map((entity, _idx) => (
-                      <button
-                        type="button"
-                        key={entity.name}
-                        className="w-full text-left p-3 hover:bg-muted transition-colors cursor-pointer"
-                        onClick={() => jumpToEntity(entity.startLine)}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-foreground">{entity.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {entity.attributes.length} attrs
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          Line {entity.startLine + 1}
-                        </div>
-                      </button>
-                    ))}
-                    {filteredEntities.length === 0 && entitySearch && (
-                      <div className="p-4 text-center text-muted-foreground text-sm">
-                        No entities match "{entitySearch}"
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
 
@@ -1518,6 +1554,15 @@ function DesignPage() {
                 </div>
               </div>
 
+              <ProjectGitHistory
+                projectId={projectId}
+                refresh={gitRefresh}
+                dirty={erdCode !== (project?.erdCode || "erDiagram\n")}
+                onRestored={() => {
+                  void loadProject(projectId);
+                  void loadVersions();
+                }}
+              />
               <div className="flex-1 overflow-y-auto">
                 {isLoadingVersions ? (
                   <div className="p-4 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
@@ -1591,6 +1636,11 @@ function DesignPage() {
                                 <span>Created:</span>
                                 <span>{formatDate(version.created_at)}</span>
                               </div>
+                              {version.git_commit && (
+                                <div>
+                                  Git: <code>{version.git_commit.slice(0, 8)}</code>
+                                </div>
+                              )}
                               {version.created_by && (
                                 <div className="flex items-center justify-between">
                                   <span>By:</span>
@@ -1626,7 +1676,7 @@ function DesignPage() {
             </div>
           )}
 
-          {!isFullscreen && (
+          {!isFullscreen && !showFlowView && (
             <div
               className={`${
                 showVersions || showEntityList ? "w-1/2" : "w-1/2"
@@ -1638,12 +1688,12 @@ function DesignPage() {
                     <h2 className="text-lg font-semibold text-foreground">Mermaid ERD Code</h2>
                     {versions.length > 0 && (
                       <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
-                        <span className="font-mono" style={{ color: "#FF8400" }}>
+                        <span className="text-brand font-mono">
                           v{versions.length}
                         </span>
                         <span>•</span>
                         <span>{versions[0]?.description || "Initial version"}</span>
-                        {project.generatedPath && (
+                        {project?.generatedPath && (
                           <>
                             <span>•</span>
                             <span className="text-amber-500">
@@ -1655,7 +1705,7 @@ function DesignPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{erdCode.split("\n").length} lines</span>
+                    <span>{countLines(erdCode)} lines</span>
                     <span>•</span>
                     <span>{entities.length} entities</span>
                   </div>
@@ -1663,13 +1713,13 @@ function DesignPage() {
                 {validationErrors !== null && (
                   <div
                     className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
-                      validationErrors.length === 0
+                      validationErrors?.length === 0
                         ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
                         : "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
                     }`}
                     role="status"
                   >
-                    {validationErrors.length === 0 ? (
+                    {validationErrors?.length === 0 ? (
                       <span className="flex items-center gap-2 font-medium">
                         <CheckCircle2 className="w-4 h-4" />
                         Diagram is valid — {entities.length} entities parsed.
@@ -1681,13 +1731,20 @@ function DesignPage() {
                           The diagram could not be parsed.
                         </span>
                         <ul className="mt-2 space-y-1 font-mono text-xs whitespace-pre-wrap">
-                          {validationErrors.map((message) => (
+                          {(validationErrors ?? []).map((message) => (
                             <li key={message}>{message}</li>
                           ))}
                         </ul>
                       </>
                     )}
                   </div>
+                )}
+                {checkReport && (
+                  <CheckReportPanel
+                    report={checkReport ?? {}}
+                    onLine={(line) => jumpToEntity(line - 1)}
+                    onClose={() => setCheckReport(null)}
+                  />
                 )}
                 <div className="relative">
                   <div className="flex h-[calc(100vh-320px)] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
@@ -1718,87 +1775,85 @@ function DesignPage() {
                       style={{ lineHeight: "20px" }}
                       spellCheck={false}
                       placeholder="Enter Mermaid ERD syntax here..."
+                      aria-label="Mermaid ERD code"
                     />
                   </div>
-                  <div className="absolute bottom-4 right-4 flex items-center gap-3 text-xs text-slate-500">
-                    <span>{erdCode.split("\n").length} lines</span>
-                    <span>•</span>
-                    <span>{entities.length} entities</span>
-                    {errorLine && (
-                      <>
-                        <span>•</span>
-                        <span className="text-red-600">Error on line {errorLine}</span>
-                      </>
-                    )}
-                  </div>
+                  {errorLine && (
+                    <div className="pointer-events-none absolute bottom-4 right-4 rounded-md bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-950">
+                      Error on line {errorLine}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          <div
-            className={`${
-              isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
-            } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}
-          >
-            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Live Preview</h2>
-              <div className="flex items-center gap-2">
-                {!isFullscreen && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleZoomOut}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Zoom Out"
-                    >
-                      <ZoomOut className="w-4 h-4" />
-                    </button>
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400 min-w-[50px] text-center">
-                      {zoom}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleZoomIn}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Zoom In"
-                    >
-                      <ZoomIn className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleZoomReset}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Fit to Screen"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                  title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-                >
-                  {isFullscreen ? (
-                    <Minimize2 className="w-4 h-4" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
+          {showFlowView ? (
             <div
-              className={`flex-1 overflow-auto ${isFullscreen ? "p-4" : "p-6"} bg-white dark:bg-slate-900`}
-              style={{ position: "relative" }}
+              className={`${isFullscreen ? "w-full h-screen" : "w-full"} flex flex-col bg-slate-50 dark:bg-slate-900`}
+              style={{ height: isFullscreen ? "100vh" : "calc(100vh - 280px)" }}
             >
-              {showFlowView ? (
-                <div style={{ width: "100%", minHeight: "400px", height: "100%" }}>
-                  <ErdFlowViewer erdCode={erdCode} />
+              <ErdFlowViewer erdCode={erdCode} />
+            </div>
+          ) : (
+            <div
+              className={`${
+                isFullscreen ? "w-full h-screen" : showVersions || showEntityList ? "w-1/2" : "w-1/2"
+              } flex flex-col bg-slate-50 dark:bg-slate-900 ${!isFullscreen ? "min-h-[calc(100vh-400px)]" : ""}`}
+            >
+              <div className="p-6 pr-24 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Live Preview</h2>
+                <div className="flex items-center gap-2">
+                  {!isFullscreen && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleZoomOut}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        title="Zoom Out"
+                      >
+                        <ZoomOut className="w-4 h-4" />
+                      </button>
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-400 min-w-[50px] text-center">
+                        {zoom}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleZoomIn}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        title="Zoom In"
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleZoomReset}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        title="Fit to Screen"
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsFullscreen(!isFullscreen)}
+                    className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                    title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                  >
+                    {isFullscreen ? (
+                      <Minimize2 className="w-4 h-4" />
+                    ) : (
+                      <Maximize2 className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
-              ) : (
+              </div>
+
+              <div
+                className={`flex-1 overflow-auto ${isFullscreen ? "p-4" : "p-6"} bg-white dark:bg-slate-900`}
+                style={{ position: "relative" }}
+              >
                 <div
                   ref={previewRef}
                   style={{
@@ -1808,9 +1863,9 @@ function DesignPage() {
                   }}
                   className="mermaid-preview w-full"
                 />
-              )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {!isFullscreen && (
@@ -1832,6 +1887,7 @@ function DesignPage() {
                       }
                     }}
                     placeholder="Describe your entities in natural language... (Cmd+Enter to submit)"
+                    aria-label="Describe your entities"
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={isAiLoading}
                   />
@@ -2146,13 +2202,6 @@ function DesignPage() {
           </div>
         )}
 
-        <button
-          type="button"
-          className="fixed bottom-6 right-6 w-14 h-14 text-white rounded-full shadow-lg shadow-primary/50 flex items-center justify-center transition-all active:scale-95 z-40"
-          style={{ backgroundColor: "#FF8400" }}
-        >
-          <HelpCircle className="w-6 h-6" />
-        </button>
       </div>
       <DbOperationsModal
         isOpen={showDbModal}
@@ -2164,6 +2213,14 @@ function DesignPage() {
           setShowDbModal(false);
         }}
       />
+      {showSeedModal && (
+        <SeedDataModal
+          isOpen={showSeedModal}
+          onClose={() => setShowSeedModal(false)}
+          projectId={projectId}
+          databaseUrl={(project as { database_url?: string } | undefined)?.database_url ?? undefined}
+        />
+      )}
 
       {/* Hidden file input for .mmd import */}
       <input
@@ -2337,5 +2394,68 @@ function DesignPage() {
         </div>
       )}
     </CopilotSidebar>
+  );
+}
+
+const SEVERITY_STYLE: Record<string, string> = {
+  error: "text-red-700 dark:text-red-400",
+  warning: "text-amber-700 dark:text-amber-300",
+  info: "text-muted-foreground",
+};
+
+/** The checker's verdict on the document, worst first, each line a jump into the editor. */
+function CheckReportPanel({
+  report,
+  onLine,
+  onClose,
+}: {
+  report: { check?: EmlSummary["check"]; failure?: string };
+  onLine: (line: number) => void;
+  onClose: () => void;
+}) {
+  const { check, failure } = report;
+  const tone = !check
+    ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950"
+    : check.errors > 0
+      ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950"
+      : "border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950";
+  return (
+    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${tone}`} role="status">
+      <div className="flex items-start gap-2">
+        <p className="flex-1 font-medium">
+          {check
+            ? `EML checker: ${check.errors} errors · ${check.warnings} warnings · ` +
+              `${check.infos} notes`
+            : `The EML checker could not run: ${failure ?? "unknown error"}`}
+        </p>
+        <button type="button" aria-label="Close the checker report" onClick={onClose}>
+          <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+        </button>
+      </div>
+      {check && check.issues.length > 0 && (
+        <ul className="mt-2 max-h-64 space-y-1.5 overflow-y-auto text-xs">
+          {check.issues.map((issue, index) => (
+            <li key={`${issue.code}-${issue.line ?? "doc"}-${index}`}>
+              <span className={`font-mono font-semibold ${SEVERITY_STYLE[issue.severity] ?? ""}`}>
+                {issue.severity} {issue.code}
+              </span>{" "}
+              {issue.line ? (
+                <button
+                  type="button"
+                  onClick={() => onLine(issue.line ?? 1)}
+                  className="font-mono text-primary underline-offset-2 hover:underline"
+                >
+                  line {issue.line}
+                </button>
+              ) : (
+                <span className="font-mono text-muted-foreground">whole document</span>
+              )}{" "}
+              {issue.message}
+              {issue.hint && <span className="block text-muted-foreground">→ {issue.hint}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

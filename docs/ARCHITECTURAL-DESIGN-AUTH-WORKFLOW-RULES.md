@@ -2600,7 +2600,7 @@ kubectl patch service hms-service -p '{"spec":{"selector":{"version":"v5.1.0"}}}
 
 ## Appendix A: Technology Compatibility Matrix
 
-| Technology | Version | Bun.js 1.3+ | PostgreSQL | Knex.js | Fastify | Next.js 14 | OpenUI5 |
+| Technology | Version | Bun.js 1.4.4+ | PostgreSQL | Knex.js | Fastify | Next.js 14 | OpenUI5 |
 |------------|---------|-------------|------------|---------|---------|------------|---------|
 | better-auth | 1.0+ | ✅ | ✅ | ✅ | ✅ (beta) | ✅ | N/A |
 | @thallesp/nestjs-better-auth | 1.0+ | ✅ | ✅ | ✅ | ✅ | ✅ | N/A |

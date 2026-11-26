@@ -85,16 +85,9 @@ export const Route = createFileRoute("/api/projects/$id/automations/")({
           }));
 
           // The current ERD, so the builder's pickers have something in them.
-          const { getDb } = await import("@appwithai/core/config");
-          const erd = await getDb()
-            .selectFrom("erd_versions")
-            .select(["mermaid_code"])
-            .where("project_id", "=", params.id)
-            .orderBy("is_current", "desc")
-            .orderBy("version_number", "desc")
-            .executeTakeFirst();
-
-          const entities = erd?.mermaid_code ? entitiesFromErd(erd.mermaid_code) : [];
+          const { projectDb } = await import("@appwithai/core/services");
+          const project = await projectDb.findById(params.id);
+          const entities = project?.erdCode ? entitiesFromErd(project.erdCode) : [];
 
           return new Response(
             JSON.stringify({
@@ -137,15 +130,20 @@ export const Route = createFileRoute("/api/projects/$id/automations/")({
             );
           }
 
-          const { workflowDb } = await import("@appwithai/core/services");
-          const created = await workflowDb.create({
-            project_id: params.id,
-            name: body.name,
-            service_name: body.entity ?? "",
-            workflow_type: "automation",
-            mermaid_code: body.mermaid,
-            description: body.description ?? "",
-          });
+          const { changeWorkflow } = await import("@/lib/server/project-repository");
+          const created = await changeWorkflow(
+            params.id,
+            access.user.id,
+            `wf_${crypto.randomUUID()}`,
+            {
+              name: body.name,
+              service_name: body.entity ?? "",
+              workflow_type: "automation",
+              mermaid_code: body.mermaid,
+              description: body.description ?? "",
+            },
+            request.headers.get("Idempotency-Key") ?? undefined
+          );
 
           return new Response(JSON.stringify({ automation: created }), {
             status: 201,

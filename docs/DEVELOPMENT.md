@@ -291,7 +291,7 @@ See `.env.example` for complete list.
 
 ## Environment
 
-- **Runtime**: Bun 1.3.4
+- **Runtime**: Bun 1.4.4
 - **Node**: v20+
 - **TypeScript**: 5.9.3
 - **ESLint**: 8.57.1

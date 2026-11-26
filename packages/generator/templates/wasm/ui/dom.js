@@ -151,3 +151,22 @@ export const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (character) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]
   );
+
+/**
+ * A NUMERIC as text: grouped, with two decimals when it has a fraction.
+ *
+ * Postgres hands NUMERIC over as a string so no digit is lost, and money is
+ * DECIMAL(18,4) — printed as it arrived, an amount read `25955.7000`. Formatted
+ * from the string rather than a parsed Number, which `Intl` treats as an exact
+ * decimal, so a value past 2^53 keeps its digits. Up to four decimals survive,
+ * which is the scale money is stored at; trailing zeros past the second do not.
+ */
+export function formatNumeric(value) {
+  const text = String(value);
+  if (!/^-?\d+(\.\d+)?$/.test(text)) return text;
+  const fraction = /\.\d*[1-9]/.test(text);
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: fraction ? 2 : 0,
+    maximumFractionDigits: 4,
+  }).format(text);
+}

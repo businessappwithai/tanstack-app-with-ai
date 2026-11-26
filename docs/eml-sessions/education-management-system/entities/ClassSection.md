@@ -20,6 +20,10 @@
 | `period` | integer | — | The numbered teaching period within the day, 1 to 8. With day_of_week it is the clash key: a student may not hold two enrolments in the same day and period. |
 | `status` | string | — | planned — being timetabled, not yet open for enrolment; open — accepting students; in_progress — teaching, enrolment closed to newcomers; completed — the term ended and final grades are in; cancelled — the group will not run, which withdraws every enrolment on it. |
 | `cancellation_reason` | text | OPTIONAL | Why the group was pulled — under-recruitment, no teacher, room lost. Shown to every affected family in the notice, so it is written for them rather than for the office. |
+| `open_at` | datetime | OPTIONAL | When the move to open was recorded on this class section. Recording it moves a class section from planned to open: the workflows set the status, which nobody changes by hand. |
+| `in_progress_at` | datetime | OPTIONAL | When the move to in progress was recorded on this class section. Recording it moves a class section from open to in progress: the workflows set the status, which nobody changes by hand. |
+| `completed_at` | datetime | OPTIONAL | When the move to completed was recorded on this class section. Recording it moves a class section from in progress to completed: the workflows set the status, which nobody changes by hand. |
+| `cancelled_at` | datetime | OPTIONAL | When the move to cancelled was recorded on this class section. Recording it moves a class section from planned or open to cancelled: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -58,7 +62,16 @@ cancelled --> [*]
 ### `sectionControl` on `beforeUpdate` — **`%%action` decision table — it can act**
 
 - `requireSectionCancellationReason validation-error when: status == "cancelled" and cancellation_reason == null message: Families are told why a group was pulled, so the reason is written for them and it is required.`
+- `requireSectionCancellationReasonOnMove validation-error when: cancelled_at != null and cancellation_reason == null message: Families are told why a group was pulled, so the reason is written for them and it is required.`
 - `withdrawEnrolmentsOnCancellation trigger-workflow when: status == "cancelled" workflow: SectionCancellation`
+
+### `classSectionStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `movePlannedToOpen trigger-workflow when: status == "planned" and open_at != null workflow: ClassSectionOpenMove`
+- `moveOpenToInProgress trigger-workflow when: status == "open" and in_progress_at != null workflow: ClassSectionInProgressMove`
+- `moveInProgressToCompleted trigger-workflow when: status == "in_progress" and completed_at != null workflow: ClassSectionCompletedMove`
+- `movePlannedToCancelled trigger-workflow when: status == "planned" and cancelled_at != null workflow: ClassSectionCancelledMove`
+- `moveOpenToCancelled trigger-workflow when: status == "open" and cancelled_at != null workflow: ClassSectionCancelledMove`
 
 ## Hooks
 
@@ -72,6 +85,17 @@ Sagas that touch it:
 
 - **SectionCancellation** *(triggered on this entity)*
   - `B UpdateEntity entity: Enrollment targetField: class_section_id field: status value: withdrawn`
+- **ClassSectionOpenMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: open`
+  - `C UpdateEntity field: in_progress_at value: null`
+  - `D UpdateEntity field: cancelled_at value: null`
+- **ClassSectionInProgressMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: in_progress`
+  - `C UpdateEntity field: completed_at value: null`
+- **ClassSectionCompletedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: completed`
+- **ClassSectionCancelledMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: cancelled`
 
 ## Access
 
@@ -80,7 +104,6 @@ Sagas that touch it:
 | `read` | principal · registrar · admissions_officer · head_of_department · teacher · finance_officer · counsellor · guardian |
 | `create` | registrar |
 | `update` | registrar · head_of_department |
-| `cancel` | principal · registrar |
 
 ## Open questions
 

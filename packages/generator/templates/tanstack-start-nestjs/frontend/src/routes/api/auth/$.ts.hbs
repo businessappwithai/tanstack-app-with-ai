@@ -16,6 +16,7 @@
  * Project: {{project.name}}
  */
 
+import type { ResolveParams } from '@tanstack/react-router'
 import { createAPIFileRoute } from '@tanstack/start/api'
 // Relative rather than the `@/` alias — see the note in ../$.ts.
 import { apiUnavailable, proxyToBackend } from '../../../lib/api-proxy'
@@ -28,12 +29,18 @@ function noSession(): Response {
   })
 }
 
-// The parameter types are left to inference on purpose. These handlers are
-// written inline into the route, so TypeScript types them from the route's own
-// signature — which is exact, and which an explicit `Record<string, string>`
-// contradicted.
+// `ResolveParams` is the exact type the route's own callback signature uses, as
+// in `api/$.ts`. These handlers live in a shared object rather than inline in the
+// `createAPIFileRoute` call, so there is no contextual typing to infer from and
+// both parameters were implicitly `any`. `Record<string, string>` looks
+// equivalent and is not: the resolved type has no string index signature.
+type AuthHandlerContext = {
+  request: Request
+  params: ResolveParams<'/api/auth/$'>
+}
+
 const handlers = {
-  GET: async ({ request, params }) => {
+  GET: async ({ request, params }: AuthHandlerContext) => {
     const path = params._splat ?? ''
     try {
       return await proxyToBackend(request, `auth/${path}`)
@@ -41,7 +48,7 @@ const handlers = {
       return noSession()
     }
   },
-  POST: async ({ request, params }) => {
+  POST: async ({ request, params }: AuthHandlerContext) => {
     const path = params._splat ?? ''
     try {
       return await proxyToBackend(request, `auth/${path}`)

@@ -1,8 +1,8 @@
 /**
  * The viewer page.
  *
- * `website/llmtext/llmdetailed.txt` sends a reader through seven phases of
- * authoring a model, and between the phases they have a partial `.eml.mmd` and
+ * `website/llmtext/llms.txt` walks a reader through the gates of authoring or
+ * changing a model, and between the gates they have a partial `.eml.mmd` and
  * no way to see it. Mermaid renders the ERD and nothing else: the `%%`
  * directives that carry the rules, the workflows, the enums and the access
  * control are comments to it, which is exactly the half a reader most needs to

@@ -3,10 +3,10 @@
 // Pure TypeScript, no AI required.
 
 import type { Entity, Relationship } from "@appwithai/core/types";
+import { parseMermaidFlowchart } from "@appwithai/editors/lib/mermaid-flowchart-parser";
 import { MermaidParser } from "@appwithai/generator";
 import type { JdmGraph } from "./jdm-converter";
 import { convertToJdm } from "./jdm-converter";
-import { parseMermaidFlowchart } from "./mermaid-flowchart-parser";
 
 export { toRenderableMermaid } from "./mermaid-render";
 

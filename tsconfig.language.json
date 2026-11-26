@@ -15,7 +15,12 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM"],
-    "types": ["node", "bun"]
+    "types": ["node", "bun"],
+    // language/cli/src/generate/jdm.ts reaches packages/web/src/lib/jdm-converter.ts,
+    // which imports the flowchart parser by the alias the root tsconfig maps.
+    "paths": {
+      "@appwithai/editors/*": ["./packages/editors/src/*"]
+    }
   },
   "include": ["language/**/*.ts"],
   "exclude": ["language/cli/runtime"]

@@ -70,9 +70,18 @@ async function seedEntity(
       const foreignKeys: Record<string, string> = {};
       for (const fk of fks) {
         const pool = pools.get(fk.name);
-        if (pool && pool.length > 0) {
-          foreignKeys[fk.name] = pool[(offset + index) % pool.length]!;
+        if (!pool || pool.length === 0) continue;
+        if (fk.unique) {
+          // A unique reference is one-to-one: a parent can be used once. Cycling a small pool put
+          // the same parent on every row, so the second insert was refused (409) and the entity
+          // seeded nothing (Facility.facility_id, a self-reference, on the hospital model). An
+          // optional one is left empty; a required one takes the next parent not yet used.
+          if (fk.required && offset + index < pool.length) {
+            foreignKeys[fk.name] = pool[offset + index]!;
+          }
+          continue;
         }
+        foreignKeys[fk.name] = pool[(offset + index) % pool.length]!;
       }
       return buildRecord(entity, { foreignKeys, uniqueSalt: `${offset + index}` });
     });
@@ -90,6 +99,10 @@ async function seedEntity(
         ids.push(result.value.data.id);
       } else {
         failed += 1;
+        // Say why once: "10 rejected" alone sent a reader to reproduce it by hand.
+        if (failed === 1 && result.status === "fulfilled") {
+          console.log(`    first refusal: ${result.value.status} ${result.value.raw.slice(0, 200)}`);
+        }
       }
     }
   }

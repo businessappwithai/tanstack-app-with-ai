@@ -23,8 +23,9 @@ export interface WasmGeneratorOptions extends WasmProjectSettings {
   /** The EML the model was parsed from, shipped so the app can describe itself. */
   source?: string;
   /**
-   * Where PGlite's ES module is loaded from when the app is not vendored.
-   * The runtime tries `vendor/pglite/index.js` first regardless.
+   * Where PGlite's ES module is loaded from when the app carries no
+   * `vendor/pglite/` — a copy the caller hosts. The runtime tries
+   * `vendor/pglite/index.js` first regardless, and there is no CDN after it.
    */
   pgliteUrl?: string;
   /**
@@ -58,8 +59,8 @@ export interface WasmGeneratedApp {
   };
 }
 
-export const DEFAULT_PGLITE_URL =
-  "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.5/dist/index.js";
+/** The line in `host/browser-node-host.js` that a supplied PGlite URL replaces. */
+export const PGLITE_URL_SLOT = 'const PGLITE_URL = "";';
 
 export function generateWasmApp(
   parsed: ParsedModel,
@@ -98,13 +99,14 @@ export function generateWasmApp(
       .replaceAll("__PROJECT_INITIALS__", escapeHtml(initials(options.name)))
   );
 
-  if (options.pgliteUrl && options.pgliteUrl !== DEFAULT_PGLITE_URL) {
+  if (options.pgliteUrl) {
+    const host = RUNTIME_ASSETS["host/browser-node-host.js"] ?? "";
+    if (!host.includes(PGLITE_URL_SLOT)) {
+      throw new Error("host/browser-node-host.js has no PGLITE_URL to set");
+    }
     files.set(
       "host/browser-node-host.js",
-      (RUNTIME_ASSETS["host/browser-node-host.js"] ?? "").replace(
-        DEFAULT_PGLITE_URL,
-        options.pgliteUrl
-      )
+      host.replace(PGLITE_URL_SLOT, `const PGLITE_URL = ${JSON.stringify(options.pgliteUrl)};`)
     );
   }
 
@@ -225,9 +227,10 @@ is how the generator's own tests exercise it.
 
 This application has no Bun in it and no build step: Node runs the host, the
 browser runs the same code under its own Node-API runtime, and nothing is
-compiled on the way in either direction. \`npm install\` is needed only when the
-application was generated *without* \`--vendor-pglite\`, to fetch PGlite for the
-Node host; in the browser it is fetched and cached by the browser itself.
+compiled on the way in either direction. PostgreSQL ships with the application,
+in \`vendor/pglite/\`, and is never fetched from a CDN. An application without that
+folder — one downloaded from the in-browser generator — needs \`npm install\`
+once: \`serve.mjs\` and the Node host then use the installed package.
 
 ## What is in here
 

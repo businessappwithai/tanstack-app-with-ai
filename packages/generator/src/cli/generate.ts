@@ -21,12 +21,13 @@ import { TanStackStartFrontendGenerator } from "../generators/tanstack-start-nes
 import { compileHooks } from "../hooks";
 import { type EntityCategory, resolveCategories } from "../parsers/category.parser";
 import { MermaidParser } from "../parsers/mermaid.parser";
+import { attachFormSections } from "../parsers/section.parser";
 import { generateApplication, readModelSources } from "../pipeline";
 import { cliLogger } from "../pipeline/logger-port";
 import { compileRbac } from "../rbac";
-import { compileReports } from "../reports";
+import { compileDashboards, compileReports } from "../reports";
 import { compileRules } from "../rules";
-import { runLintingChecks } from "../utils/lint-check.js";
+import { runTypeChecks } from "../utils/type-check.js";
 import { compileSagaWorkflows, compileWorkflows } from "../workflows";
 
 // Resolve relative paths from the workspace root (INIT_CWD) when called via bun --filter
@@ -53,7 +54,11 @@ async function parseFile(
   await fs.access(absPath);
   const content = await fs.readFile(absPath, "utf-8");
   const parser = new MermaidParser();
-  return parser.parse(content);
+  const parsed = parser.parse(content);
+  // `%%section` lives in `%%` comment lines the ERD parser drops — the same
+  // reason categories are read from the raw text below.
+  attachFormSections(content, parsed.entities);
+  return parsed;
 }
 
 /**
@@ -526,6 +531,12 @@ program
         allEntities.map((entity) => entity.name),
         warn
       );
+      // `%%dashboard` groups a role's reports into a dashboard for the reporting pack.
+      const compiledDashboards = compileDashboards(
+        ruleSources.join("\n"),
+        compiledReports.map((report) => report.name),
+        warn
+      );
 
       // ── Entity summary ──────────────────────────────────────────────────
       if (!quiet) {
@@ -650,6 +661,7 @@ program
           sagas: compiledSagas,
           rbac: compiledRbac,
           reports: compiledReports,
+          dashboards: compiledDashboards,
         },
         stackOption,
         projectName: options.name,
@@ -689,12 +701,11 @@ program
           quiet,
         });
 
-        // After the install, not before it. Run inside the generator it had no
-        // node_modules to find biome in, so it failed on every generation and
-        // said "linting found issues" about code it had never read.
+        // After the install, not before it: run inside the generator there is no
+        // node_modules, and a check that cannot pass reports nothing real.
         if (!quiet) {
-          console.log("\n🔍 Running linting checks...");
-          await runLintingChecks(outputDir, {
+          console.log("\n🔍 Running type checks...");
+          await runTypeChecks(outputDir, {
             skipBackend: !!options.skipBackend,
             skipFrontend: !!options.skipFrontend,
             packageManager: options.packageManager,
@@ -1486,7 +1497,7 @@ program
     console.log("  • Workflow definitions + BPMN executor");
     console.log("  • Audit trail (ImmuDB-backed)");
     console.log("  • Role-based access control (RBAC)");
-    console.log("  • ETag-based optimistic concurrency");
+    console.log("  • Optimistic locking (ETag / If-Match, 409 on a stale save)");
     console.log("  • E2E test suite (bun:test) — CRUD, rules, workflows, faker volume data\n");
 
     console.log("🛠️  CLI Commands\n");
@@ -1836,7 +1847,7 @@ program
             const check = await ssh.execCommand(
               // ${DB_USER:-app} is shell parameter expansion, evaluated on the remote
               // host by docker compose — not a JS template placeholder.
-              // biome-ignore lint/suspicious/noTemplateCurlyInString: shell expansion.
+              // shell expansion.
               "docker compose exec -T postgres pg_isready -U ${DB_USER:-app} 2>/dev/null",
               { cwd: remoteProjectDir }
             );

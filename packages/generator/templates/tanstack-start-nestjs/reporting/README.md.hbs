@@ -50,7 +50,11 @@ role may read — which is the whole of what signing in as it does.
 
 The administrator is the exception and keeps the same address on both sides,
 because that is what the reporting platform bootstraps for itself. It is still
-two different accounts in two different databases.
+two different accounts in two different databases. Its reporting password is set
+by the seeder on the first `docker compose up`, from `REPORT_ADMIN_PASSWORD`
+(default `{{reporting.reportPassword}}`) — set that in `.env` before anyone else
+can reach this, and change it in the platform afterwards if you like; a restart
+does not put it back.
 
 **Only `read` rules narrow a reporting role.** `%%rbac` also restricts create,
 update and delete, and none of that means anything to somebody who cannot write

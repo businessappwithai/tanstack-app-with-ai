@@ -1,9 +1,8 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Zap as Bolt, Code, GitBranch, Settings, Zap } from "lucide-react";
+import { ArrowRight, GitMerge, Zap as Bolt, Code, GitBranch, Settings, Zap } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { JourneyArc } from "@/components/JourneyArc";
-import { ProgressStepper } from "@/components/ProgressStepper";
 import { WizardStepHeader } from "@/components/WizardStepHeader";
 import { erdVersionsApi } from "@/lib/api/projects";
 import { requestContext } from "@/lib/request-context";
@@ -44,9 +43,6 @@ const ICON_CYCLE = [
 ];
 
 function parseEntityNamesFromErd(erdCode: string): string[] {
-  // Only parse the erDiagram block — %%rule/%%workflow sections contain flowchart
-  // nodes (single uppercase letters like B{condition?}) that must not be treated
-  // as entities.
   const erdBlockMatch = erdCode.match(/erDiagram([\s\S]*?)(?=\n%%[a-z]|$)/);
   const erdBlock = erdBlockMatch ? erdBlockMatch[0] : erdCode;
   const matches = [...erdBlock.matchAll(/^\s*([A-Za-z_]\w*)\s*\{/gm)];
@@ -73,16 +69,10 @@ function EnhancePage() {
   }, [projectId, getProject, currentProject, loadProject]);
 
   const [services, setServices] = useState<ServiceInfo[]>([]);
-  // Project.erdCode is declared on the type but no API ever populates it — the
-  // ERD lives in erd_versions and the design step reads it from there. Deriving
-  // services from project.erdCode therefore always produced zero services and
-  // the "generate your project code first" empty state, even right after a
-  // successful generation. Load the current version instead.
   const [erdCode, setErdCode] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
-
     erdVersionsApi
       .getAll(projectId)
       .then((versions) => {
@@ -95,7 +85,6 @@ function EnhancePage() {
       .catch((error) => {
         console.error("Failed to load ERD versions:", error);
       });
-
     return () => {
       cancelled = true;
     };
@@ -104,10 +93,8 @@ function EnhancePage() {
   useEffect(() => {
     if (project) {
       setCurrentStep("enhance");
-
       const source = erdCode || project.erdCode || "";
       const entityNames = source ? parseEntityNamesFromErd(source) : [];
-
       const derivedServices: ServiceInfo[] = entityNames.map((entity, i) => ({
         name: `${entity}Service`,
         entity,
@@ -116,20 +103,15 @@ function EnhancePage() {
         hooksCount:
           project.workflows?.filter((w) => w.serviceName === `${entity}Service`).length || 0,
       }));
-
       setServices(derivedServices);
     }
   }, [project, setCurrentStep, erdCode]);
 
   const handleServiceClick = (serviceName: string) => {
-    try {
-      navigate({
-        to: "/projects/$id/enhance/$serviceName",
-        params: { id: projectId, serviceName },
-      });
-    } catch (error) {
-      console.error("Navigation error:", error);
-    }
+    navigate({
+      to: "/projects/$id/enhance/$serviceName",
+      params: { id: projectId, serviceName },
+    });
   };
 
   if (isLoading) {
@@ -152,7 +134,7 @@ function EnhancePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div role="main" className="min-h-screen bg-background flex flex-col">
       <header className="bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-50">
         <div className="max-w-[1800px] mx-auto px-6 py-4">
           <WizardStepHeader
@@ -161,34 +143,38 @@ function EnhancePage() {
             description="Extend your generated application with AI-assisted features like authentication, validation, testing, and custom business logic. Select a service to define workflows and enhance."
             estimatedTime="5-10 min"
           />
-
-          <ProgressStepper
-            currentStep="enhance"
-            onStepClick={(step) => {
-              if (step === "init") {
-                navigate({ to: "/projects/$id/init", params: { id: projectId } });
-              } else if (step === "design") {
-                navigate({ to: "/projects/$id/design", params: { id: projectId } });
-              } else if (step === "logic") {
-                navigate({ to: "/projects/$id/logic", params: { id: projectId } });
-              } else if (step === "generate") {
-                navigate({ to: "/projects/$id/generate", params: { id: projectId } });
-              } else if (step === "deploy") {
-                navigate({ to: "/projects/$id/deploy", params: { id: projectId } });
-              }
-            }}
-          />
-
-          <JourneyArc currentStep="enhance" />
+          <JourneyArc currentStep="enhance" projectId={projectId} />
         </div>
       </header>
 
       <div className="flex-1 overflow-auto">
         <div className="max-w-[1800px] mx-auto px-6 py-12">
+          {/* Rules, workflows & status machines */}
+          <div className="mb-10">
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/projects/$id/enhance/logic", params: { id: projectId } })}
+              className="group w-full flex items-center justify-between bg-card hover:bg-primary/5 border-2 border-primary/30 hover:border-primary rounded-2xl p-6 transition-all duration-200 text-left active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-5">
+                <div className="p-4 bg-primary/10 group-hover:bg-primary/20 rounded-xl transition-colors shrink-0">
+                  <GitMerge className="w-7 h-7 text-primary" style={{ color: "#FF8400" }} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-foreground mb-1">Rules, Workflows &amp; Status Machines</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Define business rules, multi-step processes, and lifecycle state machines across all entities
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className="w-6 h-6 text-muted-foreground group-hover:text-primary transition-colors shrink-0 ml-4" />
+            </button>
+          </div>
+
           <div className="mb-8">
-            <h2 className="text-3xl font-bold text-foreground mb-2">Available Services</h2>
+            <h2 className="text-3xl font-bold text-foreground mb-2">Services</h2>
             <p className="text-muted-foreground">
-              Choose a service to define business logic hooks and workflows
+              Choose a service to define per-entity hooks and automations
             </p>
           </div>
 
@@ -198,21 +184,15 @@ function EnhancePage() {
                 <button
                   type="button"
                   key={service.name}
-                  onClick={() => {
-                    console.log("Service clicked:", service.name);
-                    handleServiceClick(service.name);
-                  }}
+                  onClick={() => handleServiceClick(service.name)}
                   className="group relative bg-card hover:bg-primary/5 border-2 border-border hover:border-primary rounded-2xl p-6 transition-all duration-200 text-left cursor-pointer active:scale-95"
                   style={{ "--tw-ring-color": "#FF8400" } as React.CSSProperties}
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div className="p-3 bg-muted group-hover:bg-primary/10 rounded-xl transition-colors">
-                      <div style={{ color: "#FF8400" }}>{service.icon}</div>
+                      <div className="text-brand">{service.icon}</div>
                     </div>
-                    <ArrowRight
-                      className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors"
-                      style={{ "--tw-hover-color": "#FF8400" } as React.CSSProperties}
-                    />
+                    <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                   </div>
 
                   <h3 className="text-xl font-bold text-foreground mb-2">{service.name}</h3>
@@ -228,10 +208,7 @@ function EnhancePage() {
                         {service.hooksCount} {service.hooksCount === 1 ? "hook" : "hooks"}
                       </span>
                     </div>
-                    <span
-                      className="text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity"
-                      style={{ color: "#FF8400" }}
-                    >
+                    <span className="text-brand text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
                       Configure →
                     </span>
                   </div>
@@ -242,17 +219,13 @@ function EnhancePage() {
                 <div className="inline-flex items-center justify-center w-20 h-20 bg-muted rounded-full mb-4">
                   <Code className="w-10 h-10 text-muted-foreground" />
                 </div>
-                <h3 className="text-xl font-semibold text-foreground mb-2">
-                  No Services Available
-                </h3>
+                <h3 className="text-xl font-semibold text-foreground mb-2">No Services Available</h3>
                 <p className="text-muted-foreground mb-6">
                   Generate your project code first to create services
                 </p>
                 <button
                   type="button"
-                  onClick={() =>
-                    navigate({ to: "/projects/$id/generate", params: { id: projectId } })
-                  }
+                  onClick={() => navigate({ to: "/projects/$id/generate", params: { id: projectId } })}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-lg shadow-primary/25 transition-all"
                   style={{ backgroundColor: "#FF8400" }}
                 >
@@ -264,6 +237,26 @@ function EnhancePage() {
           </div>
         </div>
       </div>
+
+      <footer className="border-t border-border bg-background/80 backdrop-blur-md sticky bottom-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/projects/$id/generate", params: { id: projectId } })}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-secondary text-foreground font-medium transition-all"
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/projects/$id/deploy", params: { id: projectId } })}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all"
+            style={{ backgroundColor: "#FF8400" }}
+          >
+            Continue →
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

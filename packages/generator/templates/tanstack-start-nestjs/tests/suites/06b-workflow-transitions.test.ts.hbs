@@ -1,5 +1,13 @@
 /**
- * State machines — the edges the model drew, and only those.
+ * State machines — the edges the model drew, and who moves a record along them.
+ *
+ * A state field is never written by a form: a person moves a record by pressing
+ * one of its moves (POST /bus/:entity/:id/transition) along an edge the diagram
+ * drew. A write that would change it is refused with 403 and
+ * `STATE_FIELD_SYSTEM_MANAGED`, the administrator included; a create starts the
+ * record in Draft and an accepted save moves it into the flow; an end state is
+ * Final — locked, and reopened to Draft; and the list grid always shows the
+ * state while the form never offers it as an input.
  *
  * `%%workflow … kind: state` declares a lifecycle: which state a record starts
  * in, which moves are legal from there, and which states it can end in. The
@@ -26,12 +34,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "../harness/testing.ts";
-import { config } from "../harness/config.ts";
 import {
   getEntity,
   harness,
   illegalTargetFrom,
-  pathTo,
   stateMachines,
   statesOf,
   successorsOf,
@@ -87,21 +93,6 @@ async function currentState(route: string, id: string, field: string): Promise<s
   return stateOf(response.data, field);
 }
 
-/**
- * How long the walk may take, in milliseconds.
- *
- * The work is one create plus a short walk per edge, and every one of those
- * writes runs the entity's rules and workflows. So the cost is a property of
- * the diagram, not of this suite, and a flat ceiling means a model fails the
- * moment it draws one state too many. Scaled per edge instead, with a floor for
- * the small machines and `E2E_SUITE_TIMEOUT_MS` still the minimum.
- */
-const PER_EDGE_BUDGET_MS = Number(process.env.E2E_TRANSITION_EDGE_BUDGET_MS ?? 15_000);
-
-function walkBudget(machine: StateMachine): number {
-  return Math.max(config.suiteTimeoutMs, machine.edges.length * PER_EDGE_BUDGET_MS);
-}
-
 describe("state machines", () => {
   let served: TransitionRow[] = [];
   let endpointAvailable = false;
@@ -155,182 +146,85 @@ describe("state machines", () => {
         expect([...fields]).toEqual([machine.statusField]);
       });
 
-      it(
-        "accepts every legal move, walking from the initial state",
-        async () => {
-          const refused: string[] = [];
-          /** Edges whose start state the model's automations would not let us hold. */
-          const carriedOn: string[] = [];
-
-          for (const edge of machine.edges) {
-            // Reach `edge.from` first. A machine whose initial state cannot reach
-            // it has nothing to test for that edge — a disconnected diagram,
-            // which the model, not this record, would have to fix.
-            const approach = pathTo(machine, edge.from);
-            if (approach === null) continue;
-
-            const record = await harness.createWithParents(entity, {
-              [machine.statusField]: machine.initial,
-            });
-            if (!record?.id) continue;
-
-            // Where the record actually is, tracked across the walk rather than
-            // re-read before every step. The model's own rules and workflows may
-            // move it: the CRM example's Contract leaves `in_approval` for
-            // `expiring` on its own. Once that happens the rest of the planned
-            // walk is asking the guard about edges leading out of a state the
-            // record is no longer in, and the 403 it rightly answers is not
-            // evidence of anything.
-            //
-            // So the two outcomes are kept apart. A refusal of an edge the record
-            // *was* correctly positioned for is a real failure and names that
-            // edge. Being carried elsewhere is reported and skipped.
-            let at =
-              stateOf(record, machine.statusField) ??
-              (await currentState(entity.route, String(record.id), machine.statusField));
-            let diverted: string | null = null;
-            let blocked: string | null = null;
-
-            for (const step of approach) {
-              // Carried straight to where this edge starts: the rest of the
-              // planned walk is moot and the edge is testable after all.
-              if (at === edge.from) break;
-              if (at !== step.from) {
-                diverted = `${edgeKey(edge.from, edge.to)} (carried to ${at ?? "?"})`;
-                break;
-              }
-              const response = await harness.client.patch(
-                `/bus/${entity.route}/${record.id}`,
-                { [machine.statusField]: step.to },
-                { allowFailure: true }
-              );
-              if (!response.ok) {
-                if (response.status === 403) {
-                  blocked = `${edgeKey(step.from, step.to)} (reached while approaching ${edge.from})`;
-                } else {
-                  diverted = `${edgeKey(edge.from, edge.to)} (approach answered ${response.status})`;
-                }
-                break;
-              }
-              // The write answers with the record it produced, so the state
-              // after the move is already here; only fall back to a read when
-              // it is not.
-              at =
-                stateOf(response.data, machine.statusField) ??
-                (await currentState(entity.route, String(record.id), machine.statusField));
-            }
-
-            if (blocked) {
-              refused.push(blocked);
-              continue;
-            }
-            if (diverted) {
-              carriedOn.push(diverted);
-              continue;
-            }
-
-            // And confirm it came to rest where the edge starts, rather than being
-            // moved on by whatever ran on the last write.
-            if (at !== edge.from) {
-              carriedOn.push(`${edgeKey(edge.from, edge.to)} (landed in ${at ?? "?"})`);
-              continue;
-            }
-
-            const move = await harness.client.patch(
-              `/bus/${entity.route}/${record.id}`,
-              { [machine.statusField]: edge.to },
-              { allowFailure: true }
-            );
-            // 403 is the guard refusing an edge the model drew — the failure this
-            // test is for. Any other error is the record, not the topology.
-            if (move.status === 403) refused.push(edgeKey(edge.from, edge.to));
-          }
-
-          if (carriedOn.length > 0) {
-            console.log(
-              `  ${machine.entity}: ${carriedOn.length} edge(s) not exercised — ` +
-                `a rule or workflow moved the record on: ${carriedOn.join(", ")}`
-            );
-          }
-          expect(refused).toEqual([]);
-        },
-        walkBudget(machine)
-      );
-
-      it("refuses a move the model never drew", async () => {
-        const from = machine.initial || machine.edges[0]?.from;
-        if (!from) return;
-
-        const illegal = illegalTargetFrom(machine, from);
-        if (!illegal) {
-          // Every state is reachable from here in one step, so there is no
-          // illegal move to attempt. Not a failure — a very permissive machine.
-          console.log(`  ${machine.entity}: every state is legal from "${from}"`);
-          return;
-        }
+      it("starts a new record in its initial state, whatever the request names", async () => {
+        if (!machine.initial) return;
+        // Ask for a state the record could not start in. The request is not
+        // refused — a create is not a move — but the state it names is ignored.
+        const asked = illegalTargetFrom(machine, machine.initial) ?? machine.terminal[0];
+        if (!asked || asked === machine.initial) return;
 
         const record = await harness.createWithParents(entity, {
-          [machine.statusField]: from,
+          [machine.statusField]: asked,
         });
         expect(record?.id).toBeTruthy();
         if (!record?.id) return;
 
-        // The create may itself have set the record moving; the illegal move
-        // has to be attempted from wherever it settled, and `illegal` recomputed
-        // for that state, or the 403 this asserts could be the right answer to
-        // the wrong question.
         const settled =
           stateOf(record, machine.statusField) ??
           (await currentState(entity.route, String(record.id), machine.statusField));
-        const target = settled === from ? illegal : settled ? illegalTargetFrom(machine, settled) : null;
-        if (!settled || !target) {
-          console.log(`  ${machine.entity}: no illegal move to attempt from "${settled ?? "?"}"`);
-          return;
-        }
+        // The model's own workflows may already have moved it on from the
+        // initial state; they may not have put it where the request asked.
+        expect(settled).not.toBe(asked);
+      });
+
+      it("refuses a person's change to the state, the administrator included", async () => {
+        const record = await harness.createWithParents(entity);
+        if (!record?.id) return;
+        const at =
+          stateOf(record, machine.statusField) ??
+          (await currentState(entity.route, String(record.id), machine.statusField));
+        if (!at) return;
+        // A move the model draws, so the only reason to refuse it is who is
+        // asking: the harness signs in as the administrator.
+        const target = successorsOf(machine, at)[0] ?? statesOf(machine).find((s) => s !== at);
+        if (!target) return;
 
         const response = await harness.client.patch(
           `/bus/${entity.route}/${record.id}`,
           { [machine.statusField]: target },
           { allowFailure: true }
         );
-
-        expect(response.ok).toBe(false);
         expect(response.status).toBe(403);
+        const details = (response.data as { details?: { code?: string } } | undefined)?.details;
+        expect(details?.code).toBe("STATE_FIELD_SYSTEM_MANAGED");
+
+        // A refused write that still landed would be worse than one allowed:
+        // the record would be in a state no workflow put it in.
+        expect(await currentState(entity.route, String(record.id), machine.statusField)).toBe(at);
       });
 
-      it("leaves the record in its old state when a move is refused", async () => {
-        const from = machine.initial || machine.edges[0]?.from;
-        const illegal = from ? illegalTargetFrom(machine, from) : null;
-        if (!from || !illegal) return;
-
-        const record = await harness.createWithParents(entity, {
-          [machine.statusField]: from,
-        });
+      it("accepts the state sent back unchanged", async () => {
+        const record = await harness.createWithParents(entity);
         if (!record?.id) return;
-
-        // Compare against where the record actually settled, not what was asked
-        // for — see the note on currentState.
-        const settled =
-          stateOf(record, machine.statusField) ??
-          (await currentState(entity.route, String(record.id), machine.statusField));
-        const target = settled === from ? illegal : settled ? illegalTargetFrom(machine, settled) : null;
-        if (!settled || !target) return;
-
-        await harness.client.patch(
+        const at = await currentState(entity.route, String(record.id), machine.statusField);
+        if (!at) return;
+        // A form or a client that sends the whole record back still saves: an
+        // unchanged state is not a change.
+        const response = await harness.client.patch(
           `/bus/${entity.route}/${record.id}`,
-          { [machine.statusField]: target },
+          { [machine.statusField]: at },
           { allowFailure: true }
         );
+        expect(response.status).not.toBe(403);
+      });
 
-        // A refused write that still landed would be worse than one that was
-        // allowed: the guard would be reporting a state the record is not in.
-        const after = await harness.client.get<Record<string, unknown>>(
-          `/bus/${entity.route}/${record.id}`,
+      it("shows the state in the list grid and never as a form input", async () => {
+        const grid = await harness.client.get<Array<{ column_name: string }>>(
+          `/bus/${entity.route}/fields/grid`,
           { allowFailure: true }
         );
-        if (!after.ok) return;
-        const body = (after.data as { data?: Record<string, unknown> })?.data ?? after.data;
-        expect(String(body?.[machine.statusField] ?? "")).toBe(settled);
+        const form = await harness.client.get<Array<{ column_name: string }>>(
+          `/bus/${entity.route}/fields/form`,
+          { allowFailure: true }
+        );
+        expect(grid.status).toBe(200);
+        expect(form.status).toBe(200);
+        const columns = (payload: unknown) =>
+          ((Array.isArray(payload) ? payload : ((payload as { data?: unknown })?.data ?? [])) as Array<{
+            column_name: string;
+          }>).map((field) => field.column_name);
+        expect(columns(grid.data)).toContain(machine.statusField);
+        expect(columns(form.data)).not.toContain(machine.statusField);
       });
 
       it("offers no way out of a terminal state", async () => {
@@ -350,40 +244,6 @@ describe("state machines", () => {
         expect((response.data?.data ?? []).map((row) => row.to_state)).toEqual([]);
       });
 
-      it("refuses a move out of a terminal state", async () => {
-        const terminal = machine.terminal[0];
-        const path = terminal ? pathTo(machine, terminal) : null;
-        if (!terminal || !path) return;
-
-        const record = await harness.createWithParents(entity);
-        if (!record?.id) return;
-
-        // Walk it to the end, then try to move it on. Each step is a legal
-        // edge, so a refusal on the way is a failure of the walk rather than
-        // the assertion — hence the early return rather than an expectation.
-        for (const edge of path) {
-          const step = await harness.client.patch(
-            `/bus/${entity.route}/${record.id}`,
-            { [machine.statusField]: edge.to },
-            { allowFailure: true }
-          );
-          if (!step.ok) return;
-        }
-
-        const current = await currentState(entity.route, String(record.id), machine.statusField);
-        if (current !== terminal) return; // the model moved it on by itself
-
-        const somewhereElse = statesOf(machine).find((state) => state !== terminal);
-        if (!somewhereElse) return;
-
-        const response = await harness.client.patch(
-          `/bus/${entity.route}/${record.id}`,
-          { [machine.statusField]: somewhereElse },
-          { allowFailure: true }
-        );
-        expect(response.status).toBe(403);
-      });
-
       it("answers which moves are legal from a given state", async () => {
         const from = machine.initial || machine.edges[0]?.from;
         if (!from) return;
@@ -396,6 +256,138 @@ describe("state machines", () => {
 
         const offered = (response.data?.data ?? []).map((row) => row.to_state).sort();
         expect([...new Set(offered)]).toEqual([...new Set(successorsOf(machine, from))].sort());
+      });
+
+      // ── The record's action buttons ────────────────────────────────────────
+      // A person moves a record by pressing one of its moves. The harness signs
+      // in as the administrator, so who may press is not what these test: the
+      // edge, the version and the lock are.
+
+      it("starts a new record in Draft and moves an accepted save into the flow", async () => {
+        const record = await harness.createWithParents(entity);
+        if (!record?.id) return;
+        const settled =
+          stateOf(record, machine.statusField) ??
+          (await currentState(entity.route, String(record.id), machine.statusField));
+        // Accepted: the first status of the flow (or wherever the model's own
+        // workflows took it). Refused: Error, with the reason on the record.
+        // A machine whose own first status is a draft keeps the record there.
+        expect(settled).toBeTruthy();
+        if (machine.initial.toLowerCase() !== "draft") expect(settled).not.toBe("draft");
+      });
+
+      it("offers exactly the drawn moves out of where the record is", async () => {
+        const record = await harness.createWithParents(entity);
+        if (!record?.id) return;
+        const at = await currentState(entity.route, String(record.id), machine.statusField);
+        if (!at || at === "error") return;
+        const actions = await harness.client.get<Array<{ to: string; kind: string }>>(
+          `/bus/${entity.route}/${record.id}/actions`,
+          { allowFailure: true }
+        );
+        expect(actions.status).toBe(200);
+        const offered = (actions.data ?? []).filter((a) => a.kind === "move").map((a) => a.to);
+        expect([...new Set(offered)].sort()).toEqual([...new Set(successorsOf(machine, at))].sort());
+      });
+
+      it("moves along a drawn edge, refuses an undrawn one, and needs If-Match", async () => {
+        const record = await harness.createWithParents(entity);
+        if (!record?.id) return;
+        const read = await harness.client.get<Record<string, unknown>>(
+          `/bus/${entity.route}/${record.id}`
+        );
+        const at = stateOf(read.data, machine.statusField);
+        const etag = read.headers.get("etag") ?? "";
+        if (!at || at === "error") return;
+        const path = `/bus/${entity.route}/${record.id}/transition`;
+
+        const bare = await harness.client.post(path, { to: successorsOf(machine, at)[0] ?? at }, {
+          allowFailure: true,
+        });
+        expect(bare.status).toBe(428);
+
+        const illegal = illegalTargetFrom(machine, at);
+        if (illegal) {
+          const refused = await harness.client.post(path, { to: illegal }, {
+            allowFailure: true,
+            headers: { "If-Match": etag },
+          });
+          expect(refused.status).toBe(409);
+          expect((refused.data as { details?: { code?: string } })?.details?.code).toBe(
+            "INVALID_TRANSITION"
+          );
+        }
+
+        const next = successorsOf(machine, at)[0];
+        if (!next) return;
+        const moved = await harness.client.post<Record<string, unknown>>(path, { to: next }, {
+          allowFailure: true,
+          headers: { "If-Match": etag },
+        });
+        // A rule of the model may refuse the move (422) — "a resolved case needs
+        // its notes" — which is the model working. Anything else must be a move.
+        if (moved.status === 422) return;
+        expect(moved.status).toBe(200);
+        expect(stateOf(moved.data, machine.statusField)).toBe(next);
+
+        // The version moved with it: pressing again against the old one is a conflict.
+        const stale = await harness.client.post(path, { to: next }, {
+          allowFailure: true,
+          headers: { "If-Match": etag },
+        });
+        expect(stale.status).toBe(409);
+      });
+
+      it("locks a Final record and reopens it to Draft", async () => {
+        // Walk from where a new record lands to an end state, breadth-first.
+        const record = await harness.createWithParents(entity);
+        if (!record?.id) return;
+        const id = String(record.id);
+        let at = await currentState(entity.route, id, machine.statusField);
+        if (!at || at === "error") return;
+        const path = (from: string): string[] => {
+          const seen = new Map<string, string[]>([[from, []]]);
+          const queue = [from];
+          while (queue.length) {
+            const state = queue.shift()!;
+            if (machine.terminal.includes(state)) return seen.get(state)!;
+            for (const next of successorsOf(machine, state)) {
+              if (seen.has(next)) continue;
+              seen.set(next, [...seen.get(state)!, next]);
+              queue.push(next);
+            }
+          }
+          return [];
+        };
+        for (const next of path(at)) {
+          const read = await harness.client.get(`/bus/${entity.route}/${id}`);
+          const moved = await harness.client.post(`/bus/${entity.route}/${id}/transition`, { to: next }, {
+            allowFailure: true,
+            headers: { "If-Match": read.headers.get("etag") ?? "" },
+          });
+          if (moved.status !== 200) return; // a rule of the model stopped the walk
+          at = next;
+        }
+        if (!machine.terminal.includes(at)) return;
+
+        const read = await harness.client.get(`/bus/${entity.route}/${id}`);
+        const etag = read.headers.get("etag") ?? "";
+        const edit = await harness.client.patch(`/bus/${entity.route}/${id}`, {}, {
+          allowFailure: true,
+          headers: { "If-Match": etag },
+        });
+        expect(edit.status).toBe(409);
+        expect((edit.data as { details?: { code?: string } })?.details?.code).toBe("RECORD_FINAL");
+
+        const reopened = await harness.client.post<Record<string, unknown>>(
+          `/bus/${entity.route}/${id}/transition`,
+          { event: "reopen" },
+          { allowFailure: true, headers: { "If-Match": etag } }
+        );
+        // A model may draw its own way out of an end state; reopen is the lifecycle's.
+        if (reopened.status === 409) return;
+        expect(reopened.status).toBe(200);
+        expect(stateOf(reopened.data, machine.statusField)?.toLowerCase()).toBe("draft");
       });
     });
   }

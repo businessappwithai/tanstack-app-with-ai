@@ -1,0 +1,405 @@
+%%meta name: Education Management System
+%%meta version: 1.0.0
+%%meta description: A comprehensive system for managing students, courses, faculty, enrollments, grades, and academic administration.
+
+%%enum StudentStatus: active, on_leave, graduated, suspended, withdrawn
+%%enum DegreeType: bachelor, master, doctorate, diploma, certificate
+%%enum FacultyRank: lecturer, assistant_professor, associate_professor, professor, emeritus
+%%enum FacultyTitle: dr, prof, mr, ms, mrs
+%%enum CourseLevel: undergraduate_100, undergraduate_200, undergraduate_300, undergraduate_400, graduate_500, graduate_600
+%%enum SectionStatus: open, closed, cancelled, completed
+%%enum EnrollmentStatus: registered, waitlisted, dropped, completed, withdrawn, failed
+%%enum LetterGrade: A, A_minus, B_plus, B, B_minus, C_plus, C, C_minus, D_plus, D, F, I, W
+%%enum AssignmentType: essay, exam, quiz, project, lab, presentation, homework
+%%enum SubmissionStatus: submitted, grading, graded, returned
+%%enum LoanStatus: active, returned, overdue, lost
+
+erDiagram
+
+    Department {
+        string  id PK
+        string  department_code UK
+        string  name
+        text    description OPTIONAL
+        string  building OPTIONAL
+        string  phone OPTIONAL
+        string  email OPTIONAL
+        string  head_id FK OPTIONAL
+        decimal budget OPTIONAL
+    }
+
+    Faculty {
+        string  id PK
+        string  employee_number UK
+        string  first_name
+        string  last_name
+        string  email
+        string  phone OPTIONAL
+        string  title
+        string  rank
+        string  specialization OPTIONAL
+        date    hire_date
+        string  department_id FK
+        string  office_location OPTIONAL
+        boolean is_active
+    }
+
+    Program {
+        string  id PK
+        string  program_code UK
+        string  name
+        text    description OPTIONAL
+        string  degree_type
+        integer duration_years
+        integer total_credits
+        string  department_id FK
+        boolean is_active
+    }
+
+    Student {
+        string  id PK
+        string  student_number UK
+        string  first_name
+        string  last_name
+        date    date_of_birth OPTIONAL
+        string  email
+        string  phone OPTIONAL
+        text    address OPTIONAL
+        date    enrollment_date
+        string  status
+        decimal gpa OPTIONAL
+        string  advisor_id FK OPTIONAL
+        string  program_id FK
+    }
+
+    Semester {
+        string  id PK
+        string  name
+        string  semester_code UK
+        date    start_date
+        date    end_date
+        date    registration_start
+        date    registration_end
+        boolean is_active
+    }
+
+    Course {
+        string  id PK
+        string  course_code UK
+        string  title
+        text    description OPTIONAL
+        integer credits
+        string  level
+        string  department_id FK
+        boolean is_active
+        integer max_capacity
+        text    prerequisites OPTIONAL
+    }
+
+    CourseSection {
+        string  id PK
+        string  section_number
+        string  course_id FK
+        string  faculty_id FK
+        string  semester_id FK
+        string  room OPTIONAL
+        string  schedule OPTIONAL
+        integer enrolled_count
+        string  status
+    }
+
+    Enrollment {
+        string  id PK
+        string  student_id FK
+        string  section_id FK
+        datetime enrollment_date
+        string  status
+        string  grade OPTIONAL
+        decimal grade_points OPTIONAL
+        decimal attendance_percent OPTIONAL
+        text    notes OPTIONAL
+    }
+
+    Assignment {
+        string  id PK
+        string  title
+        text    description OPTIONAL
+        string  section_id FK
+        datetime due_date
+        decimal max_score
+        decimal weight_percent
+        string  assignment_type
+        boolean is_published
+    }
+
+    Submission {
+        string  id PK
+        string  assignment_id FK
+        string  student_id FK
+        datetime submitted_at
+        decimal score OPTIONAL
+        text    feedback OPTIONAL
+        string  graded_by OPTIONAL
+        datetime graded_at OPTIONAL
+        boolean is_late
+        string  status
+    }
+
+    Library {
+        string  id PK
+        string  name
+        string  location OPTIONAL
+        string  opening_hours OPTIONAL
+        string  phone OPTIONAL
+        string  email OPTIONAL
+        boolean is_active
+    }
+
+    BookLoan {
+        string  id PK
+        string  library_id FK
+        string  borrower_student_id FK OPTIONAL
+        string  borrower_faculty_id FK OPTIONAL
+        string  item_title
+        string  item_isbn OPTIONAL
+        date    loan_date
+        date    due_date
+        date    return_date OPTIONAL
+        decimal fine_amount OPTIONAL
+        string  status
+    }
+
+    Department }o--o| Faculty : "headed by"
+    Faculty }|--|| Department : "belongs to"
+    Program }|--|| Department : "offered by"
+    Student }|--|| Program : "enrolled in"
+    Student }|--o| Faculty : "advised by"
+    Course }|--|| Department : "owned by"
+    CourseSection }|--|| Course : "section of"
+    CourseSection }|--|| Faculty : "taught by"
+    CourseSection }|--|| Semester : "runs in"
+    Enrollment }|--|| Student : "enrolled student"
+    Enrollment }|--|| CourseSection : "enrolled in section"
+    Assignment }|--|| CourseSection : "set in section"
+    Submission }|--|| Assignment : "responds to"
+    Submission }|--|| Student : "submitted by"
+    BookLoan }|--|| Library : "from library"
+    BookLoan }o--o| Student : "borrowed by student"
+    BookLoan }o--o| Faculty : "borrowed by faculty"
+
+%%entity Department help: An academic department that groups related disciplines and faculty.
+%%field Department.department_code help: Short code used in course prefixes and room bookings.
+%%field Department.name help: Full name of the department.
+%%field Department.description help: Summary of the department's academic focus.
+%%field Department.building help: Building where the department's main offices are located.
+%%field Department.phone help: Main telephone number for the department office.
+%%field Department.email help: General enquiries email address.
+%%field Department.head_id help: The faculty member currently serving as department head.
+%%field Department.budget help: Annual operating budget allocated to this department.
+
+%%entity Faculty help: An academic staff member who teaches, researches, and advises students.
+%%field Faculty.employee_number help: Unique staff identifier used in payroll and HR systems.
+%%field Faculty.first_name help: Legal given name.
+%%field Faculty.last_name help: Legal family name.
+%%field Faculty.email help: Institutional email address.
+%%field Faculty.phone help: Office telephone extension.
+%%field Faculty.title help: Academic or professional title.
+%%field Faculty.rank help: Academic rank within the institution's hierarchy.
+%%field Faculty.specialization help: Primary area of academic expertise.
+%%field Faculty.hire_date help: Date the faculty member joined the institution.
+%%field Faculty.department_id help: The department this faculty member belongs to.
+%%field Faculty.office_location help: Room number and building for student office hours.
+%%field Faculty.is_active help: Whether this faculty member is currently employed.
+%%field Faculty.title enum: FacultyTitle
+%%field Faculty.rank enum: FacultyRank
+
+%%entity Program help: A structured academic qualification such as a degree or diploma.
+%%field Program.program_code help: Short unique code used in official documents and timetables.
+%%field Program.name help: Full name of the program as it appears on transcripts.
+%%field Program.description help: Overview of what the program covers and who it is for.
+%%field Program.degree_type help: The qualification awarded on successful completion.
+%%field Program.duration_years help: Nominal number of years to complete the program full-time.
+%%field Program.total_credits help: Total credit hours required to graduate.
+%%field Program.department_id help: The department that owns and administers this program.
+%%field Program.is_active help: Whether new students may currently enrol in this program.
+%%field Program.degree_type enum: DegreeType
+
+%%entity Student help: A person enrolled or applying to study at the institution.
+%%field Student.student_number help: Unique identifier assigned at enrolment, printed on all official documents.
+%%field Student.first_name help: Legal given name as it appears on identity documents.
+%%field Student.last_name help: Legal family name as it appears on identity documents.
+%%field Student.date_of_birth help: Used to verify identity and calculate age eligibility.
+%%field Student.email help: Primary contact address; used for all official correspondence.
+%%field Student.phone help: Contact telephone number including country code.
+%%field Student.address help: Residential address for postal correspondence.
+%%field Student.enrollment_date help: Date the student was formally admitted and enrolled.
+%%field Student.status help: Current standing of the student in the institution.
+%%field Student.gpa help: Cumulative grade point average across all completed courses.
+%%field Student.advisor_id help: The faculty member advising this student.
+%%field Student.program_id help: The academic program the student is pursuing.
+%%field Student.status enum: StudentStatus
+
+%%entity Semester help: An academic period during which courses are offered and assessed.
+%%field Semester.name help: Human-readable name such as Fall 2024 or Spring 2025.
+%%field Semester.semester_code help: Short code used in transcripts and section identifiers.
+%%field Semester.start_date help: First day of classes.
+%%field Semester.end_date help: Last day of classes.
+%%field Semester.registration_start help: Date from which students may register for courses.
+%%field Semester.registration_end help: Deadline for adding or dropping courses without penalty.
+%%field Semester.is_active help: Whether this semester is currently in progress.
+
+%%entity Course help: A unit of study offered by a department, identified by a code and title.
+%%field Course.course_code help: Unique code such as CS101 used in timetables and transcripts.
+%%field Course.title help: Full descriptive title of the course.
+%%field Course.description help: What the course covers, its learning outcomes and assessment methods.
+%%field Course.credits help: Number of credit hours this course contributes to a program.
+%%field Course.level help: Academic level indicating the year of study the course is intended for.
+%%field Course.department_id help: The department that owns and delivers this course.
+%%field Course.is_active help: Whether this course is currently available for enrolment.
+%%field Course.max_capacity help: Maximum number of students who may enrol in a single section.
+%%field Course.prerequisites help: Free-text description of courses that must be completed first.
+%%field Course.level enum: CourseLevel
+
+%%entity CourseSection help: A specific offering of a course in a given semester with a time, place, and instructor.
+%%field CourseSection.section_number help: Identifier distinguishing this offering from others of the same course in the same term.
+%%field CourseSection.course_id help: The course this section delivers.
+%%field CourseSection.faculty_id help: The instructor assigned to teach this section.
+%%field CourseSection.semester_id help: The semester in which this section runs.
+%%field CourseSection.room help: Classroom or laboratory where sessions are held.
+%%field CourseSection.schedule help: Days and times the section meets.
+%%field CourseSection.enrolled_count help: Current number of students enrolled; updated automatically.
+%%field CourseSection.status help: Whether the section is open, closed, or cancelled.
+%%field CourseSection.status enum: SectionStatus
+
+%%entity Enrollment help: A student's registration in a specific course section for a semester.
+%%field Enrollment.student_id help: The student who enrolled.
+%%field Enrollment.section_id help: The course section the student is enrolled in.
+%%field Enrollment.enrollment_date help: Date and time the student registered.
+%%field Enrollment.status help: Current state of the enrollment.
+%%field Enrollment.grade help: Final letter grade awarded on completion.
+%%field Enrollment.grade_points help: Numeric grade points used to compute GPA.
+%%field Enrollment.attendance_percent help: Percentage of sessions the student attended.
+%%field Enrollment.notes help: Administrative notes about this enrollment.
+%%field Enrollment.status enum: EnrollmentStatus
+%%field Enrollment.grade enum: LetterGrade
+
+%%entity Assignment help: A graded piece of work set within a course section.
+%%field Assignment.title help: Name of the assignment shown to students.
+%%field Assignment.description help: Full instructions and submission requirements.
+%%field Assignment.section_id help: The course section this assignment belongs to.
+%%field Assignment.due_date help: Deadline by which students must submit.
+%%field Assignment.max_score help: Maximum number of points attainable.
+%%field Assignment.weight_percent help: Contribution of this assignment to the overall course grade.
+%%field Assignment.assignment_type help: Category of work required.
+%%field Assignment.is_published help: Whether students can currently see this assignment.
+%%field Assignment.assignment_type enum: AssignmentType
+
+%%entity Submission help: A student's response to an assignment including any score awarded.
+%%field Submission.assignment_id help: The assignment being submitted.
+%%field Submission.student_id help: The student who made the submission.
+%%field Submission.submitted_at help: Date and time of submission.
+%%field Submission.score help: Points awarded by the grader.
+%%field Submission.feedback help: Grader's written comments returned to the student.
+%%field Submission.graded_by help: Faculty member who graded this submission.
+%%field Submission.graded_at help: When the score and feedback were recorded.
+%%field Submission.is_late help: Whether the submission was received after the due date.
+%%field Submission.status help: Current grading state.
+%%field Submission.status enum: SubmissionStatus
+
+%%entity Library help: A campus library available to students and faculty.
+%%field Library.name help: Name of the library.
+%%field Library.location help: Building and floor where the library is situated.
+%%field Library.opening_hours help: Days and times the library is open.
+%%field Library.phone help: Contact number for enquiries and renewals.
+%%field Library.email help: Email for enquiries.
+%%field Library.is_active help: Whether the library is currently operational.
+
+%%entity BookLoan help: A loan of a library resource to a student or faculty member.
+%%field BookLoan.library_id help: The library from which the item was borrowed.
+%%field BookLoan.borrower_student_id help: Student who borrowed the item, if applicable.
+%%field BookLoan.borrower_faculty_id help: Faculty who borrowed the item, if applicable.
+%%field BookLoan.item_title help: Title of the book or resource borrowed.
+%%field BookLoan.item_isbn help: ISBN or other catalogue identifier.
+%%field BookLoan.loan_date help: Date the item was checked out.
+%%field BookLoan.due_date help: Date by which the item must be returned.
+%%field BookLoan.return_date help: Actual date the item was returned, if returned.
+%%field BookLoan.fine_amount help: Fine charged for late return, if any.
+%%field BookLoan.status help: Current state of the loan.
+%%field BookLoan.status enum: LoanStatus
+
+%%section entity: Department; name: Identification; help: The department's identity and contact details.; rows: department_code | name, phone | email, building | head_id, budget | description
+%%section entity: Faculty; name: Personal Details; help: The faculty member's identity and contact details.; rows: first_name | last_name, title | email, phone | office_location
+%%section entity: Faculty; name: Employment; help: The faculty member's role and department.; rows: employee_number | rank, hire_date | department_id, specialization | is_active
+%%section entity: Program; name: Program Details; help: The program's identity and academic scope.; rows: program_code | name, degree_type | duration_years, total_credits | department_id, is_active | description
+%%section entity: Student; name: Personal Details; help: The student's identity and contact details.; rows: first_name | last_name, date_of_birth | email, phone | address
+%%section entity: Student; name: Academic Standing; help: The student's program, advisor, and academic performance.; rows: student_number | status, gpa | enrollment_date, program_id | advisor_id
+%%section entity: Semester; name: Dates; help: The semester's schedule and registration window.; rows: name | semester_code, start_date | end_date, registration_start | registration_end, is_active
+%%section entity: Course; name: Course Details; help: The course's identity, scope, and capacity.; rows: course_code | title, credits | level, department_id | is_active, max_capacity | prerequisites, description
+%%section entity: CourseSection; name: Section Details; help: The time, place, and instructor for this offering.; rows: course_id | semester_id, faculty_id | room, schedule | status, section_number | enrolled_count
+%%section entity: Enrollment; name: Enrollment Details; help: Registration, attendance, and grade for this student in this section.; rows: student_id | section_id, enrollment_date | status, grade | grade_points, attendance_percent | notes
+%%section entity: Assignment; name: Assignment Details; help: The task, its deadline, and its weight in the final grade.; rows: title | assignment_type, section_id | due_date, max_score | weight_percent, is_published | description
+%%section entity: Submission; name: Submission Details; help: The student's work and the grader's response.; rows: assignment_id | student_id, submitted_at | status, score | is_late, graded_by | graded_at, feedback
+%%section entity: Library; name: Library Details; help: Location and contact details for this library.; rows: name | location, phone | email, opening_hours | is_active
+%%section entity: BookLoan; name: Item; help: The item borrowed and from which library.; rows: library_id | item_title, item_isbn | loan_date, due_date | return_date, fine_amount | status, borrower_student_id | borrower_faculty_id
+
+%%rule gradePointsRange on Enrollment event: beforeUpdate priority: 5
+flowchart TD
+    A([Start: Grade Updated]) --> B{grade_points >= 0?}
+    B -->|No| X1[Reject: Grade points must be 0 or higher]
+    B -->|Yes| C{grade_points <= 4?}
+    C -->|No| X2[Reject: Grade points cannot exceed 4]
+    C -->|Yes| P[Accept]
+    X1 --> Z([End])
+    X2 --> Z
+    P --> Z
+
+%%rule attendanceRange on Enrollment event: beforeUpdate priority: 5
+flowchart TD
+    A([Start: Attendance Updated]) --> B{attendance_percent >= 0?}
+    B -->|No| X1[Reject: Attendance cannot be negative]
+    B -->|Yes| C{attendance_percent <= 100?}
+    C -->|No| X2[Reject: Attendance cannot exceed 100 percent]
+    C -->|Yes| P[Accept]
+    X1 --> Z([End])
+    X2 --> Z
+    P --> Z
+
+%%rule submissionScoreRange on Submission event: beforeUpdate priority: 5
+flowchart TD
+    A([Start: Score Entered]) --> B{score >= 0?}
+    B -->|No| X1[Reject: Score cannot be negative]
+    B -->|Yes| P[Accept]
+    X1 --> Z([End])
+    P --> Z
+
+%%workflow GradeRecorded entity: Enrollment kind: saga trigger: automatic operation: UPDATE
+flowchart TD
+    A([Grade recorded]) --> B[Mark enrollment complete]
+    B --> C([Done])
+
+    %%step B UpdateEntity field: status value: completed
+
+%%rbac role:Administrator on Student.create
+%%rbac role:Administrator on Student.update
+%%rbac role:Administrator on Student.delete
+%%rbac role:Faculty on Student.read
+%%rbac role:Faculty on Enrollment.read
+%%rbac role:Faculty on Assignment.create
+%%rbac role:Faculty on Assignment.update
+%%rbac role:Faculty on Submission.update
+%%rbac role:Administrator on Faculty.create
+%%rbac role:Administrator on Faculty.update
+%%rbac role:Administrator on Program.create
+%%rbac role:Administrator on Program.update
+%%rbac role:Administrator on Course.create
+%%rbac role:Administrator on Course.update
+%%rbac role:Administrator on Semester.create
+%%rbac role:Administrator on Semester.update
+
+    %%report students-by-program title: Students by Program entity: Student help: Headcount and average GPA by program, showing where enrolment is concentrated. sql: SELECT p.name AS program, d.name AS department, COUNT(s.id) AS student_count, ROUND(AVG(s.gpa)::numeric, 2) AS avg_gpa FROM bus_student s JOIN bus_program p ON p.id = s.program_id JOIN bus_department d ON d.id = p.department_id WHERE s.deleted_at IS NULL GROUP BY p.name, d.name ORDER BY p.name
+
+    %%report course-enrollment-summary title: Course Enrollment Summary entity: CourseSection chart: bar x: course y: enrolled help: Enrollment versus capacity for each section, identifying over-subscribed courses. sql: SELECT c.course_code, c.title, se.name AS semester, cs.enrolled_count, cs.max_capacity, cs.enrolled_count::float / NULLIF(cs.max_capacity, 0) AS fill_rate FROM bus_course_section cs JOIN bus_course c ON c.id = cs.course_id JOIN bus_semester se ON se.id = cs.semester_id WHERE cs.deleted_at IS NULL ORDER BY se.name, c.course_code
+
+    %%report faculty-teaching-load title: Faculty Teaching Load entity: Faculty chart: bar x: faculty y: sections help: How many sections each faculty member is delivering this term, to surface workload imbalances. sql: SELECT f.first_name || ' ' || f.last_name AS faculty_name, d.name AS department, COUNT(cs.id) AS sections_taught FROM bus_faculty f JOIN bus_department d ON d.id = f.department_id LEFT JOIN bus_course_section cs ON cs.faculty_id = f.id AND cs.deleted_at IS NULL WHERE f.deleted_at IS NULL GROUP BY f.id, f.first_name, f.last_name, d.name ORDER BY sections_taught DESC
+
+    %%report overdue-loans title: Overdue Library Loans entity: BookLoan help: Items not returned by their due date, together with the borrower and the fine accrued. sql: SELECT bl.item_title, bl.item_isbn, bl.loan_date, bl.due_date, (now()::date - bl.due_date) AS days_overdue, bl.fine_amount, l.name AS library FROM bus_book_loan bl JOIN bus_library l ON l.id = bl.library_id WHERE bl.deleted_at IS NULL AND bl.status = 'overdue' ORDER BY days_overdue DESC

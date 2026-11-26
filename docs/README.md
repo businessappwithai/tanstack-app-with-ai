@@ -198,7 +198,7 @@ Generated Application (Next.js/NestJS or OpenUI5/OData)
 
 | Layer | Technologies |
 |-------|-------------|
-| **Runtime** | Bun.js 1.3+ |
+| **Runtime** | Bun.js 1.4.4+ |
 | **AI Framework** | Mastra.ai, CopilotKit |
 | **AI Model** | Anthropic Claude Sonnet 4 |
 | **Frontend** | Next.js 14+, React 18+, Shadcn UI, TailwindCSS |
@@ -421,5 +421,5 @@ MIT License - See LICENSE file for details
 **Version**: 5.1.0
 **Status**: Production Ready ✅
 **Last Updated**: February 2026
-**Runtime**: Bun.js 1.3+
+**Runtime**: Bun.js 1.4.4+
 **Node**: v20+ compatible

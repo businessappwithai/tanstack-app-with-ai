@@ -28,6 +28,9 @@ import { declaredEntityNames, entityToBusEntity } from "@appwithai/core/types";
 import type { CompiledRbac } from "../../rbac";
 import { deriveAccess } from "../../rbac/roles";
 import type { CompiledReport } from "../../reports";
+import type { ReportingPack } from "../../reporting/pack";
+import { stateFieldOf } from "../../../../../language/state-field";
+import type { CompiledRule } from "../../rules";
 import type { CompiledWorkflow } from "../../workflows";
 import { BaseGenerator } from "../base.generator";
 
@@ -92,6 +95,20 @@ export interface BunE2ETestGeneratorOptions {
    * that the query runs against the schema the generator emitted.
    */
   compiledReports?: CompiledReport[];
+  /**
+   * The compiled `%%rule` graphs. The factory invents numbers, and a model's own
+   * `validation-error when: discount_percent > 40` refuses an update to a record
+   * the factory gave 56 — so the suites read the ceilings off the rules and keep
+   * the values they invent under them.
+   */
+  compiledRules?: CompiledRule[];
+  /**
+   * The reporting pack the platform is seeded from, derived from the same model.
+   * Its presence is what turns the reporting suites on; the suites read the pack
+   * itself from `reporting/reporting-pack.json` at run time, so what they expect
+   * is the artefact the seeder loaded rather than a second derivation.
+   */
+  reportingPack?: ReportingPack;
   /** The administrator address the bootstrap creates. */
   adminEmail?: string;
 }
@@ -110,6 +127,9 @@ const HARNESS_FILES = [
   // The dictionary and transition suites compare the running application
   // against this rather than against themselves.
   "model.ts",
+  // The Enterprise Reporting platform: its sign-in, its envelopes, and the pack
+  // the seeder loaded into it, read off disk.
+  "reporting.ts",
   "factory.ts",
   "rules.ts",
   "workflows.ts",
@@ -132,11 +152,17 @@ const SHARED_SUITES = [
   // and a broken reference fail for different reasons and want different names.
   "02b-dictionary-layout.test.ts",
   "02c-dictionary-references.test.ts",
+  // The error envelope: the code, category and ref every failure carries, and the
+  // route the browser reports its own errors to.
+  "02d-error-envelope.test.ts",
+  // Changing a log level on a running process: administrators only, reads included.
+  "02e-log-levels.test.ts",
   "04-bulk-seed.test.ts",
   "06-rules-workflow.test.ts",
   // The state machine, driven edge by edge — after the rule-triggered
   // workflows, because both write to the same status fields.
   "06b-workflow-transitions.test.ts",
+  "06c-status-bound-workflow.test.ts",
   "07-workflow-random.test.ts",
   "08-users-roles.test.ts",
   "09-workflow-multistep.test.ts",
@@ -164,6 +190,17 @@ const SHARED_SUITES = [
   // model's own SQL, and the checker that validated the directive never saw
   // the schema the query has to match.
   "21-reports.test.ts",
+  // Optimistic locking: a stale save is a 409 the form can offer "reload or
+  // overwrite" on, and two saves racing from one version produce one winner.
+  "22-optimistic-locking.test.ts",
+  // What the rules & workflows screen saves: status machines as edges, processes as automations.
+  "23-workflow-editors-api.test.ts",
+  // Who may press which action button, from where each record is — per role.
+  "26-status-flows-by-role.test.ts",
+  // The Enterprise Reporting platform held to the pack the model produced, and
+  // the application and the platform on one set of data.
+  "28-reporting-platform.test.ts",
+  "29-app-and-reports-together.test.ts",
   // Last, so they measure the fullest the tables will be this run.
   "10-benchmark.test.ts",
   "18-write-benchmark.test.ts",
@@ -171,7 +208,26 @@ const SHARED_SUITES = [
 ];
 
 /** Root-level files. */
-const ROOT_FILES = ["package.json", "tsconfig.json", "README.md", "run.ts", "cleanup.ts"];
+const ROOT_FILES = [
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  "run.ts",
+  "cleanup.ts",
+  // The `e2e` compose service builds this: `docker compose run --rm e2e`.
+  "Dockerfile",
+  // The browser layer's image: Chromium + Playwright. `docker compose run --rm e2e-ui`.
+  "Dockerfile.ui",
+  ".dockerignore",
+];
+
+/** The browser layer: Playwright specs and the helpers they share. */
+const UI_FILES = [
+  "playwright.config.ts",
+  "helpers.ts",
+  "app.spec.ts",
+  "reporting.spec.ts",
+];
 
 /** Files made executable after writing. */
 const EXECUTABLE_FILES = ["run.ts", "cleanup.ts"];
@@ -199,6 +255,7 @@ export class BunE2ETestGenerator extends BaseGenerator {
 
     await this.writeRootFiles(testsDir, context);
     await this.writeHarness(testsDir, context);
+    await this.writeUi(testsDir, context);
     await this.writeSharedSuites(testsDir, context);
     await this.writePerEntitySuites(testsDir, busEntities, context);
 
@@ -209,12 +266,139 @@ export class BunE2ETestGenerator extends BaseGenerator {
     );
   }
 
+  /**
+   * Hang `maxValue` on every numeric attribute a refusing rule caps.
+   *
+   * Reads the `prevent` rows of each compiled decision table and keeps the
+   * simple `<field> > N` / `<field> >= N` conditions — the shape `%%action
+   * validation-error when:` is written in for a bound. Anything else is left
+   * alone: a condition the suite cannot read is one it has no ceiling for.
+   */
+  private withValueCeilings(entities: BusEntity[]): BusEntity[] {
+    const ceilings = new Map<string, number>();
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph: {
+        nodes?: Array<{ type?: string; content?: { rules?: Array<Record<string, string>> } }>;
+      };
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode") continue;
+        for (const row of node.content?.rules ?? []) {
+          if (row.o1 !== "'prevent'") continue;
+          const match = /^\s*([A-Za-z_]\w*)\s*(>=|>)\s*(-?\d+(?:\.\d+)?)\s*$/.exec(row.i1 ?? "");
+          if (!match) continue;
+          const [, column, operator, bound] = match as unknown as [string, string, string, string];
+          const ceiling = operator === ">=" ? Number(bound) - 0.01 : Number(bound);
+          const key = `${rule.tableName}.${column}`;
+          ceilings.set(key, Math.min(ceilings.get(key) ?? ceiling, ceiling));
+        }
+      }
+    }
+    if (ceilings.size === 0) return entities;
+
+    return entities.map((entity) => ({
+      ...entity,
+      attributes: (entity.attributes ?? []).map((attribute) => {
+        const column = (attribute as Partial<BusEntityAttribute>).columnName ?? attribute.name;
+        const ceiling = ceilings.get(`${entity.tableName}.${column}`);
+        return ceiling === undefined ? attribute : { ...attribute, maxValue: ceiling };
+      }),
+    })) as BusEntity[];
+  }
+
+  /**
+   * Hang `uniqueTogether` on every entity that declares a unique index over more
+   * than one column — `%%index BookingShipment(booking_id, shipment_id) unique`.
+   *
+   * A single-column unique index is already on the column (`unique`), and the
+   * factory salts it. A pair is a property of the entity, and a suite that reuses
+   * one parent for every record it creates writes the same pair twice and is
+   * refused with a 409 that is the constraint working, not the application failing.
+   */
+  private withUniqueTogether(entities: BusEntity[]): BusEntity[] {
+    return entities.map((entity) => ({
+      ...entity,
+      uniqueTogether: (entity.indexes ?? [])
+        .filter((index) => index.unique && index.columns.length > 1)
+        .map((index) => index.columns),
+    })) as BusEntity[];
+  }
+
+  /**
+   * Every condition under which a compiled rule refuses a write, as text.
+   *
+   * The factory redraws a record that would trip one (see `harness/factory.ts`),
+   * so a CRUD run is not at the mercy of which status or amount it happened to
+   * invent. Rows that are not a refusal, and rules whose JSON cannot be read,
+   * contribute nothing.
+   */
+  private refusals(): Array<{ tableName: string; when: string }> {
+    const found: Array<{ tableName: string; when: string }> = [];
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph: {
+        nodes?: Array<{ type?: string; content?: { rules?: Array<Record<string, string>> } }>;
+      };
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode") continue;
+        for (const row of node.content?.rules ?? []) {
+          const when = (row.i1 ?? "").trim();
+          if (row.o1 === "'prevent'" && when && when !== "true") {
+            found.push({ tableName: rule.tableName, when });
+          }
+        }
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Every column a compiled `transform` rule overwrites after a write.
+   *
+   * A suite that stores a distinctive value in such a column and reads it back
+   * is asserting against the rule, not the API: `stampCashReference` rewrites
+   * `reference` on every cash payment, so the text-search case never found its
+   * needle. The harness keeps free-text probes off these columns.
+   */
+  private transforms(): Array<{ tableName: string; column: string }> {
+    const found: Array<{ tableName: string; column: string }> = [];
+    for (const rule of this.options.compiledRules ?? []) {
+      let graph: {
+        nodes?: Array<{ type?: string; content?: { rules?: Array<Record<string, string>> } }>;
+      };
+      try {
+        graph = JSON.parse(rule.jdmContent);
+      } catch {
+        continue;
+      }
+      for (const node of graph.nodes ?? []) {
+        if (node.type !== "decisionTableNode") continue;
+        for (const row of node.content?.rules ?? []) {
+          const column = (row.o5 ?? "").trim().replace(/^'(.*)'$/, "$1");
+          if (row.o1 === "'transform'" && column) {
+            found.push({ tableName: rule.tableName, column });
+          }
+        }
+      }
+    }
+    return found;
+  }
+
   // ── context ───────────────────────────────────────────────────────────────
 
   private buildContext(
     entities: BusEntity[],
     relationships: Relationship[]
   ): Record<string, unknown> {
+    entities = this.withUniqueTogether(this.withValueCeilings(entities));
     return {
       project: {
         name: this.options.projectName,
@@ -226,6 +410,9 @@ export class BunE2ETestGenerator extends BaseGenerator {
         port: this.options.port,
         frontendPort: this.options.frontendPort,
         recordsPerEntity: this.options.recordsPerEntity ?? 1000,
+        // A file-level budget: the per-entity suites make several round trips
+        // per entity, so a 90-entity model needs more than a 19-entity one.
+        suiteTimeoutMs: Math.max(180_000, entities.length * 6_000),
       },
       entities,
       relationships,
@@ -239,7 +426,10 @@ export class BunE2ETestGenerator extends BaseGenerator {
         x: report.x ?? "",
         y: report.y ?? "",
       })),
+      refusals: this.refusals(),
+      transforms: this.transforms(),
       stateMachines: this.stateMachines(entities),
+      hasReporting: this.options.reportingPack !== undefined,
       ...this.accessContext(entities),
       now: new Date().toISOString(),
     };
@@ -430,7 +620,8 @@ export class BunE2ETestGenerator extends BaseGenerator {
       const columns = ((entity.attributes ?? []) as Array<Partial<BusEntityAttribute>>).map(
         (attribute) => attribute.columnName ?? attribute.name
       );
-      const statusField = columns.includes("status") ? "status" : "workflow_status";
+      const statusField =
+        stateFieldOf(columns.filter((name): name is string => !!name)) ?? "workflow_status";
 
       // `[*]` is the diagram's start and end marker, not a state a record is
       // ever in — the seed drops those edges, so the suite must too or it
@@ -445,7 +636,13 @@ export class BunE2ETestGenerator extends BaseGenerator {
         tableName: entity.tableName,
         statusField,
         initial: workflow.initial ?? "",
-        terminal: workflow.terminal ?? [],
+        // A state the diagram sends to `[*]` is not terminal if it also draws a way
+        // out (`closed --> [*]` beside `closed --> available : reopen`): the suite
+        // asserts a terminal state offers no move, so it is only handed the states
+        // that really have none.
+        terminal: (workflow.terminal ?? []).filter(
+          (state) => !edges.some((edge) => edge.from === state)
+        ),
         edges,
       });
     }
@@ -463,6 +660,14 @@ export class BunE2ETestGenerator extends BaseGenerator {
     for (const file of EXECUTABLE_FILES) {
       // chmod is best-effort — Windows and some CI filesystems reject it.
       await fs.chmod(path.join(testsDir, file), 0o755).catch(() => {});
+    }
+  }
+
+  private async writeUi(testsDir: string, context: Record<string, unknown>): Promise<void> {
+    await fs.mkdir(path.join(testsDir, "ui"), { recursive: true });
+    for (const file of UI_FILES) {
+      const content = await this.renderTemplate(`ui/${file}.hbs`, context);
+      await fs.writeFile(path.join(testsDir, "ui", file), content);
     }
   }
 

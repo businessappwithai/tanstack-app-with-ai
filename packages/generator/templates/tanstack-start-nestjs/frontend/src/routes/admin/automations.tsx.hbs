@@ -1,432 +1,83 @@
 /**
- * Automations — build multi-step workflows and business rules.
+ * Rules & workflows — the modelling tool's Logic step, inside the application.
  *
- * One screen holds the automations, the rule tables they look up, and the help,
- * because a rule table is only ever reached from a step that uses it.
+ * Everything on this screen is `LogicWorkbench`, vendored from `@appwithai/editors`: the
+ * same rail, the same rule editor (decision tables, the GoRules graph, Try it), the same
+ * lifecycle, process and status-machine editors, flowchart views and per-topic help.
+ * What is this application's is `lib/logic-host.ts`: where the rules and workflows are
+ * read from and written to, and what the model says they may name.
  *
- * The entity list is baked in at generation time from this app's own model, so
- * the pickers and the help examples name {{#if entities.[0]}}{{entities.[0].name}}{{else}}your records{{/if}} rather than a
- * stand-in the reader has to translate.
+ * A status flow saved here is the one the application runs from then on: the record's
+ * action buttons, the transition API and the badge all follow it (`lib/use-lifecycles.ts`).
  *
  * Generated for: {{project.name}}
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
-import { AutomationBuilder, type RuleTableSummary } from '@/components/automation/AutomationBuilder';
-import { AutomationHelp } from '@/components/automation/AutomationHelp';
-import { useHelp } from '@/components/help/help-toaster';
-import { ThemeToggle } from '@/components/theme/theme-toggle';
-import { RailSection } from '@/components/automation/RailList';
-import { RuleTableEditor } from '@/components/automation/RuleTableEditor';
-import {
-  type Automation,
-  emptyAutomation,
-  parseAutomation,
-  serializeAutomation,
-  validateAutomation,
-} from '@/lib/automation/model';
-import { asDecisionTable } from '@/lib/automation/rule-content';
-import type { DecisionTable } from '@/lib/workflow/bpmn-model';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { LogicWorkbench } from '@/editors/components/LogicWorkbench';
+import { createLogicHost, logicConstraints, logicEntities, simulateRule, type LoadedLogic } from '@/lib/logic-host';
+import { LIFECYCLES_QUERY_KEY } from '@/lib/use-lifecycles';
 
 export const Route = createFileRoute('/admin/automations')({
-  component: AutomationsPage,
+  component: RulesAndWorkflowsPage,
 });
 
-/** This app's entities and their fields, from the model it was generated from. */
-const ENTITIES: string[] = [
-{{#each entities}}
-  '{{this.name}}',
-{{/each}}
-];
-
-const ENTITY_FIELDS: Record<string, string[]> = {
-{{#each entities}}
-  '{{this.name}}': [{{#each this.attributes}}'{{this.name}}'{{#unless @last}}, {{/unless}}{{/each}}],
-{{/each}}
-};
-
-/** A row as sys_workflow_definitions returns it. */
-interface StoredAutomation {
-  id: string;
-  name: string;
-  entity_name?: string;
-  mermaid_code?: string;
-}
-
-/** A rule as the endpoint returns it, in either casing. */
-interface RuleRow {
-  id: string;
-  ruleName?: string;
-  entityName?: string;
-  jdmContent?: unknown;
-  rule_name?: string;
-  entity_name?: string;
-  jdm_content?: unknown;
-}
-
-interface RuleTableRecord {
-  id: string;
-  name: string;
-  entity: string;
-  table: DecisionTable;
-}
-
-/**
- * `help` used to be one of these, and the page opened on it — so the first
- * thing a user met here was documentation rather than their own automations.
- * Help is the toaster now, opened by the `?` in the header, so the empty view
- * is genuinely empty and says what to do next.
- */
-type View =
-  | { kind: 'automation'; id: string }
-  | { kind: 'table'; id: string }
-  | { kind: 'none' };
-
-function AutomationsPage() {
-  const [automations, setAutomations] = useState<Automation[]>([]);
-  const [storedIds, setStoredIds] = useState<Record<string, string>>({});
-  const [tables, setTables] = useState<RuleTableRecord[]>([]);
-  const [view, setView] = useState<View>({ kind: 'none' });
-  const [loading, setLoading] = useState(true);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [autoTotal, setAutoTotal] = useState(0);
-  const [tableTotal, setTableTotal] = useState(0);
+function RulesAndWorkflowsPage() {
+  const host = useMemo(() => createLogicHost(), []);
+  const queryClient = useQueryClient();
+  const [model, setModel] = useState<LoadedLogic | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-
-    const load = async () => {
-      try {
-        const [autoRes, ruleRes] = await Promise.all([
-          fetch('/api/workflow-definitions?kind=automation&limit=200'),
-          fetch('/api/rules?limit=200'),
-        ]);
-
-        if (cancelled) return;
-
-        // Parse first, then apply. Everything that touches state goes inside
-        // one startTransition below.
-        const autoData = autoRes.ok
-          ? ((await autoRes.json()) as { items?: StoredAutomation[]; total?: number })
-          : null;
-
-        const rulePayload = ruleRes.ok
-          ? ((await ruleRes.json()) as
-              | RuleRow[]
-              | { rules?: RuleRow[]; items?: RuleRow[]; total?: number })
-          : null;
-
-        if (cancelled) return;
-
-        const parsed = (autoData?.items ?? []).map((row) => ({
-          stored: row.id,
-          automation: {
-            ...parseAutomation(row.mermaid_code ?? '', row.entity_name || ENTITIES[0] || 'Record'),
-            name: row.name,
-          },
-        }));
-
-        const ruleRows: RuleRow[] = rulePayload
-          ? Array.isArray(rulePayload)
-            ? rulePayload
-            : (rulePayload.rules ?? rulePayload.items ?? [])
-          : [];
-
-        // The page streams from the server showing "Loading automations…", so
-        // this is the first update while hydration is still in flight. React
-        // treats an urgent update inside a hydrating Suspense boundary as a
-        // reason to discard the server HTML and re-render on the client — the
-        // "received an update before it finished hydrating" warning. Marking it
-        // non-urgent lets hydration finish first.
-        startTransition(() => {
-          if (autoData) {
-            setAutoTotal(autoData.total ?? (autoData.items ?? []).length);
-            setAutomations(parsed.map((p) => p.automation));
-            setStoredIds(Object.fromEntries(parsed.map((p) => [p.automation.id, p.stored])));
-            const first = parsed[0];
-            if (first) setView({ kind: 'automation', id: first.automation.id });
-          }
-
-          if (rulePayload) {
-            setTableTotal(
-              (Array.isArray(rulePayload) ? undefined : rulePayload.total) ?? ruleRows.length
-            );
-            setTables(
-              ruleRows.map((r) => ({
-                id: r.id,
-                name: r.ruleName ?? r.rule_name ?? 'Untitled rule',
-                entity: r.entityName ?? r.entity_name ?? '',
-                table: asDecisionTable(r.jdmContent ?? r.jdm_content),
-              }))
-            );
-          }
-        });
-      } catch (error) {
-        console.error('Failed to load automations:', error);
-      } finally {
-        // This is the update that actually swaps the "Loading automations…"
-        // placeholder for the builder, so it has to be non-urgent too — a
-        // transition around the data alone still leaves this one able to
-        // interrupt hydration.
-        if (!cancelled) startTransition(() => setLoading(false));
-      }
-    };
-
-    void load();
+    host
+      .load()
+      .then((loaded) => {
+        if (!cancelled) setModel(loaded);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : 'Could not load the rules and workflows.');
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [host]);
 
-  const current = useMemo(
-    () => (view.kind === 'automation' ? automations.find((a) => a.id === view.id) : undefined),
-    [view, automations]
-  );
-
-  const currentTable = useMemo(
-    () => (view.kind === 'table' ? tables.find((t) => t.id === view.id) : undefined),
-    [view, tables]
-  );
-
-  const ruleTableSummaries: RuleTableSummary[] = useMemo(
-    () =>
-      tables.map((t) => ({
-        id: t.id,
-        name: t.name,
-        rowCount: t.table.rules.length,
-        outputs: t.table.outputs.map((o) => o.field || o.name),
-      })),
-    [tables]
-  );
-
-  const usersOf = useCallback(
-    (tableName: string) =>
-      automations.flatMap((a) =>
-        a.steps
-          .map((s, i) => ({ s, i }))
-          .filter(({ s }) => s.type === 'Decision' && s.props.ruleTable === tableName)
-          .map(({ i }) => ({ name: a.name, where: `step ${i + 1}` }))
-      ),
-    [automations]
-  );
-
-  const helpExample = useMemo(() => {
-    const entity = ENTITIES[0] ?? 'Record';
-    const fields = ENTITY_FIELDS[entity] ?? [];
-    return {
-      entity,
-      numericField: fields.find((f) => /total|amount|price|qty|count/i.test(f)) ?? fields[0] ?? 'id',
-      relatedEntity: ENTITIES[1] ?? entity,
-    };
-  }, []);
-
-  const { showHelp } = useHelp();
-  const openHelp = useCallback(
-    () =>
-      showHelp({
-        key: 'automations',
-        title: 'Automations — Help',
-        body: <AutomationHelp example={helpExample} />,
-      }),
-    [showHelp, helpExample]
-  );
-
-  const updateAutomation = (next: Automation) =>
-    setAutomations((list) => list.map((a) => (a.id === next.id ? next : a)));
-
-  const createAutomation = async () => {
-    const fresh = emptyAutomation(ENTITIES[0] ?? 'Record');
-    setAutomations((list) => [...list, fresh]);
-    setView({ kind: 'automation', id: fresh.id });
-
-    try {
-      const res = await fetch('/api/workflow-definitions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind: 'automation',
-          name: fresh.name,
-          entityName: fresh.trigger.entity,
-          operation: 'ALL',
-          mermaid: serializeAutomation(fresh),
-        }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { id?: string; item?: { id: string } };
-        const id = data.id ?? data.item?.id;
-        if (id) setStoredIds((m) => ({ ...m, [fresh.id]: id }));
+  const save = useCallback(
+    async (payload: Parameters<typeof host.save>[0]) => {
+      try {
+        await host.save(payload);
+      } finally {
+        // A status flow saved (or refused part-way) changes how records move: every
+        // screen reading a lifecycle reads it again.
+        await queryClient.invalidateQueries({ queryKey: LIFECYCLES_QUERY_KEY });
       }
-    } catch (error) {
-      console.error('Failed to create automation:', error);
-    }
-  };
-
-  const publish = async (automation: Automation) => {
-    const storedId = storedIds[automation.id];
-    if (!storedId) return;
-
-    setSaveState('saving');
-    try {
-      const res = await fetch(`/api/workflow-definitions/${storedId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: automation.name,
-          entityName: automation.trigger.entity,
-          mermaid: serializeAutomation(automation),
-          isActive: true,
-        }),
-      });
-      setSaveState(res.ok ? 'saved' : 'error');
-      if (res.ok) updateAutomation({ ...automation, status: 'live' });
-    } catch (error) {
-      console.error('Failed to publish automation:', error);
-      setSaveState('error');
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-background text-muted-foreground">
-        Loading automations…
-      </div>
-    );
-  }
+    },
+    [host, queryClient]
+  );
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-5">
-        <span className="text-[15px] font-bold">{{project.name}}</span>
-        <span className="text-[13px] text-muted-foreground">
-          Automations ›{' '}
-          <b className="font-semibold text-foreground">
-            {view.kind === 'table'
-              ? currentTable?.name ?? 'Rule table'
-              : view.kind === 'automation'
-                ? current?.name ?? 'Automation'
-                : 'Overview'}
-          </b>
-        </span>
-        <div className="flex-1" />
-        {saveState === 'saving' ? <span className="text-xs text-muted-foreground">Saving…</span> : null}
-        {saveState === 'saved' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">Published</span> : null}
-        {saveState === 'error' ? (
-          <span className="text-xs text-red-600 dark:text-red-400">Could not save. Try again.</span>
-        ) : null}
-        <ThemeToggle />
-        <button
-          type="button"
-          onClick={openHelp}
-          aria-label="Help for Automations"
-          title="Help for Automations"
-          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          ? Help
-        </button>
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label="Automations and rule tables"
-          // Scrolls on its own: with a few hundred automations an unscrolled rail
-          // grows the document instead, and selecting one further down takes the
-          // work area off screen with it.
-          className="flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-border bg-card"
-        >
-          <RailSection
-            heading="Automations"
-            total={autoTotal}
-            items={automations.map((a) => ({
-              id: a.id,
-              title: a.name,
-              subtitle: `${a.trigger.entity || 'no record type'} · ${a.steps.length} step${
-                a.steps.length === 1 ? '' : 's'
-              }`,
-              state:
-                a.status === 'live'
-                  ? ('live' as const)
-                  : validateAutomation(a).length > 0
-                    ? ('draft' as const)
-                    : ('paused' as const),
-            }))}
-            selectedId={view.kind === 'automation' ? view.id : undefined}
-            onSelect={(id) => setView({ kind: 'automation', id })}
-          />
-
-          <RailSection
-            heading="Rule tables"
-            total={tableTotal}
-            items={tables.map((t) => ({
-              id: t.id,
-              title: t.name,
-              subtitle: `${t.table.inputs.length} inputs · ${t.table.rules.length} rows`,
-              state: 'live' as const,
-            }))}
-            selectedId={view.kind === 'table' ? view.id : undefined}
-            onSelect={(id) => setView({ kind: 'table', id })}
-          />
-
-          <div className="mt-auto border-t border-border p-3">
-            <button
-              type="button"
-              onClick={createAutomation}
-              className="w-full rounded-lg border border-border bg-card py-2 text-[13px] font-semibold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              + New automation
-            </button>
-          </div>
-        </nav>
-
-        {view.kind === 'none' ? (
-          <div className="grid flex-1 place-items-center p-8 text-center">
-            <div className="max-w-sm space-y-2">
-              <p className="text-sm font-semibold">No automation selected</p>
-              <p className="text-[13px] text-muted-foreground">
-                Pick one from the rail, or start a new one. Press{' '}
-                <button
-                  type="button"
-                  onClick={openHelp}
-                  className="font-semibold text-primary underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  ?
-                </button>{' '}
-                for a walkthrough — it opens beside this screen and stays open until you close it.
-              </p>
-            </div>
-          </div>
-        ) : null}
-
-        {/* `onOpenHelp` opens the same toaster the header's `?` opens. Two
-            triggers, one surface — which is the whole point of the toaster:
-            help no longer takes the builder away, so having the control within
-            reach of the inspector costs nothing. */}
-        {view.kind === 'automation' && current ? (
-          <AutomationBuilder
-            onOpenHelp={openHelp}
-            automation={current}
-            onChange={updateAutomation}
-            entities={ENTITIES}
-            entityFields={ENTITY_FIELDS}
-            ruleTables={ruleTableSummaries}
-            onOpenRuleTable={(name) => {
-              const table = tables.find((t) => t.name === name);
-              if (table) setView({ kind: 'table', id: table.id });
-            }}
-            onPublish={() => void publish(current)}
-          />
-        ) : null}
-
-        {view.kind === 'table' && currentTable ? (
-          <RuleTableEditor
-            name={currentTable.name}
-            table={currentTable.table}
-            usedBy={usersOf(currentTable.name)}
-            onChange={(table) =>
-              setTables((list) => list.map((t) => (t.id === currentTable.id ? { ...t, table } : t)))
-            }
-          />
-        ) : null}
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-[1600px] px-4 py-6">
+        <div className="mb-4">
+          <p className="text-[13px] text-muted-foreground">{{project.name}}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Rules and workflows</h1>
+        </div>
+        <LogicWorkbench
+          loading={!model && !loadError}
+          loadError={loadError}
+          rules={model?.rules ?? []}
+          workflows={model?.workflows ?? []}
+          entities={logicEntities}
+          constraintsFor={logicConstraints}
+          dryRun={simulateRule}
+          save={save}
+          rulesHavePriority={false}
+          lockedWorkflows={model?.locked}
+          lockedNote="This automation is declared in the model. Edit the model and generate the application again to change it; it is shown here as the author drew it. Status flows are not locked: a flow saved here is the one records follow."
+        />
       </div>
     </div>
   );

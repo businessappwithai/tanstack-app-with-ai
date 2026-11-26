@@ -91,19 +91,25 @@ async function boot(message) {
 }
 
 /**
- * Resolve PGlite: vendored copy, then the URL the page supplied, then the CDN.
+ * Where PGlite lives when it is not in `vendor/pglite/`: a URL the generator
+ * wrote in from `--pglite-url` (or the hosting page's own copy), or nothing.
+ */
+const PGLITE_URL = "";
+
+/**
+ * Resolve PGlite: the vendored copy, then the URL written in above, then the one
+ * the page supplied. Never a CDN.
  *
- * An application generated with `--vendor-pglite` carries its own copy and
- * never touches the network; one generated without it needs somewhere to get
- * ~10MB of WebAssembly, and saying so in the log beats failing silently on a
- * plane.
+ * `appwithai-wasm generate` vendors PGlite by default, and `serve.mjs` serves
+ * `vendor/pglite/` from the installed `@electric-sql/pglite` when it was not.
+ * Postgres is the application's database, so it is shipped with the
+ * application rather than fetched from a third party at the moment someone
+ * opens it — behind a firewall, offline, or on the day that host is down.
  */
 async function loadPGlite(base, supplied) {
-  const candidates = [
-    new URL("vendor/pglite/index.js", base).href,
-    supplied,
-    "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.5/dist/index.js",
-  ].filter(Boolean);
+  const candidates = [new URL("vendor/pglite/index.js", base).href, PGLITE_URL, supplied].filter(
+    Boolean
+  );
 
   const failures = [];
   for (const candidate of candidates) {
@@ -128,7 +134,12 @@ async function loadPGlite(base, supplied) {
       failures.push(`${candidate}: ${error.message}`);
     }
   }
-  throw new Error(`Could not load PGlite.\n${failures.join("\n")}`);
+  throw new Error(
+    "Could not load PostgreSQL (PGlite). This application does not carry its own copy.\n" +
+      "Generate it with `appwithai-wasm generate` (which copies PGlite into vendor/pglite), " +
+      "or start it with `npm install && npm start`, which serves the installed package.\n" +
+      failures.join("\n")
+  );
 }
 
 async function respond(port, message) {

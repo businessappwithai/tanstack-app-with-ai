@@ -17,6 +17,10 @@
 | `due_on` | date | — | When the work is due in. The overdue-marking report measures from here, not from the date the assessment was set. |
 | `status` | string | — | draft — being written, invisible to students; published — visible, result rows created for the group; marking — work is in and being marked; marked — every result is in and the grade contributes; cancelled — the piece will not count, and its results are ignored by the weighting. |
 | `instructions` | text | OPTIONAL | What the students were told to do. Optional, and the only record of the task when a mark is queried a term later. |
+| `published_at` | datetime | OPTIONAL | When the move to published was recorded on this assessment. Recording it moves an assessment from draft to published: the workflows set the status, which nobody changes by hand. |
+| `marking_at` | datetime | OPTIONAL | When the move to marking was recorded on this assessment. Recording it moves an assessment from published to marking: the workflows set the status, which nobody changes by hand. |
+| `marked_at` | datetime | OPTIONAL | When the move to marked was recorded on this assessment. Recording it moves an assessment from marking to marked: the workflows set the status, which nobody changes by hand. |
+| `cancelled_at` | datetime | OPTIONAL | When the move to cancelled was recorded on this assessment. Recording it moves an assessment from draft or published to cancelled: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -45,7 +49,13 @@ cancelled --> [*]
 
 ## Rules
 
-None on this entity.
+### `assessmentStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `moveDraftToPublished trigger-workflow when: status == "draft" and published_at != null workflow: AssessmentPublishedMove`
+- `movePublishedToMarking trigger-workflow when: status == "published" and marking_at != null workflow: AssessmentMarkingMove`
+- `moveMarkingToMarked trigger-workflow when: status == "marking" and marked_at != null workflow: AssessmentMarkedMove`
+- `moveDraftToCancelled trigger-workflow when: status == "draft" and cancelled_at != null workflow: AssessmentCancelledMove`
+- `movePublishedToCancelled trigger-workflow when: status == "published" and cancelled_at != null workflow: AssessmentCancelledMove`
 
 ## Hooks
 
@@ -55,6 +65,20 @@ None.
 
 Publishing an assessment is expected to create one result row per enrolled student. Not modelled as a saga: a `CreateEntity` step writes one row, and the fan-out over a group belongs in the application. Stated here rather than left as an assumption.
 
+Sagas that touch it:
+
+- **AssessmentPublishedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: published`
+  - `C UpdateEntity field: marking_at value: null`
+  - `D UpdateEntity field: cancelled_at value: null`
+- **AssessmentMarkingMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: marking`
+  - `C UpdateEntity field: marked_at value: null`
+- **AssessmentMarkedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: marked`
+- **AssessmentCancelledMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: cancelled`
+
 ## Access
 
 | Operation | Roles |
@@ -62,7 +86,6 @@ Publishing an assessment is expected to create one result row per enrolled stude
 | `read` | principal · registrar · head_of_department · teacher · guardian |
 | `create` | teacher · head_of_department |
 | `update` | teacher · head_of_department |
-| `cancel` | head_of_department · principal |
 
 ## Open questions
 

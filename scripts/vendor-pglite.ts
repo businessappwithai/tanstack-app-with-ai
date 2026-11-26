@@ -6,8 +6,8 @@
  *
  * Not checked in: it is ~17MB of WebAssembly, most of it one `.wasm` and one
  * `.data`, and a documentation folder is the wrong place to keep that in git.
- * The page falls back to a CDN when this has not been run, and says which one
- * it used in its log — so the difference is visible rather than mysterious.
+ * There is no CDN fallback: without this the page generates and downloads an
+ * application but will not run one, and says so.
  *
  *   bun run vendor:pglite
  */

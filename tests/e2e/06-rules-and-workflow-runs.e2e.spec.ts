@@ -15,7 +15,7 @@
 
 import { type APIRequestContext, expect, test } from "@playwright/test";
 
-import { emptyDecisionTable, newRowId } from "../../packages/web/src/lib/workflow/bpmn-model";
+import { emptyDecisionTable, newRowId } from "../../packages/editors/src/lib/workflow/bpmn-model";
 import {
   adminContext,
   anonymousContext,

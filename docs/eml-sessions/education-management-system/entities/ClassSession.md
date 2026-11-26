@@ -18,6 +18,8 @@
 | `register_taken` | boolean | — | Set when the teacher closes the register. It is the field the statutory return counts against, because a session with no register is a hole in the return rather than a day nobody was absent. |
 | `topic` | string | OPTIONAL | What was taught, in a line. Optional, and the only place a family looking at a missed session can see what their child missed. |
 | `cancellation_reason` | text | OPTIONAL | Why the meeting did not run — snow, cover unavailable, examination clash. Read by the attendance officer when explaining a gap in a student's record. |
+| `held_at` | datetime | OPTIONAL | When the move to held was recorded on this class session. Recording it moves a class session from scheduled to held: the workflows set the status, which nobody changes by hand. |
+| `cancelled_at` | datetime | OPTIONAL | When the move to cancelled was recorded on this class session. Recording it moves a class session from scheduled to cancelled: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -46,7 +48,10 @@ cancelled --> [*]
 
 ## Rules
 
-None on this entity.
+### `classSessionStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `moveScheduledToHeld trigger-workflow when: status == "scheduled" and held_at != null workflow: ClassSessionHeldMove`
+- `moveScheduledToCancelled trigger-workflow when: status == "scheduled" and cancelled_at != null workflow: ClassSessionCancelledMove`
 
 ## Hooks
 
@@ -56,6 +61,13 @@ None on this entity.
 
 Closing a register updates each enrolment's attendance rate — that is written by the `AttendanceRecord` hooks, one mark at a time, rather than by the session.
 
+Sagas that touch it:
+
+- **ClassSessionHeldMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: held`
+- **ClassSessionCancelledMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: cancelled`
+
 ## Access
 
 | Operation | Roles |
@@ -63,7 +75,6 @@ Closing a register updates each enrolment's attendance rate — that is written 
 | `read` | principal · registrar · head_of_department · teacher · counsellor |
 | `create` | registrar |
 | `update` | registrar · teacher |
-| `cancel` | registrar · head_of_department |
 
 ## Open questions
 

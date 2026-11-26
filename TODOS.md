@@ -300,16 +300,11 @@ Found while QA-ing the CLI and a generated application against
 generator on that branch; these eight were not. Full write-up, with evidence, in
 `docs/qa/qa-report-dance-studio-2026-08-31.md`.
 
-1. **`lint` writes, and the generated app does not pass it.** *(medium)*
-   Both generated `package.json`s define `lint` and `lint:fix` identically as
-   `biome lint --write src`, so the lint script mutates the tree and the
-   generated `ci.yml` lint job passes anything biome can auto-fix. Making `lint`
-   read-only is one line; a freshly generated application then fails it with
-   **71 backend and 162 frontend findings** — `useNodejsImportProtocol` (17),
-   `noParameterAssign` (13), `useLiteralKeys` (28), `useTemplate` (35), and the
-   accessibility ones a reader would notice: `useButtonType` (30),
-   `noLabelWithoutControl` (6), `useKeyWithClickEvents` (5). Flip the script and
-   clear the findings together, or every generated repository ships red.
+1. **~~`lint` writes, and the generated app does not pass it.~~** *Resolved by
+   removal.* A generated application has no linter now: Biome, its config and its
+   `lint`/`lint:fix`/`format` scripts are gone, and its static check is
+   `"type-check": "bun check"` in both halves, which a freshly generated
+   application passes — backend, frontend and `tests/`.
 
 2. **A join entity's display value is two raw uuids.** *(medium)*
    §3.7 labels a join entity by its first two parents *resolved through their
@@ -355,3 +350,23 @@ generator on that branch; these eight were not. Full write-up, with evidence, in
 Also recorded, not a defect: `04-bulk-seed` times out at 60s on a 4-core
 container while writing 1000 records across nine entities. It is the suite
 `--run-tests-fast` skips.
+
+## Found by /qa on `claude/shipping-management-qa-08b4e1`, 2026-10-30 — RESOLVED
+
+Generated from `examples/shipping-management-system.eml.mmd` (NestJS + TanStack). All six
+findings fixed on the branch, each with a regression test under
+`packages/generator/src/templates/__tests__/` and rechecked in a regenerated app:
+
+- **Reference dropdowns offered only the first 20 records** — `TableReferenceField` passed no
+  `limit`; it now asks for `REFERENCE_LOOKUP_LIMIT` (500) like the other lookups.
+- **Record navigator arrows squashed to 4px** — `Button` now merges a caller's classes over its
+  variant's with `cn()`.
+- **No navigation below `md`** — a header menu button opens the sidebar in the `MobileSidebar`
+  drawer, which closes on navigation.
+- **"Dangerous Goodses"** — one shared `lib/plural-label.ts` that leaves an already-plural label
+  alone.
+- **Toolbar buttons unnamed below `sm`** — `sr-only sm:not-sr-only` instead of `hidden sm:inline`.
+- **React warning after a toast, every toast drawn twice** — two sonner Toasters were mounted; the
+  one in `__root.tsx` is gone.
+
+Not a defect: `Currency.decimal_places` accepts `-3` because the model declares no range for it.

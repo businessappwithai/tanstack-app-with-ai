@@ -46,6 +46,14 @@ export interface SeededAccount {
 export const SEEDED_PASSWORD = "admin123";
 export const TOTAL_ENTITIES = {{entities.length}};
 
+/**
+ * The entities that are line items of another (`%%entity … parent:`). They are
+ * counted in `TOTAL_ENTITIES` and in each role's `entities`, but have no card or
+ * sidebar entry of their own: they open as a tab of their parent. The sign-in
+ * screen says so, because its count and the sidebar's would otherwise disagree.
+ */
+export const LINE_ITEM_ENTITIES: string[] = [{{#each entities}}{{#if this.parentEntity}}"{{this.name}}", {{/if}}{{/each}}];
+
 export const SEEDED_ACCOUNTS: SeededAccount[] = [
 {{#each access.users}}
   {

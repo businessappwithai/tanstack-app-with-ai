@@ -539,6 +539,7 @@ export function buildSampleData(parsed: ParsedModel, options: SampleDataOptions)
     entities.find((entity) => /^(user|staff|employee|person|account)s?$/i.test(entity.name))?.name;
 
   const fkOverrides = buildFkOverrides(entities, parsed.relationships ?? [], personEntity);
+  const declared = new Set(entities.map((entity) => entity.name));
 
   const ids = new Map<string, string[]>();
   const data: SampleData = {};
@@ -577,6 +578,7 @@ export function buildSampleData(parsed: ParsedModel, options: SampleDataOptions)
           selfIds: generatedIds,
           entityName: full.name,
           fkOverrides,
+          declared,
           claimedFks,
         });
       }
@@ -596,6 +598,8 @@ interface ValueContext {
   selfIds: string[];
   entityName: string;
   fkOverrides: Map<string, string>;
+  /** Every entity the model declares, to tell "parent not seeded yet" from "no such parent". */
+  declared: Set<string>;
   /** Parent ids a UNIQUE foreign key has already taken, per column. Reset per
       entity, because uniqueness is a property of one table's column. */
   claimedFks: Map<string, Set<string>>;
@@ -620,7 +624,18 @@ function valueFor(
     );
     const pool =
       target === context.entityName ? context.selfIds.slice(0, row) : context.ids.get(target ?? "");
-    if (!pool || pool.length === 0) return null;
+    if (!pool || pool.length === 0) {
+      /* No parent entity at all — `Document.document_type_id` with no
+         `DocumentType` (the checker's EML502). A required column cannot be
+         null: PostgreSQL refuses every row and the entity gets no sample data.
+         A uuid no row has is the smaller problem, and only here: when the
+         parent *is* declared but not seeded yet (a cycle), null stays, because
+         a uuid there would fail a real foreign key. */
+      if (column.required && !(target && context.declared.has(target))) {
+        return draw.faker.string.uuid();
+      }
+      return null;
+    }
     /* A UNIQUE foreign key is a one-to-one, so it has to be drawn *without*
        replacement. Drawn with it, two children take the same parent, the second
        insert fails the unique index, and the row is lost without a word — the

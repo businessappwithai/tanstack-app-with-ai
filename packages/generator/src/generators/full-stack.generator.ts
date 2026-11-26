@@ -148,11 +148,11 @@ export class FullStackGenerator {
       );
     }
 
-    // The linting check is NOT run here. It shells out to the generated
-    // package scripts, and at this point nothing is installed — so it reported
-    // "linting found issues" on every generation regardless of the code, which
-    // is a signal that cannot distinguish a missing biome from a real finding.
-    // The CLI runs it after the install step instead; see `runLintingChecks`.
+    // The type check is NOT run here. It shells out to the generated package
+    // scripts, and at this point nothing is installed — so it would report
+    // errors on every generation regardless of the code, a signal that cannot
+    // distinguish a missing dependency from a real finding. The CLI runs it
+    // after the install step instead; see `runTypeChecks`.
   }
 
   /**
@@ -221,6 +221,8 @@ export class FullStackGenerator {
         // `%%report` says the model declared none rather than showing an empty
         // table that reads like a failed query.
         compiledReports: this.options.compiledReports,
+        // The form reads each record's lifecycle from the same module the API does.
+        compiledWorkflows: this.options.compiledWorkflows,
         ...aiConfig,
         ...this.options.tanstackStartNestjs?.frontend,
       };
@@ -250,6 +252,10 @@ export class FullStackGenerator {
         // The reports suite runs the model's own SQL against the schema this
         // same run emitted — the one pairing nothing else checks.
         compiledReports: this.options.compiledReports,
+        // A refusing rule's ceiling keeps the numbers the suites invent legal.
+        compiledRules: this.options.compiledRules,
+        // The reporting suites hold the platform to this pack.
+        reportingPack: this.options.reportingPack,
       });
       await testGenerator.generate(entities, relationships, outputDir);
     }
@@ -390,6 +396,8 @@ tests/.e2e-seed-manifest.json
       // two things no default can supply.
       { template: ".env.example.root.hbs", output: ".env.example" },
       { template: "docker-start.sh.hbs", output: "docker-start.sh", executable: true },
+      // The collector the `observability` compose profile mounts. Plain YAML: no placeholders.
+      { template: "observability/otel-collector.yaml.hbs", output: "observability/otel-collector.yaml" },
     ];
 
     // The Dockerfile copies this directory unconditionally, so it has to exist
@@ -408,7 +416,11 @@ tests/.e2e-seed-manifest.json
     const projectSnake = this.options.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
     const render = (content: string): string =>
-      content
+      // The `e2e` service builds the `tests/` project, which `skipTests` leaves out.
+      (this.options.skipTests
+        ? content.replace(/\n  # <e2e>[\s\S]*?# <\/e2e>\n/, "\n")
+        : content.replace(/\n  # <\/?e2e>/g, "")
+      )
         .replace(/\{\{project\.name \| replace '-' '_'\}\}/g, projectSnake)
         .replace(/\{\{project\.name\}\}/g, this.options.projectName)
         .replace(/\{\{project\.id\}\}/g, projectId)
@@ -421,6 +433,7 @@ tests/.e2e-seed-manifest.json
         const source = path.join(templateDir, "tanstack-start-nestjs", file.template);
         const rendered = render(await fs.readFile(source, "utf-8"));
         const destination = path.join(outputDir, file.output);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.writeFile(destination, rendered);
         // chmod is best-effort: Windows and some CI filesystems reject it.
         if (file.executable) await fs.chmod(destination, 0o755).catch(() => {});

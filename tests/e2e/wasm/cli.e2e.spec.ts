@@ -107,11 +107,14 @@ test.describe("@cli the standalone browser application", () => {
     // worth asserting: a parser that silently drops a section still writes a
     // complete-looking application.
     expect(out).toMatch(/Entities\s+17/);
-    expect(out).toMatch(/Rules\s+8/);
-    // 32: the eight transition and CRUD restrictions the model always had, plus
-    // one `.read` directive per entity — which is how the CRM says which
-    // functional role each of its seventeen entities belongs to.
-    expect(out).toMatch(/Access rules\s+32/);
+    // 9: the eight the model always had, and opportunityHandoff, which starts
+    // the closed-won handoff when the deal is won. A record moves by its action
+    // buttons, so no rule moves it.
+    expect(out).toMatch(/Rules\s+9/);
+    // 24 CRUD restrictions — one `.read` directive per entity among them, which
+    // is how the CRM says which functional role each of its seventeen entities
+    // belongs to — and 48 moves, each the button of the roles named.
+    expect(out).toMatch(/Access rules\s+72 \(24 CRUD, 48 transition\)/);
     expect(out).toMatch(/State machines\s+5/);
   });
 

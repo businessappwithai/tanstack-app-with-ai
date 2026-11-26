@@ -1,46 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FileText, Home } from "lucide-react";
 import { useMemo } from "react";
 import { ADSidebar } from "@/components/admin/ad-sidebar";
 import { ReportDesigner } from "@/components/reports/ReportDesigner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiClient } from "@/lib/api-client";
+import { tabForTable, useDictionaryTabs } from "@/hooks/use-dictionary-windows";
 
 export const Route = createFileRoute("/admin/reports/$tableName")({
   component: ReportDesignPage,
 });
 
-interface ColumnMeta {
-  column_name: string;
-  name?: string;
-}
-
-interface ColumnMetaResponse {
-  columns?: ColumnMeta[];
-}
-
 function ReportDesignPage() {
   const { tableName } = Route.useParams();
 
-  // `/bus/:entity/meta` is the Application Dictionary reading of a table — the
-  // same one every business screen builds its form from, and it accepts either
-  // the physical name (`bus_account`) or the bare one. The path this used to
-  // call, `/sys/entity-metadata/:table`, is served by nothing: the designer's
-  // data-source tree came back empty for every entity, so no field could be
-  // bound and no report could be designed.
-  const { data: meta, isLoading } = useQuery({
-    queryKey: ["report-designer-columns", tableName],
-    queryFn: () => apiClient.get<ColumnMetaResponse>(`/bus/${tableName}/meta`),
-    enabled: !!tableName,
-  });
+  // The window this record type is shown in, and its fields: the designer
+  // names things the way the screen the record is printed from names them.
+  // The URL carries the storage key the design is filed under; nothing on
+  // this page displays it.
+  const { data: tabs, isLoading } = useDictionaryTabs();
+  const tab = tabForTable(tabs, tableName);
+  const title = tab?.label ?? "Report Designer";
 
   // Memoised: `ReportDesigner` keys its mount effect on this array, and a fresh
   // one every render would tear the designer down and rebuild it — losing
   // whatever the user had just placed on the page.
-  const columns: string[] = useMemo(
-    () => (meta?.columns ?? []).map((c) => c.column_name).filter(Boolean),
-    [meta]
+  const fields = useMemo(
+    () => (tab?.fields ?? []).map((f) => ({ label: f.label, field: f.value })),
+    [tab]
   );
 
   return (
@@ -70,12 +56,12 @@ function ReportDesignPage() {
               Report Designs
             </Link>
             <span className="text-muted-foreground/40">/</span>
-            <span className="text-foreground font-medium">{tableName}</span>
+            <span className="text-foreground font-medium">{title}</span>
           </div>
           <div className="flex items-center gap-3">
             <FileText className="h-5 w-5 text-primary" />
             <h1 className="text-2xl font-bold text-foreground">
-              Report Designer — <span className="text-primary">{tableName}</span>
+              Report Designer — <span className="text-primary">{title}</span>
             </h1>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
@@ -91,7 +77,7 @@ function ReportDesignPage() {
               ))}
             </div>
           ) : (
-            <ReportDesigner tableName={tableName} columns={columns} />
+            <ReportDesigner tableName={tableName} fields={fields} />
           )}
         </div>
       </div>

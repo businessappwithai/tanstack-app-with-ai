@@ -10,6 +10,10 @@ import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { KYSELY_CONNECTION } from './database.constants';
 import { DatabaseService } from './database.service';
+import { getLogger } from '../common/logging/logger.service';
+
+// pg's own default, stated so the log line is true. The WebAssembly Postgres Pool has no `options`.
+const POOL_MAX = 10;
 
 function buildPoolConfig(configService: ConfigService) {
   const url = configService.get<string>('DATABASE_URL');
@@ -25,6 +29,23 @@ function buildPoolConfig(configService: ConfigService) {
   };
 }
 
+/** Where the pool points, for the log: never the credentials. */
+function describeTarget(configService: ConfigService): { host: string; database: string } {
+  const url = configService.get<string>('DATABASE_URL');
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      return { host: parsed.hostname, database: parsed.pathname.replace(/^\//, '') };
+    } catch {
+      return { host: 'unparseable DATABASE_URL', database: '' };
+    }
+  }
+  return {
+    host: configService.get('DB_HOST', '127.0.0.1'),
+    database: configService.get('DB_NAME', '{{snakeCase project.name}}'),
+  };
+}
+
 @Global()
 @Module({
   providers: [
@@ -32,14 +53,20 @@ function buildPoolConfig(configService: ConfigService) {
       provide: KYSELY_CONNECTION,
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => {
-        const pool = new Pool(buildPoolConfig(configService));
+        const pool = new Pool({ ...buildPoolConfig(configService), max: POOL_MAX });
         const db = new Kysely<any>({ dialect: new PostgresDialect({ pool }) });
 
         try {
           await db.selectFrom('information_schema.tables' as any).limit(1).execute();
-          console.log('✓ Database connection established');
+          getLogger('db').event('db.connected', {
+            ...describeTarget(configService),
+            poolMax: POOL_MAX,
+          });
         } catch (error) {
-          console.warn('⚠ Database connection check failed:', error instanceof Error ? error.message : String(error));
+          getLogger('db').event('db.connection.failed', {
+            ...describeTarget(configService),
+            err: error,
+          });
         }
 
         return db;
@@ -54,6 +81,5 @@ export class DatabaseModule implements OnModuleDestroy {
 
   async onModuleDestroy() {
     await this.db.destroy();
-    console.log('✓ Database connection closed');
   }
 }

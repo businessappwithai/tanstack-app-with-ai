@@ -36,6 +36,7 @@ export function ADRecordNav({
         className="h-7 w-7 p-0"
         onClick={onFirst}
         disabled={!canGoPrev}
+        aria-label="First record"
       >
         <ChevronsLeft className="h-4 w-4" />
       </Button>
@@ -45,6 +46,7 @@ export function ADRecordNav({
         className="h-7 w-7 p-0"
         onClick={onPrev}
         disabled={!canGoPrev}
+        aria-label="Previous record"
       >
         <ChevronLeft className="h-4 w-4" />
       </Button>
@@ -59,6 +61,7 @@ export function ADRecordNav({
         className="h-7 w-7 p-0"
         onClick={onNext}
         disabled={!canGoNext}
+        aria-label="Next record"
       >
         <ChevronRight className="h-4 w-4" />
       </Button>
@@ -68,6 +71,7 @@ export function ADRecordNav({
         className="h-7 w-7 p-0"
         onClick={onLast}
         disabled={!canGoNext}
+        aria-label="Last record"
       >
         <ChevronsRight className="h-4 w-4" />
       </Button>

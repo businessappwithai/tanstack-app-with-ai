@@ -103,7 +103,7 @@ Every EML document is valid, renderable Mermaid — the generator's semantics ri
 on `%%` comments that renderers ignore, so a model opens in any Mermaid viewer.
 
 `language/appwithai-language.json` is the canonical definition. The full
-specification, written for language models, is `website/llmtext/llms-full.txt`.
+specification, written for language models, is `website/llmtext/llms.txt`.
 
 ### Validating a model
 
@@ -150,9 +150,8 @@ database/              migrations for the modelling tool's own database
 ## Development
 
 ```bash
-bun run type-check           # the root tsconfig
+bun run type-check           # the root tsconfig, with bun check
 bun run type-check:language  # language/** has its own config
-bun run lint                 # Biome
 bun run test                 # Vitest
 bun run test:playwright      # the modelling tool, in Chromium
 bun run test:wasm            # the browser stack, end to end, in Chromium
@@ -182,7 +181,7 @@ bun run build:language-tools
 
 ## Requirements
 
-- **Bun** 1.4.0 — this repository is bun-only; `npm` and `pnpm` are not used.
+- **Bun** 1.4.4 — this repository is bun-only; `npm` and `pnpm` are not used.
   The version is pinned, not a floor: four committed bundles are compared
   byte for byte against a fresh build, and `Bun.build`'s output depends on
   both the bun version and the platform.

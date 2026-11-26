@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ExternalLink, FilePlus2, FileX2, History, Home, MessageSquare, Pencil, Star } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportPrintModal } from "@/components/reports/ReportPrintModal";
 import { toast } from "sonner";
 import { DynamicForm } from "@/components/forms/dynamic-form";
@@ -12,7 +12,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { type FieldMetadata, useEntityMetadata } from "@/hooks/use-entities";
+import { withReference } from "@/lib/api-error";
 import { apiClient, type PaginatedResponse } from "@/lib/api-client";
+import {
+  type AnyRecord as ConflictRecord,
+  type ConflictField,
+  changedByOthers,
+  ifMatchHeader,
+  isVersionConflict,
+} from "@/lib/version-conflict";
 import { ADRecordNav } from "./ad-record-nav";
 import { ADToolbar } from "./ad-toolbar";
 import {
@@ -22,7 +30,12 @@ import {
   buildAdminListUrl,
   type ParentContext,
 } from "./ad-window-configs";
-import { DocStatusBadge } from "./doc-status-badge";
+import { LifecycleBadge } from "./lifecycle-badge";
+import { RecordActions } from "./record-actions";
+import { isLocked, lifecycleOf, phaseOf } from "@/lib/lifecycle";
+import { pluralLabel } from "@/lib/plural-label";
+import { useLifecycles } from "@/lib/use-lifecycles";
+import { VersionConflictDialog } from "./version-conflict-dialog";
 import { helpTableNameFromEndpoint, WindowHelpButton } from "./window-help-button";
 import { format } from "date-fns";
 
@@ -47,19 +60,6 @@ function dedupeParents(parentCtx: ParentContext[]): ParentContext[] {
     seen.add(key);
     return true;
   });
-}
-
-function pluralLabel(label: string): string {
-  if (label.endsWith("y") && !/[aeiou]y$/i.test(label)) return label.slice(0, -1) + "ies";
-  if (
-    label.endsWith("s") ||
-    label.endsWith("sh") ||
-    label.endsWith("ch") ||
-    label.endsWith("x") ||
-    label.endsWith("z")
-  )
-    return label + "es";
-  return label + "s";
 }
 
 interface ChildPanelProps {
@@ -89,6 +89,40 @@ function ChildPanel({ childTab, parentRecord, selfLevel, parentContext }: ChildP
   const records = data?.data ?? [];
   const totalCount = data?.meta?.total ?? 0;
 
+  // A line is created where it is read: inside its parent's tab, with the
+  // reference to the parent filled in and hidden. The detail toolbar's New
+  // belongs to the parent level, so without this a child could only be added
+  // by leaving the record for the child's own list.
+  const queryClient = useQueryClient();
+  const [isCreating, setIsCreating] = useState(false);
+  const [createErrors, setCreateErrors] = useState<string[]>([]);
+  const parentLink: AnyRecord = childLevel.parentField
+    ? { [childLevel.parentField]: parentId }
+    : {};
+
+  const createMutation = useMutation({
+    mutationFn: (formData: AnyRecord) =>
+      apiClient.post<AnyRecord>(childLevel.endpoint, { ...formData, ...parentLink }),
+    onSuccess: () => {
+      toast.success(`${childLevel.label} created`);
+      queryClient.invalidateQueries({ queryKey: ["ad-child", childLevel.endpoint, parentId] });
+      queryClient.invalidateQueries({
+        queryKey: ["ad-child-count", childLevel.endpoint, parentId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["ad-list", childLevel.endpoint] });
+      setIsCreating(false);
+      setCreateErrors([]);
+    },
+    onError: (err: any) => {
+      const specific = Array.isArray(err?.errors) ? (err.errors as string[]) : null;
+      const fallback = Array.isArray(err?.message)
+        ? err.message.join(", ")
+        : (err?.message ?? "Failed to create");
+      setCreateErrors(specific ?? [fallback]);
+      toast.error(withReference(specific?.[0] ?? fallback, err));
+    },
+  });
+
   return (
     <div>
       {/* Child list link */}
@@ -97,13 +131,57 @@ function ChildPanel({ childTab, parentRecord, selfLevel, parentContext }: ChildP
           {totalCount} {childLevel.label}
           {totalCount !== 1 ? "s" : ""}
         </span>
-        <Link
-          to={buildAdminListUrl(childParentCtx, childLevel) as never}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          View all <ExternalLink className="h-3 w-3" />
-        </Link>
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            variant={isCreating ? "ghost" : "outline"}
+            className="h-7 gap-1 text-xs"
+            onClick={() => {
+              setIsCreating((open) => !open);
+              setCreateErrors([]);
+            }}
+          >
+            {isCreating ? (
+              "Cancel"
+            ) : (
+              <>
+                <FilePlus2 className="h-3.5 w-3.5" /> New {childLevel.label}
+              </>
+            )}
+          </Button>
+          <Link
+            to={buildAdminListUrl(childParentCtx, childLevel) as never}
+            className="flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            View all <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
       </div>
+      {isCreating && (
+        <div className="mx-4 mt-2 rounded-md border border-border bg-muted/20 p-4">
+          <DynamicForm
+            tableName={childLevel.id}
+            idField={childLevel.idField}
+            fields={childLevel.formFields}
+            initialData={parentLink}
+            parentField={childLevel.parentField}
+            parentContext={parentRecord}
+            onSubmit={(fd) => createMutation.mutate(fd)}
+            mode="create"
+            isSaving={createMutation.isPending}
+          />
+          {createErrors.length > 0 && (
+            <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3">
+              <p className="text-sm font-medium text-destructive mb-1">Validation failed</p>
+              <ul className="text-xs text-destructive/90 space-y-0.5 list-disc list-inside">
+                {createErrors.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
       <div className="p-4">
         <DynamicTable
           tableName={childLevel.id}
@@ -538,14 +616,37 @@ export function ADDetailShell({
 }: ADDetailShellProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // The status flow as the API runs it, should an administrator have redrawn it.
+  useLifecycles();
   const [page, setPage] = useState(1);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [formData, setFormData] = useState<AnyRecord>({});
   const [hasChanges, setHasChanges] = useState(false);
   const [activeChildTab, setActiveChildTab] = useState(() => level.childTabs?.[0]?.id ?? "");
+  // The child tabs arrive with the metadata, usually after the first render, so
+  // the initial value above is "" and no tab would open. Select the first one
+  // once they exist, and again if the current one is no longer among them.
+  useEffect(() => {
+    const tabs = level.childTabs ?? [];
+    if (tabs.length === 0) return;
+    if (!tabs.some((ct) => ct.id === activeChildTab)) setActiveChildTab(tabs[0]!.id);
+  }, [level.childTabs, activeChildTab]);
   const [isEditing, setIsEditing] = useState(initialMode === "edit");
   const [saveErrors, setSaveErrors] = useState<string[]>([]);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
+  // Optimistic locking. `editBase` is the record as it stood when editing
+  // began. The form is drawn from it while editing — DynamicForm rewrites every
+  // field whenever its initialData changes, so drawing from the live list let a
+  // background refetch replace what the user was typing — and its version is
+  // what a save sends as If-Match, so a save made after someone else's is a
+  // 409 with a choice instead of a silent overwrite.
+  const [editBase, setEditBase] = useState<AnyRecord | null>(null);
+  const [conflict, setConflict] = useState<{
+    mine: AnyRecord;
+    theirs: AnyRecord;
+    fields: ConflictField[];
+  } | null>(null);
+  const [formNonce, setFormNonce] = useState(0);
 
   // Fetch entity metadata to resolve summary fields — skip for sys-level windows that supply static fields
   const hasDynamicFields = !level.formFields || level.formFields.length === 0;
@@ -645,43 +746,135 @@ export function ADDetailShell({
     const idx = records.findIndex((r) => String(r[level.idField]) === String(recordId));
     if (idx !== -1) {
       setCurrentIndex(idx);
-      setFormData(records[idx]);
-      setHasChanges(false);
     }
   }, [records, recordId, level.idField]);
 
-  const currentRecord = records.find((r) => String(r[level.idField]) === String(recordId)) ?? null;
+  /*
+   * The record itself, read by id.
+   *
+   * The sibling list is for prev/next, and a list endpoint is free to return a
+   * summary of each row — `/sys/fields` returned nine of sys_field's thirty
+   * columns, so the Field window showed "—" for Same Line, Heading, Encrypted,
+   * Obscure Type and all three logic expressions, and saved them back as
+   * nothing. The GET by id is the whole row; the list row is only what shows
+   * while it loads.
+   */
+  const { data: fullRecord } = useQuery({
+    queryKey: ["ad-detail-record", level.endpoint, recordId],
+    queryFn: () => apiClient.get<AnyRecord>(`${level.endpoint}/${recordId}`),
+    enabled: !!recordId,
+    retry: false,
+  });
+
+  const listRecord = records.find((r) => String(r[level.idField]) === String(recordId)) ?? null;
+  const currentRecord = useMemo(() => {
+    const full =
+      fullRecord && String(fullRecord[level.idField]) === String(recordId) ? fullRecord : null;
+    if (!listRecord && !full) return null;
+    return { ...(listRecord ?? {}), ...(full ?? {}) } as AnyRecord;
+  }, [listRecord, fullRecord, level.idField, recordId]);
   const globalIndex = (page - 1) * 100 + currentIndex;
   const canGoPrev = globalIndex > 0;
   const canGoNext = globalIndex < totalCount - 1;
 
-  // Reset form when record changes
+  // Reset form when record changes — but not mid-edit (see `editBase`).
   useEffect(() => {
-    if (currentRecord) {
+    if (currentRecord && !isEditing) {
       setFormData(currentRecord);
       setHasChanges(false);
     }
-  }, [currentRecord]);
+  }, [currentRecord, isEditing]);
+
+  // A window opened straight into edit mode takes its snapshot once the record
+  // arrives.
+  useEffect(() => {
+    if (isEditing && !editBase && currentRecord) setEditBase(currentRecord);
+  }, [isEditing, editBase, currentRecord]);
 
   const saveMutation = useMutation({
-    mutationFn: (data: AnyRecord) => apiClient.patch(`${level.endpoint}/${recordId}`, data),
-    onSuccess: () => {
-      toast.success("Saved");
+    mutationFn: ({ data, version }: { data: AnyRecord; version?: unknown }) =>
+      apiClient.patch<AnyRecord>(`${level.endpoint}/${recordId}`, data, {
+        headers: ifMatchHeader(version ?? editBase?.version ?? currentRecord?.version),
+      }),
+    onSuccess: (saved) => {
+      // The save reports where the record ended up: moved on, or refused by a
+      // rule or workflow and in Error with the reason — still saved.
+      const promotion = (saved as { promotion?: { docStatus?: string; message?: string } } | null)
+        ?.promotion;
+      if (promotion?.docStatus === "error") {
+        toast.error(`Saved — Error: ${promotion.message ?? "a rule or workflow refused it"}`);
+      } else if (promotion?.docStatus === "final") {
+        toast.success("Saved — Final");
+      } else {
+        toast.success("Saved");
+      }
       setHasChanges(false);
       setSaveErrors([]);
-      if (initialMode === "view") setIsEditing(false);
+      setConflict(null);
+      // Still editing (a window opened in edit mode): continue from the record
+      // just saved, whose version is the one the next save must name.
+      if (initialMode === "view") {
+        setIsEditing(false);
+        setEditBase(null);
+      } else {
+        setEditBase(saved && typeof saved === "object" ? (saved as AnyRecord) : null);
+      }
       queryClient.invalidateQueries({ queryKey: ["ad-detail-list", level.endpoint] });
+      queryClient.invalidateQueries({ queryKey: ["ad-detail-record", level.endpoint, recordId] });
       refetch();
     },
-    onError: (err: any) => {
+    onError: async (err: any, variables) => {
+      if (isVersionConflict(err)) {
+        // Read the record as it stands now, through the GET that applies this
+        // user's field access, and show what the other save changed.
+        try {
+          const theirs = await apiClient.get<AnyRecord>(`${level.endpoint}/${recordId}`);
+          const base = editBase ?? currentRecord ?? {};
+          const visible = new Set((level.formFields ?? []).map((f) => f.column_name));
+          const fields = changedByOthers(
+            base as ConflictRecord,
+            variables.data as ConflictRecord,
+            theirs as ConflictRecord
+          ).filter((f) => visible.size === 0 || visible.has(f.field));
+          setConflict({ mine: variables.data, theirs, fields });
+        } catch {
+          toast.error("This record was changed by someone else, and could not be reloaded.");
+        }
+        return;
+      }
       const specific = Array.isArray(err?.errors) ? (err.errors as string[]) : null;
       const fallback = Array.isArray(err?.message)
         ? err.message.join(", ")
         : (err?.message ?? "Save failed");
       setSaveErrors(specific ?? [fallback]);
-      toast.error(specific?.[0] ?? fallback);
+      toast.error(withReference(specific?.[0] ?? fallback, err));
     },
   });
+
+  const handleConflictReload = () => {
+    if (!conflict) return;
+    setFormData(conflict.theirs);
+    setEditBase(initialMode === "view" ? null : conflict.theirs);
+    if (initialMode === "view") setIsEditing(false);
+    setHasChanges(false);
+    setSaveErrors([]);
+    setConflict(null);
+    setFormNonce((n) => n + 1);
+    queryClient.invalidateQueries({ queryKey: ["ad-detail-list", level.endpoint] });
+    refetch();
+    toast.info("Showing the record as it was last saved.");
+  };
+
+  const handleConflictOverwrite = () => {
+    if (!conflict) return;
+    // Against the version just read, not the one editing began at: a third save
+    // in the meantime is refused again rather than overwritten as well.
+    setEditBase(conflict.theirs);
+    saveMutation.mutate({ data: conflict.mine, version: conflict.theirs.version });
+  };
+
+  const labelOf = (field: string) =>
+    (level.formFields ?? []).find((f) => f.column_name === field)?.name ?? field.replace(/_/g, " ");
 
   const deleteMutation = useMutation({
     mutationFn: () => apiClient.delete(`${level.endpoint}/${recordId}`),
@@ -733,7 +926,13 @@ export function ADDetailShell({
     crumbs.push({ label: parentNames[i] ?? id, href: buildAdminDetailUrl(grandParentCtx, pl, id) });
   }
   crumbs.push({ label: pluralLabel(level.label), href: buildAdminListUrl(parentContext, level) });
-  const currentName = currentRecord
+  // The server resolves a record's label (references followed to the names behind
+  // them); the name column alone would show a uuid for a record named by its parents.
+  const servedLabel =
+    currentRecord && typeof currentRecord._label === "string" ? currentRecord._label : "";
+  const currentName = servedLabel
+    ? servedLabel
+    : currentRecord
     ? level.nameField === "first_name" && currentRecord.last_name
       ? `${currentRecord.first_name ?? ""} ${currentRecord.last_name ?? ""}`.trim()
       : ((currentRecord[level.nameField] as string) ?? recordId)
@@ -744,10 +943,24 @@ export function ADDetailShell({
 
   const hasReportDesign = !!(reportDesign?.layout);
 
+  // The record's lifecycle (lib/lifecycle.ts): its badge, its action buttons,
+  // the Error banner, and the end of a flow locked against editing.
+  const tableName = helpTableNameFromEndpoint(level.endpoint);
+  const lifecycle = lifecycleOf(tableName);
+  const lifecycleValue = lifecycle ? currentRecord?.[lifecycle.column] : undefined;
+  const locked = !!lifecycle && !!currentRecord && isLocked(lifecycle, lifecycleValue);
+  const inError = !!lifecycle && !!currentRecord && phaseOf(lifecycle, lifecycleValue) === "error";
+  const onMoved = () => {
+    queryClient.invalidateQueries({ queryKey: ["ad-detail-list", level.endpoint] });
+    queryClient.invalidateQueries({ queryKey: ["ad-detail-record", level.endpoint, recordId] });
+    queryClient.invalidateQueries({ queryKey: ["record-actions", level.endpoint, recordId] });
+    refetch();
+  };
+
   return (
     <div className="flex flex-col h-full">
       <ADToolbar
-        onSave={() => saveMutation.mutate(formData)}
+        onSave={() => saveMutation.mutate({ data: formData })}
         onDelete={() => deleteMutation.mutate()}
         onUndo={() => {
           if (currentRecord) {
@@ -756,9 +969,13 @@ export function ADDetailShell({
           }
         }}
         onRefresh={() => refetch()}
-        onEdit={() => setIsEditing(true)}
+        onEdit={() => {
+          setEditBase(currentRecord);
+          setIsEditing(true);
+        }}
         onCancelEdit={() => {
           setIsEditing(false);
+          setEditBase(null);
           if (currentRecord) {
             setFormData(currentRecord);
             setHasChanges(false);
@@ -772,6 +989,7 @@ export function ADDetailShell({
         canCreate={false}
         isEditing={isEditing}
         isDetailView={true}
+        canEdit={!locked}
         hasPrintReport={hasReportDesign}
       />
 
@@ -788,7 +1006,7 @@ export function ADDetailShell({
           </Link>
           {crumbs.slice(0, -1).map((c, i) => (
             <span key={i} className="flex items-center gap-1.5">
-              <span className="text-muted-foreground/50">/</span>
+              <span aria-hidden="true" className="text-muted-foreground/50">/</span>
               {c.href ? (
                 <Link
                   to={c.href as never}
@@ -814,14 +1032,32 @@ export function ADDetailShell({
               >
                 ← List
               </button>
-              <span className="text-muted-foreground/40">|</span>
+              <span aria-hidden="true" className="text-muted-foreground/40">|</span>
               <h1 className="text-xl font-semibold text-foreground truncate">{currentName}</h1>
-              {!!currentRecord?.doc_status && currentRecord.doc_status !== "none" && (
-                <DocStatusBadge
-                  status={currentRecord.doc_status as string}
-                  message={currentRecord.doc_status_message as string}
-                />
-              )}
+              <LifecycleBadge
+                tableName={tableName}
+                fields={
+                  // The grid fields always carry the state field; the form
+                  // fields never do, because it is not an input.
+                  (level.gridFields?.length
+                    ? level.gridFields
+                    : (entityMeta?.columns ?? [])) as FieldMetadata[]
+                }
+                record={currentRecord as Record<string, unknown> | null}
+              />
+              <RecordActions
+                endpoint={level.endpoint}
+                tableName={tableName}
+                record={currentRecord as Record<string, unknown> | null}
+                disabled={saveMutation.isPending}
+                formValues={isEditing && hasChanges ? formData : null}
+                onSaved={() => {
+                  // The press saved the form: it is the record now, at its new version.
+                  setHasChanges(false);
+                  setEditBase(null);
+                }}
+                onMoved={onMoved}
+              />
               <WindowHelpButton
                 tableName={helpTableNameFromEndpoint(level.endpoint)}
                 entityLabel={level.label}
@@ -848,6 +1084,23 @@ export function ADDetailShell({
           )}
         </div>
       </div>
+
+      {inError && (
+        <div
+          role="alert"
+          data-testid="record-error"
+          className="mx-6 mt-3 rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-800 dark:text-red-200"
+        >
+          <p className="font-semibold">The last save was refused, so this record is in Error.</p>
+          <p className="mt-1">
+            {(currentRecord?.doc_status_message as string) ||
+              "A rule or workflow refused it. Correct the record and save it again."}
+          </p>
+          <p className="mt-1 text-xs opacity-80">
+            Your changes are saved. Edit the record and save it again to run its rules and workflows.
+          </p>
+        </div>
+      )}
 
       {/* Print modal — only mounts when a design exists and the user clicks Print */}
       {hasReportDesign && currentRecord && reportDesign?.layout && (
@@ -897,14 +1150,15 @@ export function ADDetailShell({
             {/* Detail form */}
             <div className="p-6 border-b border-border">
               <DynamicForm
+                key={`${recordId}:${formNonce}`}
                 tableName={level.id}
                 idField={level.idField}
                 fields={level.formFields}
-                initialData={currentRecord}
+                initialData={isEditing && editBase ? editBase : currentRecord}
                 onSubmit={(fd) => {
                   setFormData(fd);
                   setHasChanges(false);
-                  saveMutation.mutate(fd);
+                  saveMutation.mutate({ data: fd });
                 }}
                 onChange={(fd) => {
                   setFormData(fd);
@@ -915,6 +1169,17 @@ export function ADDetailShell({
                 readOnly={!isEditing}
                 isSaving={saveMutation.isPending}
                 parentContext={immediateParentData}
+              />
+              <VersionConflictDialog
+                open={conflict !== null}
+                entityLabel={level.label ?? "record"}
+                fields={conflict?.fields ?? []}
+                labelOf={labelOf}
+                theirVersion={Number(conflict?.theirs.version) || undefined}
+                isSaving={saveMutation.isPending}
+                onReload={handleConflictReload}
+                onOverwrite={handleConflictOverwrite}
+                onCancel={() => setConflict(null)}
               />
               {saveErrors.length > 0 && (
                 <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3">

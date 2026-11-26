@@ -23,12 +23,12 @@ permissions:
 
 # Pinned, not `latest`. Three of the checks below compare a committed bundle
 # against a fresh build of it, byte for byte, and Bun's bundler is free to
-# change its output between releases — 1.4.0 did, and turned every open pull
+# change its output between releases — a release once did, and turned every open pull
 # request red for a reason none of them had anything to do with. Moving this
 # forward is a deliberate step: bump it, run the four build scripts, and commit
 # the bundles they rewrite in the same change.
 env:
-  BUN_VERSION: "1.4.0"
+  BUN_VERSION: "1.4.4"
 
 # A newer push makes an in-flight run redundant, except on main, where each
 # commit's result is worth keeping.
@@ -37,8 +37,37 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  project-git:
+    name: Project Git recovery and database consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appwithai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APPWITHAI_GIT_TEST_DB: "1"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/appwithai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run test -- src/lib/server/__tests__/project-repository.test.ts
+
   checks:
-    name: Type-check, lint and unit tests
+    name: Type-check and unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -55,12 +84,11 @@ jobs:
       - name: Type-check
         run: bun run type-check
 
-      # Error-level only. The tree carries several hundred style warnings that
-      # predate this workflow; failing on those would mean the first red build
-      # is noise nobody reads. Errors — formatting and unorganised imports — are
-      # auto-fixable with `bun run lint:fix` and stay enforced.
-      - name: Lint
-        run: bunx biome check . --max-diagnostics=2000 --diagnostic-level=error
+      # language/** has its own tsconfig, which the root type-check does not
+      # read. Unchecked, it went red when the flowchart parser moved into
+      # packages/editors and nothing noticed.
+      - name: Type-check the language package
+        run: bun run type-check:language
 
       - name: Unit tests
         run: bun run test
@@ -80,7 +108,7 @@ jobs:
       - name: The browser bundle of the generator is current
         run: bun run build:wasm-browser -- --check
 
-      # checker.js and fixer.js are the published validation surface: llms-full.txt
+      # checker.js and fixer.js are the published validation surface: llms.txt
       # tells a model to run its output past them before handing it to anyone. A
       # stale or broken copy passes a document the CLI would refuse, which is the
       # one failure that discredits the whole loop.
@@ -249,10 +277,14 @@ jobs:
       - name: Install Chromium
         run: bunx playwright install --with-deps chromium
 
-      # Seventeen megabytes of PostgreSQL, placed beside the page so the run
-      # does not depend on a CDN being up.
+      # Seventeen megabytes of PostgreSQL, placed beside the page. Nothing is
+      # fetched from a CDN, so without this the page refuses to run an app.
       - name: Vendor PGlite
         run: bun run vendor:pglite
+
+      # The same for run-real-stack.html's @webcontainer/api.
+      - name: Vendor the WebContainer API
+        run: bun run vendor:webcontainer
 
       # run-real-stack.html assembles the NestJS stack in the tab, which needs
       # the templates beside the page. They are a copy of files already in this
@@ -327,7 +359,7 @@ jobs:
       # Playwright starts the server itself (see playwright.config.ts) and stops
       # it afterwards, so there is no background process to leak between steps.
       - name: Run the modelling tool's E2E suite
-        run: bunx playwright test
+        run: bunx --bun playwright test
 
       - name: Keep what the run saw
         if: always()
@@ -415,7 +447,7 @@ jobs:
 
       - name: Type-check the generated test suite
         working-directory: ${{ env.APP_DIR }}/tests
-        run: bunx tsc --noEmit
+        run: bun check
 
       - name: Point the generated backend at Postgres
         run: |

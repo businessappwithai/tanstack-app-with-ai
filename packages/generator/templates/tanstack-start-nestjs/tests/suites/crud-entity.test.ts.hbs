@@ -20,6 +20,7 @@ import {
   entities,
   type FieldMeta,
   firstTextField,
+  firstUnruledNumericField,
   getEntity,
   harness,
   HttpClient,
@@ -158,7 +159,7 @@ describe("{{entity.displayName}} CRUD", () => {
 
   it("leaves the fields it was not asked to change", async () => {
     const textField = firstTextField(entity);
-    const numeric = numericFields(entity)[0];
+    const numeric = firstUnruledNumericField(entity);
     if (!textField || !numeric) return;
 
     const created = await harness.createWithParents(entity, {

@@ -125,7 +125,7 @@
           <span class="choice__desc">
             Ninety-one entities — households and advisors, the compliance file, financial plans, a
             security master, portfolios and holdings, orders and settlement, recommendations,
-            rebalancing and commissions. Eleven state machines and three sagas: the one to open if
+            rebalancing and commissions. Ten state machines, three sagas and forty-nine written reports, one set for every role: the one to open if
             you want to see whether this holds up at enterprise size.
           </span>
           <span class="choice__meta">examples/investment-planning-wealth-management-system.eml.mmd</span>
@@ -238,12 +238,14 @@
 <p>
   The same output can be written to disk and served anywhere static:
 </p>
-<pre class="code"><code>bun run wasm generate -i language/examples/crm.eml.mmd -o ./crm --name "Acme CRM" --vendor-pglite
+<pre class="code"><code>bun run wasm generate -i language/examples/crm.eml.mmd -o ./crm --name "Acme CRM"
 bun run wasm serve ./crm</code></pre>
 <p>
-  <code>--vendor-pglite</code> copies the WebAssembly build of Postgres into the output, so the
-  application needs no network at all. Without it — as on this page, where seventeen megabytes would be
-  a rude thing to bundle into a documentation folder — it is fetched once and cached by the browser.
+  The generator copies the WebAssembly build of Postgres into the output, under
+  <code>vendor/pglite/</code>, so the application needs no network at all. Postgres is never fetched
+  from a CDN. This page runs the copy <code>bun run vendor:pglite</code> places beside it, and the
+  download it offers — a shell script, which cannot carry seventeen megabytes of WebAssembly — starts
+  with <code>npm install &amp;&amp; npm start</code>, so the application serves the installed package.
 </p>
 
 <h2 id="limits">Where this stops</h2>

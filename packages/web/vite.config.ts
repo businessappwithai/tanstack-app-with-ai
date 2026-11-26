@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { devtools } from "@tanstack/devtools-vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +41,21 @@ const config = defineConfig({
       // Generate step mid-run and threw away its logs and completion state.
       ignored: ["**/generated-projects/**"],
     },
+    // Transform the rule editor in the background as soon as the server starts.
+    // It is a lazy chunk over @gorules/jdm-editor (with antd) and Monaco — about
+    // 11 MB of pre-bundled code — and Vite transforms a module on its first
+    // request, so after every restart the first "New rule" sat on "Loading
+    // editor…" while that happened. Warming the entry warms its static imports.
+    warmup: {
+      clientFiles: ["../editors/src/components/eml/GoRulesEditorPanel.tsx"],
+    },
+    // Setting `allow` replaces Vite's default — the workspace root — rather than adding to
+    // it. `[".."]` alone (packages/) put the root node_modules out of reach, where bun keeps
+    // @gorules/zen-engine-wasm: its .wasm answered 403, the decision table never left
+    // Developer mode, and the operator palette and value pickers silently disappeared.
+    fs: {
+      allow: [searchForWorkspaceRoot(__dirname), path.resolve(__dirname, "..")],
+    },
   },
   optimizeDeps: {
     // Native .node binaries and Node-only drivers can't be bundled by Rolldown — exclude them
@@ -50,9 +65,22 @@ const config = defineConfig({
       "@anush008/tokenizers-darwin-universal",
       "pg",
       "@appwithai/core",
+      // Monaco workers must not be pre-bundled — Vite's ?worker handling creates the
+      // wrapper with a default export, but optimizeDeps runs first and produces a plain
+      // module with no default, so the worker import answers "no export named 'default'".
+      "monaco-editor",
     ],
     // CJS interop: pre-bundle elkjs bundled JS so Vite handles it as ESM
-    include: ["elkjs/lib/elk.bundled.js"],
+    include: [
+      "elkjs/lib/elk.bundled.js",
+      // Monaco's workers, imported by packages/editors/src/lib/monaco-workers/.
+      // The scan does not follow a `?worker` import into the worker, so these were
+      // found only when a code box first started one — and finding a dependency
+      // that late re-bundles and reloads the page under the person using it.
+      "monaco-editor/editor/editor.worker",
+      "monaco-editor/language/json/json.worker",
+      "monaco-editor/language/typescript/ts.worker",
+    ],
   },
   ssr: {
     // Treat workspace packages as Node.js externals so their dist/index.js
@@ -63,6 +91,13 @@ const config = defineConfig({
   },
   resolve: {
     tsconfigPaths: true,
+    // One Monaco. @gorules/jdm-editor depends on monaco-editor 0.52 but draws every
+    // editor through @monaco-editor/react's loader, which takes the 0.57 instance
+    // packages/editors/src/lib/monaco-local.ts puts on `window`. Its one direct
+    // import is the MarkerSeverity enum — and resolving that from its own 0.52
+    // pulled a second full Monaco into the rule editor's chunk: 4 MB more to
+    // transform and about 95 more stylesheets on the first open.
+    dedupe: ["monaco-editor"],
     alias: [
       // Replace @tanstack/start-api-routes@1.120 (Vinxi-based) with a Vite-compatible shim.
       // The original imports 'vinxi/routes' which doesn't exist in @tanstack/react-start@1.167+.
@@ -73,10 +108,39 @@ const config = defineConfig({
       },
       { find: "#", replacement: path.resolve(__dirname, "src") },
       { find: "@", replacement: path.resolve(__dirname, "src") },
+      // `@appwithai/generator` is externalised for SSR and resolved from its
+      // built `dist/index.js` for the client, which has no subpaths. The web
+      // tsconfig only maps `@/*`, so a subpath import of the generator's pure
+      // modules (the rules compiler, used by the enhance page) does not resolve
+      // at runtime. Point it at the source, which is browser-safe.
+      {
+        find: /^@appwithai\/generator\/(.*)$/,
+        replacement: path.resolve(__dirname, "../generator/src/$1"),
+      },
+      // The rule and workflow editors: one source, imported by path from packages/editors.
+      {
+        find: /^@appwithai\/editors\/(.*)$/,
+        replacement: path.resolve(__dirname, "../editors/src/$1"),
+      },
+      // monaco-editor lives in packages/web/node_modules but packages/editors is
+      // outside packages/web, so Vite cannot find it via normal node resolution.
+      // Follow monaco-editor 0.57's exports map: "." -> esm/vs/index.js, "./*" -> esm/vs/*.js
+      {
+        find: /^monaco-editor$/,
+        replacement: path.resolve(__dirname, "node_modules/monaco-editor/esm/vs/index.js"),
+      },
+      {
+        find: /^monaco-editor\/(.+)$/,
+        replacement: path.resolve(__dirname, "node_modules/monaco-editor/esm/vs/$1.js"),
+      },
     ],
   },
   plugins: [
-    devtools(),
+    // Console piping mirrors every browser console line into the server's, and the devtools
+    // client mirrors that back into the browser — each pass prefixing another "[Server]".
+    // One React warning on the Logic page grew the dev log to 690MB and the dev server to
+    // 8GB within an hour. Nothing here reads the piped lines, so it is off.
+    devtools({ consolePiping: { enabled: false } }),
     tailwindcss(),
     tanstackStart({
       tsr: {

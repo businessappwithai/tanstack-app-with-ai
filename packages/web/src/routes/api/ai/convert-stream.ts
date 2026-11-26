@@ -59,7 +59,6 @@ export const Route = createFileRoute("/api/ai/convert-stream")({
                     step: "error",
                     message: "AI returned an empty domain analysis — please try again.",
                   });
-                  controller.close();
                   return;
                 }
 
@@ -75,14 +74,21 @@ export const Route = createFileRoute("/api/ai/convert-stream")({
                     step: "error",
                     message: "AI returned an empty diagram — please try again with more detail.",
                   });
-                  controller.close();
                   return;
                 }
 
                 send({ step: "validating", message: "Validating ERD diagram syntax..." });
                 send({ mermaidSyntax });
               } catch (error) {
-                const message = error instanceof Error ? error.message : "Conversion failed";
+                const raw = error instanceof Error ? error.message : "Conversion failed";
+                // "Connection error." names no service and no remedy. The model server is
+                // the one thing this route cannot work without, so say that it did not answer.
+                const unreachable = /connection error|ECONNREFUSED|ENOTFOUND|fetch failed/i.test(raw);
+                const message = unreachable
+                  ? `The AI service did not answer. Start the model server (LOCAL_AI_BASE_URL, default ${
+                      process.env.LOCAL_AI_BASE_URL ?? "http://127.0.0.1:8000/v1"
+                    }) or check its address, then try again.`
+                  : raw;
                 send({ step: "error", message });
               } finally {
                 clearInterval(heartbeat);

@@ -202,7 +202,10 @@ test.describe("a project's model", () => {
 
     const versions = await versionsOf(owner.request, projectId);
     expect(versions.filter((version) => version.is_current)).toHaveLength(1);
-    expect(versions.find((version) => version.is_current)?.id).toBe(first);
+    expect(versions).toHaveLength(3);
+    expect(versions.some((version) => version.id === first)).toBe(true);
+    expect(versions.find((version) => version.is_current)?.id).not.toBe(first);
+    expect(versions.find((version) => version.is_current)?.mermaid_code).toBe(eml);
   });
 
   test("will not restore a version belonging to another project", async () => {

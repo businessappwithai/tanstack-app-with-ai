@@ -75,6 +75,37 @@ function displayValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/** Dictionary reference ids: 15 a date, 16 a date and time, 11 an integer, 12 a number. */
+function typedDisplay(referenceId: number): ((value: unknown) => string | null) | null {
+  if (referenceId === 15) {
+    return (value) => {
+      const date = new Date(String(value));
+      // A date has no time zone; read it in UTC, which is how it was stored.
+      return Number.isNaN(date.getTime())
+        ? null
+        : date.toLocaleDateString(undefined, { timeZone: "UTC", dateStyle: "medium" });
+    };
+  }
+  if (referenceId === 16) {
+    return (value) => {
+      const date = new Date(String(value));
+      return Number.isNaN(date.getTime())
+        ? null
+        : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    };
+  }
+  if (referenceId === 11 || referenceId === 12) {
+    return (value) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      return referenceId === 11
+        ? n.toLocaleString()
+        : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    };
+  }
+  return null;
+}
+
 /** A column pointing at another table — its value is an id, not a word. */
 function isTableReference(field: FieldMetadata): boolean {
   return Boolean(field.ref_table_name || field.ref_endpoint);
@@ -218,6 +249,15 @@ export function ReportPrintModal({
 
     const byColumn = new Map<string, (value: unknown) => string | null>();
     for (const field of fields) {
+      // The column's declared type decides how its value reads on paper. A
+      // date column came back as a midnight timestamp ("2/15/2001, 12:00:00
+      // AM", and a day early west of UTC), and a NUMERIC as PostgreSQL's
+      // padded string ("1.500000").
+      const typed = typedDisplay(Number(field.sys_reference_id));
+      if (typed) {
+        byColumn.set(field.column_name, typed);
+        continue;
+      }
       if (isTableReference(field)) {
         const endpoint = referenceEndpoint(field);
         if (!endpoint) continue;

@@ -46,17 +46,31 @@ export function makeService(entityName) {
       if (sm && !data[sm.statusField]) data[sm.statusField] = sm.initial;
 
       const ts = nowIso();
-      const row = { id: data.id || randomUUID(), ...data, created_at: ts, updated_at: ts };
+      const row = {
+        id: data.id || randomUUID(),
+        ...data,
+        version: 1,
+        created_at: ts,
+        updated_at: ts,
+      };
       insert(col, row);
       await runHooks(entityName, "afterCreate", row);
       return ruleTrace.length ? { ...row, _rules: ruleTrace } : row;
     },
 
-    async update(id, body) {
+    /**
+     * `expectedVersion` is the version the caller read (from `If-Match`).
+     * When it is given and the record has moved past it, the save is refused
+     * with 409 VERSION_CONFLICT rather than overwriting someone else's change.
+     * Without it the save is unconditional, as before.
+     */
+    async update(id, body, expectedVersion) {
       const existing = find(col, id);
       if (!existing) return null;
+      assertVersion(entityName, id, existing, expectedVersion);
 
       let data = { ...body };
+      delete data.version;
       data = await runHooks(entityName, "beforeUpdate", data);
 
       // Enforce workflow transition when the status field changes.
@@ -73,7 +87,19 @@ export function makeService(entityName) {
       data = validate(entityName, { ...existing, ...data }, "update");
       const ruleTrace = runRules(entityName, "beforeUpdate", data);
 
-      const row = update(col, id, { ...body, ...pickValidated(data, body), updated_at: nowIso() });
+      // Hooks above are async, so another save may have landed meanwhile. The
+      // check and the write below are synchronous, so nothing can come between
+      // them: this is the one that decides.
+      const current = find(col, id);
+      if (!current) return null;
+      assertVersion(entityName, id, current, expectedVersion);
+      const { version: _ignored, ...supplied } = body;
+      const row = update(col, id, {
+        ...supplied,
+        ...pickValidated(data, supplied),
+        version: (Number(current.version) || 1) + 1,
+        updated_at: nowIso(),
+      });
       await runHooks(entityName, "afterUpdate", row);
       return ruleTrace.length ? { ...row, _rules: ruleTrace } : row;
     },
@@ -87,6 +113,20 @@ export function makeService(entityName) {
       return ok;
     },
   };
+}
+
+/** 409 when the caller read an older version than the one stored. */
+function assertVersion(entityName, id, row, expectedVersion) {
+  if (expectedVersion === undefined) return;
+  const currentVersion = Number(row.version) || 1;
+  if (currentVersion === expectedVersion) return;
+  throw new HttpError(409, "This record was changed by someone else after you opened it.", {
+    code: "VERSION_CONFLICT",
+    entity: entityName,
+    id,
+    expectedVersion,
+    currentVersion,
+  });
 }
 
 // Only persist keys the caller actually supplied (plus any coercions on them).

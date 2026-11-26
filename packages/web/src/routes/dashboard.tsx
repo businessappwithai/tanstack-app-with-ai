@@ -50,11 +50,11 @@ const features = [
   },
   {
     title: "Code Generation",
-    description: "Generate Knex.js migrations, SQL DDL, and more",
+    description: "Generate Kysely migrations, SQL DDL, and more",
     icon: FileCode,
     href: "/designer?tab=generate",
     color: "from-emerald-500 to-teal-500",
-    features: ["Knex.js Migrations", "SQL DDL", "Multiple Dialects"],
+    features: ["Kysely Migrations", "SQL DDL", "Multiple Dialects"],
   },
   {
     title: "Human-in-the-Loop",

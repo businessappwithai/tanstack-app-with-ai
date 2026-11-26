@@ -3,8 +3,6 @@ import { join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { requireProjectAccess } from "@/lib/project-access";
 
-const GENERATED_HOOKS_BASE_PATH = join(process.cwd(), "generated-projects");
-
 export const Route = createFileRoute("/api/projects/$id/workflows/$serviceName/files/")({
   server: {
     handlers: {
@@ -19,9 +17,9 @@ export const Route = createFileRoute("/api/projects/$id/workflows/$serviceName/f
           const serviceName = params.serviceName as string;
           const entityName = (serviceName as string).replace("Service", "");
 
+          const { projectDirectory } = await import("@/lib/server/project-git");
           const hooksDir = join(
-            GENERATED_HOOKS_BASE_PATH,
-            projectId,
+            await projectDirectory(projectId),
             "src",
             "modules",
             entityName.toLowerCase(),

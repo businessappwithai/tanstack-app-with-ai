@@ -17,6 +17,9 @@
 | `status` | string | — | pending — published, nothing submitted yet; submitted — work is in, not marked; marked — a score is recorded; missing — nothing was submitted and the deadline passed, which counts as zero in the weighting; excused — the student was authorised not to sit it, and it is removed from the weighting rather than counted as zero. |
 | `marked_at` | datetime | OPTIONAL | When the mark was recorded. The turnaround report is the gap between this and the assessment's due date, and it is the number departments are held to. |
 | `feedback` | text | OPTIONAL | What the student is told about the work. The one field in the model written to be read by a child, so it is never a grade restated as a sentence. |
+| `submitted_at` | datetime | OPTIONAL | When the move to submitted was recorded on this assessment result. Recording it moves an assessment result from pending or missing to submitted: the workflows set the status, which nobody changes by hand. |
+| `missing_at` | datetime | OPTIONAL | When the move to missing was recorded on this assessment result. Recording it moves an assessment result from pending to missing: the workflows set the status, which nobody changes by hand. |
+| `excused_at` | datetime | OPTIONAL | When the move to excused was recorded on this assessment result. Recording it moves an assessment result from pending to excused: the workflows set the status, which nobody changes by hand. |
 
 ## Enums
 
@@ -52,6 +55,15 @@ excused --> [*]
 - `refuseScoreAboveMaximum validation-error when: score > max_score message: A score cannot exceed the paper's maximum as it stood when the result was created.`
 - `refuseNegativeScore validation-error when: score < 0 message: A score cannot be negative. A missing piece of work is the missing status, not a negative mark.`
 - `requireScoreWhenMarked validation-error when: status == "marked" and score == null message: A marked result needs a score. A blank is not a zero and the reports keep the two apart.`
+- `requireScoreWhenMarkedOnMove validation-error when: marked_at != null and score == null message: A marked result needs a score. A blank is not a zero and the reports keep the two apart.`
+
+### `assessmentResultStateProgress` on `beforeUpdate` — **`%%action` decision table — it can act**
+
+- `movePendingToSubmitted trigger-workflow when: status == "pending" and submitted_at != null workflow: AssessmentResultSubmittedMove`
+- `movePendingToMissing trigger-workflow when: status == "pending" and missing_at != null workflow: AssessmentResultMissingMove`
+- `movePendingToExcused trigger-workflow when: status == "pending" and excused_at != null workflow: AssessmentResultExcusedMove`
+- `moveSubmittedToMarked trigger-workflow when: status == "submitted" and marked_at != null workflow: AssessmentResultMarkedMove`
+- `moveMissingToSubmitted trigger-workflow when: status == "missing" and submitted_at != null workflow: AssessmentResultSubmittedMove`
 
 ## Hooks
 
@@ -62,6 +74,19 @@ excused --> [*]
 
 None outward. Inward: `copyAssessmentMaximum` stamps `max_score` from the paper at creation — the §10.4 first route, a column that earns its place, and the reason `refuseScoreAboveMaximum` can be a rule at all.
 
+Sagas that touch it:
+
+- **AssessmentResultSubmittedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: submitted`
+  - `C UpdateEntity field: marked_at value: null`
+- **AssessmentResultMissingMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: missing`
+  - `C UpdateEntity field: submitted_at value: null`
+- **AssessmentResultExcusedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: excused`
+- **AssessmentResultMarkedMove** *(triggered on this entity)*
+  - `B UpdateEntity field: status value: marked`
+
 ## Access
 
 | Operation | Roles |
@@ -69,7 +94,6 @@ None outward. Inward: `copyAssessmentMaximum` stamps `max_score` from the paper 
 | `read` | principal · registrar · head_of_department · teacher · guardian |
 | `create` | teacher · head_of_department |
 | `update` | teacher · head_of_department |
-| `mark` | teacher · head_of_department |
 
 ## Open questions
 

@@ -137,4 +137,77 @@ describe("identifierColumnNames", () => {
       )
     ).toEqual([]);
   });
+
+  describe("a record with no free text of its own", () => {
+    const pack = [
+      { name: "id", type: "string" },
+      { name: "member_id", type: "string", isForeignKey: true },
+      { name: "credits", type: "integer" },
+      { name: "purchased_on", type: "date" },
+      { name: "status", type: "string", enumReferenceId: 1042 },
+    ];
+
+    it("is not named by its status, a closed vocabulary", () => {
+      expect(identifierColumnNames(pack, "id")).not.toContain("status");
+    });
+
+    it("is named by whose it is and when", () => {
+      // Found in a generated app: a booking's Class Pack read "active".
+      expect(identifierColumnNames(pack, "id")).toEqual(["member_id", "purchased_on"]);
+    });
+
+    it("still prefers a free-text column beside the status", () => {
+      expect(identifierColumnNames([...pack, { name: "notes", type: "string" }], "id")).toEqual([
+        "notes",
+      ]);
+    });
+
+    it("has none with no parent or no date to say", () => {
+      expect(identifierColumnNames(pack.filter((a) => a.name !== "purchased_on"), "id")).toEqual(
+        []
+      );
+    });
+  });
+});
+
+describe("an entity whose columns are prefixed with its own name", () => {
+  /* The hospital model writes `department_name` and `department_code`, with a key called
+     `department_id` and two references. Neither is the bare `name` the rule used to want,
+     so a department was called by its parents — "FACILITY 3 · FACILITY 3" — in every
+     lookup and list that showed one. */
+  const department = [
+    { name: "department_id", type: "string", isForeignKey: true },
+    fk("facility_id"),
+    fk("parent_id"),
+    { name: "department_code", type: "string", unique: true },
+    { name: "department_name", type: "string" },
+    { name: "department_type", type: "string" },
+  ];
+
+  it("names the record by its own name column, not by its parents", () => {
+    expect(identifierColumnNames(department, "department_id")).toEqual(["department_name"]);
+  });
+
+  it("finds the prefix from the entity's name when the key is a plain id", () => {
+    const declared = columns("id", fk("clinic_id"), fk("owner_id"), "clinic_name");
+    expect(identifierColumnNames(declared, "id", "Clinic")).toEqual(["clinic_name"]);
+    expect(identifierColumnNames(columns("id", "billing_account_code"), "id", "BillingAccount")).toEqual([
+      "billing_account_code",
+    ]);
+  });
+
+  it("falls back to its own code when it has no name", () => {
+    const declared = columns("order_id", "order_number", "notes");
+    expect(identifierColumnNames(declared, "order_id")).toEqual(["order_number"]);
+  });
+
+  it("a bare name still wins, and a prefixed reference or enum is never taken", () => {
+    expect(identifierColumnNames(columns("id", "name", "ward_name"), "id", "Ward")).toEqual(["name"]);
+    const referenced = [
+      { name: "ward_id", type: "string", isForeignKey: true },
+      { name: "ward_name", type: "string", isForeignKey: true },
+      { name: "ward_type", type: "string" },
+    ];
+    expect(identifierColumnNames(referenced, "ward_id")).not.toContain("ward_name");
+  });
 });

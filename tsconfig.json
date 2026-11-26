@@ -45,18 +45,24 @@
 
     /* Path Mapping */
     "paths": {
+      "@appwithai/yamltecture": ["./packages/yamltecture/src/index.ts"],
+      "@appwithai/yamltecture/*": ["./packages/yamltecture/src/*"],
       "@appwithai/core": ["./packages/core/src"],
       "@appwithai/core/*": ["./packages/core/src/*"],
       "@appwithai/generator": ["./packages/generator/src"],
       "@appwithai/generator/*": ["./packages/generator/src/*"],
       "@appwithai/ai": ["./packages/ai/src"],
       "@appwithai/ai/*": ["./packages/ai/src/*"],
+      "@appwithai/editors/*": ["./packages/editors/src/*"],
       "@appwithai/web": ["./packages/web/src"],
       "@appwithai/web/*": ["./packages/web/src/*"],
-      "@/*": ["./packages/web/src/*"]
+      "@/*": ["./packages/web/src/*"],
+      "monaco-editor": ["./node_modules/.bun/monaco-editor@0.57.0/node_modules/monaco-editor/esm/vs/index"],
+      "monaco-editor/*": ["./node_modules/.bun/monaco-editor@0.57.0/node_modules/monaco-editor/*"]
     }
   },
   "include": [
+    "packages/yamltecture/src/**/*.ts",
     "packages/core/**/*.ts",
     "packages/core/**/*.tsx",
     "packages/generator/src/**/*.ts",
@@ -64,6 +70,8 @@
     "packages/generator/migrations/**/*.ts",
     "packages/ai/src/**/*.ts",
     "packages/ai/src/**/*.tsx",
+    "packages/editors/src/**/*.ts",
+    "packages/editors/src/**/*.tsx",
     "packages/web/src/**/*.ts",
     "packages/web/src/**/*.tsx",
     "packages/web/vitest.config.ts",

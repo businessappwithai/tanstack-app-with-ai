@@ -12,6 +12,7 @@
  * application actually applies.
  */
 
+import { lifecycleValuesFor, RESERVED_STATE_NAMES } from "../../../../language/state-field";
 import { extractWorkflowSections } from "../eml";
 import { type CompiledSaga, compileSagas } from "./steps";
 
@@ -45,7 +46,13 @@ export interface CompiledWorkflow {
   transitions: WorkflowTransition[];
   /** The state a record starts in — the `[*] --> x` edge. */
   initial?: string;
+  /** The states the diagram ends (`x --> [*]`). Each one is Final: the record is locked. */
   terminal: string[];
+  /**
+   * Every value the lifecycle column may hold: `draft`, the machine's states, and
+   * `error` (`lifecycleValuesFor` in language/state-field.ts — the one statement).
+   */
+  lifecycleValues: string[];
 }
 
 const START_MARKER = "[*]";
@@ -109,14 +116,28 @@ export function compileWorkflows(
     if (!initial) {
       onWarn(`Workflow "${section.name}" has no starting state — records will not be stamped.`);
     }
+    for (const reserved of RESERVED_STATE_NAMES) {
+      if (states.has(reserved)) {
+        onWarn(
+          `Workflow "${section.name}" draws a state named "${reserved}", which the record ` +
+            `lifecycle reserves (checker EML509).`
+        );
+      }
+    }
+    if (terminal.length === 0) {
+      onWarn(
+        `Workflow "${section.name}" ends nowhere: no state reaches [*], so no record of ` +
+          `${section.entity} can become Final (checker EML422).`
+      );
+    }
 
+    const machine = { states: [...states.values()], initial, terminal };
     compiled.push({
       name: section.name,
       entity: section.entity,
-      states: [...states.values()],
+      ...machine,
       transitions,
-      initial,
-      terminal,
+      lifecycleValues: lifecycleValuesFor(machine),
     });
   }
 

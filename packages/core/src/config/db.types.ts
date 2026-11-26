@@ -56,6 +56,7 @@ export interface ProjectMembersTable {
 }
 
 export interface ErdVersionsTable {
+  git_commit: Nullable<string>;
   id: string;
   project_id: string;
   version_number: number;
@@ -236,6 +237,8 @@ export interface RulesTable {
 }
 
 export interface Database {
+  project_git_state: ProjectGitStateTable;
+  project_git_operations: ProjectGitOperationTable;
   projects: ProjectsTable;
   project_members: ProjectMembersTable;
   erd_versions: ErdVersionsTable;
@@ -249,4 +252,25 @@ export interface Database {
   auth_sessions: AuthSessionsTable;
   auth_accounts: AuthAccountsTable;
   auth_verification_tokens: AuthVerificationTokensTable;
+}
+
+export interface ProjectGitStateTable {
+  project_id: string;
+  model_code: string;
+  model_commit: string;
+  generation_commit: Nullable<string>;
+  generation_model_commit: Nullable<string>;
+  updated_at: string;
+}
+
+export interface ProjectGitOperationTable {
+  id: string;
+  project_id: string;
+  request_id: string;
+  fingerprint: string;
+  kind: string;
+  status: string;
+  payload: string;
+  result: Nullable<string>;
+  created_at: string;
 }

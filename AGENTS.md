@@ -38,7 +38,7 @@ Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
 # APPWITHAI
 
 **Project**: AI-powered ERD design + full-stack code generation  
-**Version**: 5.1.1 | **Runtime**: Bun.js 1.4.0 (pinned — see below)
+**Version**: 5.1.1 | **Runtime**: Bun.js 1.4.4 (pinned — see below)
 
 ## Commands
 
@@ -50,7 +50,6 @@ Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
 | `bun run build` | Build all packages |
 | `bun run type-check` | TypeScript (root tsconfig only) |
 | `bun run type-check:language` | Type-check `language/**` (separate config) |
-| `bun run lint` / `bun run lint:fix` | Biome lint / autofix |
 | `bun run test` | Vitest unit tests (runs `packages/web/vitest.config.ts`) |
 | `bun run test:e2e:server` | Playwright E2E with server startup |
 | `bun run test:wasm` | WASM stack end-to-end |
@@ -63,7 +62,7 @@ Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
 | `bun run build:language-tools` | Rebuild `html/checker.js` + `html/fixer.js` |
 | `bun run test:language-tools` | The published `checker.js`/`fixer.js` still agree with the CLI |
 | `bun run build:viewers` | Rebuild `website/viewers/eml-model.js` (the model viewers' reader) |
-| `bun run test:llmtext` | Hold all four `website/llmtext/*.txt` protocol documents to what the checker actually does, the viewer claims in them, and — for the two enhancement editions — that they still carry their base's language reference byte for byte |
+| `bun run test:llmtext` | Hold `website/llmtext/llms.txt` to what the checker, the fixer and the dictionary actually do, its examples to 0 errors and 0 warnings, and `website/llmtext/` to holding the controller and its named chunks and nothing else |
 | `bun run vendor:pglite` | Put PGlite beside `html/` (the wasm E2E job needs it) |
 | `bun run build:stack-templates` | Put the stack templates beside `run-real-stack.html` |
 
@@ -73,26 +72,41 @@ bun --filter @appwithai/web test -- path/to/file.spec.ts
 bunx playwright test tests/e2e/specific.e2e.spec.ts
 ```
 
-### Run `bun install` first — both failure modes are silent
+### Run `bun install` first — the failure mode is silent
 
-In a tree with no `node_modules`, the two commands you would reach for to check
-your work lie to you, in opposite directions:
+In a tree with no `node_modules`, the command you would reach for to check your
+work lies to you:
 
 | Command | What it does with no `node_modules` |
 |---|---|
-| `bunx biome check .` | Resolves **`biome@0.3.3`** — an unrelated legacy package, not `@biomejs/biome` — and exits **0 having checked nothing**. Indistinguishable from a clean lint |
 | `bun run type-check` | Reports **thousands of phantom errors**: every `node:` builtin and `process` is unresolvable. Indistinguishable from a broken repository |
 
-Both have been mistaken for real results, and each wasted a CI cycle. `bun
-install` fixes both. If you cannot install, pin the linter explicitly —
-`bunx @biomejs/biome@2.5.6 check .` — and do not trust `type-check` at all.
+It has been mistaken for a real result and wasted a CI cycle. `bun install`
+fixes it; if you cannot install, do not trust `type-check` at all.
+
+### There is no linter or formatter — the static check is `bun check`
+
+Biome is gone: its config, its dependency, the `lint`, `lint:fix`, `format` and
+`format:check` scripts, the CI step that ran it, and its suppression comments.
+Bun has no linter, so nothing checks style any more; the static check is
+**`bun check`**, the type checker built into Bun since 1.4.3. It reads
+`tsconfig.json`, reports the same errors as `tsc`, and runs on every core — the
+root type-check takes about 4 seconds. `type-check`, `type-check:language`,
+`packages/web` and `yamltecture` all run it; `typescript` stays a dependency for
+editors, and nothing in a script runs `tsc` except the browser application below.
+
+Keep the existing style by hand — 2 spaces, LF, 100 columns, double quotes,
+semicolons, ES5 trailing commas — because nothing enforces it now. The old
+suppression comments kept their reasons as plain comments (`// <reason>`): why an
+`any`, an index key or a `dangerouslySetInnerHTML` is acceptable at that spot is
+still worth reading.
 
 ### The committed build artifacts, and why CI is the only judge of them
 
 Eight files are built from sources and committed, and CI rebuilds each one and
 compares byte for byte. Editing a source without rebuilding fails the
-`Type-check, lint and unit tests` job — after type-check, lint and the unit
-tests have all passed, which is a long way to walk to find out.
+`Type-check and unit tests` job — after the type-check and the unit tests
+have both passed, which is a long way to walk to find out.
 
 | Rebuild with | Artifact | Stale when you edit |
 |---|---|---|
@@ -111,7 +125,7 @@ touched.
 `overlay-assets.generated.ts` and `sw.js` are verbatim copies — byte-identical
 anywhere. The `.js` bundles come from `Bun.build`, whose output depends on the
 bun version **and the platform**: the full-stack bundle is 807407 bytes built on
-macOS and 807697 on Linux, same bun 1.4.0, same frozen lockfile. CI builds with
+macOS and 807697 on Linux, same bun, same frozen lockfile. CI builds with
 the `BUN_VERSION` pinned in `.github/workflows/ci.yml` on `linux-x64`, so
 rebuilding a bundle anywhere else commits bytes CI will reject.
 
@@ -131,7 +145,7 @@ Two traps worth knowing. The job's steps **fail fast**, so the first stale
 artifact hides the rest — run all five locally or you will fix one per CI cycle.
 And if `--check` reports your runtime differs from CI's, do not rebuild locally:
 build where CI builds, e.g.
-`docker run --rm -v "$PWD":/w -w /w oven/bun:1.4.0 sh -c 'bun install --frozen-lockfile && bun run build:fullstack-browser'`.
+`docker run --rm -v "$PWD":/w -w /w oven/bun:1.4.4 sh -c 'bun install --frozen-lockfile && bun run build:fullstack-browser'`.
 
 ### `bun run dev` builds the workspace packages first
 `packages/web` imports `@appwithai/core`, `@appwithai/generator` and
@@ -141,12 +155,19 @@ tree that has never been built those do not exist, so `dev` runs
 and nothing rebuilt on a warm tree. Editing `packages/core` mid-session still
 needs `bun run build:core`.
 
+Before building, it checks every workspace's declared dependencies against what
+is installed and stops with `run "bun install" first` if one is missing or out of
+range. A pull that bumps a dependency otherwise surfaces as a Vite import error
+naming a path that "does not exist" — `monaco-editor/editor/editor.worker` when
+`packages/editors` moved monaco from 0.52 to 0.57. Platform-specific binaries
+bun.lock marks for another os/cpu are skipped.
+
 ### Known-broken scripts
 All of the entries that used to be here have been **removed** rather than
 documented: `migrate`, `test:app`, `test:e2e`, `test:generator`, `test:complete`
 and `setup:gstack` pointed at files that do not exist, the root
 `vitest.config.ts` referenced a missing `./test/setup.ts`, and `packages/web`'s
-`lint` ran eslint, which is not a dependency anywhere (it runs Biome now). A
+`lint` ran eslint, which is not a dependency anywhere. A
 script that has never worked is worse than no script: it costs every new reader
 the time to find out.
 
@@ -170,7 +191,7 @@ nothing about whether a generated one compiles.
 
 | Job | What it does that nothing else does |
 |---|---|
-| **Type-check, lint and unit tests** | Also the four `--check` artifact comparisons, `test:language-tools` and `test:llmtext`. Lint is `--diagnostic-level=error` only — the tree carries several hundred pre-existing style warnings |
+| **Type-check and unit tests** | `bun check` on the root and on `language/**`, the five `--check` artifact comparisons, `test:language-tools` and `test:llmtext` |
 | **Generate a browser application and run its backend** | Generates the stack twice (with and without the overlay) and diffs; asserts the overlay's exact footprint; asserts **no `bun`/`bunx` survives** in any generated `package.json`; migrates and seeds on WebAssembly Postgres with no Postgres on the runner |
 | **Drive the browser stack in Chromium** | The only job that *opens* the result — Service Worker, Node-API shim, worker host |
 | **Generate an application and build it** | Builds the generated backend **and** frontend, type-checks the generated `tests/`, then runs that suite against real Postgres (pgvector) with `node run.ts --no-server` |
@@ -187,7 +208,7 @@ failures move around between runs.
 
 | Layer | Technology |
 |-------|------------|
-| Runtime | Bun.js 1.4.0 (pinned) |
+| Runtime | Bun.js 1.4.4 (pinned) |
 | AI Orchestration | Mastra.ai v1.59+, CopilotKit v1.68+ |
 | AI Model | Local OpenAI-compatible endpoint (:8000) |
 | Retrieval | `@mastra/pg` PgVector (HNSW) |
@@ -197,7 +218,7 @@ failures move around between runs.
 | Backend (generated) | NestJS 10+, Fastify, Kysely |
 | Database | PostgreSQL via Kysely + `pg`; LibSQL/SQLite for Mastra |
 | Testing | Vitest 4, Playwright 1.62, `node:test` (generated apps) |
-| Linter | **Biome** |
+| Static checks | `bun check` (Bun's own type checker) — no linter, no formatter |
 
 ---
 
@@ -228,8 +249,8 @@ app-with-ai-tanstack/
 ├── database/       # Migrations (001–010)
 ├── html/           # Static guide + run-in-browser.html + run-real-stack.html
 ├── website/        # What businessappwithai.github.io publishes from here
-│   ├── llmtext/    #   llms-full.txt and llmdetailed.txt, plus the two
-│                   #   enhancement editions DERIVED from them
+│   ├── llmtext/    #   llms.txt — the ~1k-token controller, plus the chunks
+│                   #   it names and a model loads lazily
 │   └── viewers/    #   The model viewers — served at appwithai.org/viewers
 ├── tests/          # Playwright E2E suites
 └── examples/       # Sample .eml.mmd files
@@ -296,11 +317,15 @@ guard finds no edge out of a state the model never declared, and every rule
 keyed on a real status value never fired. A generated application could not
 demonstrate the workflows it was generated from.
 
-### State machines
+### State machines — the record lifecycle and its action buttons
 
-`%%workflow … kind: state` compiles to rows in `sys_workflow_transitions`, seeded by `05b_workflow_transitions.ts`. `entity-access.guard.ts` reads them and refuses a status write with no matching edge — **for every caller, master role included**: an edge the diagram never drew is not a permission an administrator lacks, it is a move that does not exist. Who may cross an edge is the separate question, answered from `sys_transition_access` — compiled from `%%rbac` by `packages/generator/src/rbac/index.ts`, **not** from `%%guard`, which now means only an automation condition — and *that* one the master role does bypass. Keep the two apart; merging them is how topology enforcement came to run only on edges that happened to carry a role rule.
+Every record has one lifecycle, stated once in `language/state-field.ts` and written per table into `src/common/lifecycle.ts` (backend) and `src/lib/lifecycle.ts` (front end) by one call, `renderLifecycleModule` in `generators/tanstack-start-nestjs/lifecycle-module.ts`; the browser stack's `model.json` carries the same `lifecycleTable` and `server/lib/lifecycle.js` reads it. **A save puts a record in Draft** and runs its rules and workflows (`EntityPromotionService`): accepted, a record with a `kind: state` machine moves to the machine's first state, one with none to **Final**; refused, it goes to **Error** with the reason and stays editable — saving it again runs the pipeline again. A save part-way along a flow is one transaction with its update workflows (422 `WORKFLOW_FAILED` on a failure). Every end state (`x --> [*]`) is **Final and locked** (409 `RECORD_FINAL` on an edit or delete); **a record with no flow is never locked** — each save runs Draft → Final again. `doc_status` holds the phase (`draft`/`active`/`final`/`error`) on every table; the lifecycle column is the state field (`status`, else `state`, else `stage`), or `doc_status` with no machine.
 
-`GET /api/workflows/transitions?table=&from=` exposes the edges, so a screen can offer only the moves that exist.
+**A record moves only by its action buttons.** `GET /bus/:e/:id/actions` lists the moves the caller may press from where the record is; `POST /bus/:e/:id/transition` (`{event}` or `{to}`, `If-Match` required — 428 without) is `TransitionService.move`: row lock and version, a drawn edge (409 `INVALID_TRANSITION`), the caller's grant (403 `TRANSITION_FORBIDDEN`), refusing rules on the record as the move leaves it (422), the state written and `<state>_at` stamped, the update workflows and those bound to `TRANSITION:<event>` / `ENTER:<state>` run, then the trigger rules again (a rule keyed on `stage == "closed_won"` starts its process here), every press logged in `sys_record_transitions`. A form still never writes the state field (403 `STATE_FIELD_SYSTEM_MANAGED`); a saga's `UpdateEntity` of it moves only rows in a state with a drawn edge to the new one. `?awaiting=me` lists the records waiting for the caller.
+
+**Who may press is `%%rbac`.** `%%rbac role:<roles> on <Entity>.<event>` (also `from->to`, and `reopen`) compiles to `kind: move`/`reopen` rows of **`sys_access_grant`**, the one grant table — `sys_operation_access` and `sys_transition_access` are read-only views over it (migration `022_record_lifecycle`). A move a grant names is those roles' (a role given a move need not be allowed to edit the record); one no grant names needs update permission; Reopen with no grant is the administrator's. A user's access is the **union** of their roles' grants, read in **one query** through the view `sys_user_capability` and cached per user by `CapabilityService` (`modules/auth/capability.service.ts.hbs`), dropped on `pg_notify('access_changed')`. Every cache's expiry is `CACHE_TTL_<NAME>_MS` in `.env` (`common/ttl-cache.ts`, default 6000, `0` turns it off). The checker: `EML509` (`final`/`error` as a state), `EML511` (info — moves no line names), `EML512` (auto-fixed — a rule and saga pair that only moves a record its buttons move, retired; `language/move-facts.ts`).
+
+Held by `templates/__tests__/record-lifecycle-templates.test.ts` (every piece reaches a generated app), suites `06b`, `15` and `20`, `tests/e2e/wasm`, and `compile-rbac.spec.ts`.
 
 ### WASM stack
 
@@ -591,7 +616,7 @@ the service cannot forget.
 
 **TypeScript strict flags:** `noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexedAccess` (every index → `T | undefined`, narrow before use), `noImplicitReturns`, `isolatedModules`, `experimentalDecorators`.
 
-**Biome:** 2-space indent, LF, line width 100, double quotes, semicolons always, ES5 trailing commas. Excluded: `packages/generator/templates`, `**/routeTree.gen.ts`, `**/*.generated.ts`, `html/assets/`.
+**Style, kept by hand (there is no formatter):** 2-space indent, LF, line width 100, double quotes, semicolons always, ES5 trailing commas.
 
 **Naming:** functions→camelCase, Types/Classes→PascalCase, primitive constants→UPPER_SNAKE_CASE, instance constants→camelCase, logic files→kebab-case, React component files→PascalCase.
 
@@ -614,56 +639,78 @@ the service cannot forget.
 
 ---
 
-## The four protocol documents under `website/llmtext/`
+## One protocol document — `website/llmtext/llms.txt`
 
-`llms-full.txt` and `llmdetailed.txt` tell a language model how to **write** a
-model from a brief. `llmtextenhancement.txt` and `llmdetailedenhancement.txt`
-tell it how to **change one that already exists** — the user loads their `.mmd`,
-the model reads and counts it, applies only what was asked, and hands the whole
-file back with before-and-after counts.
+`llms.txt` is the document a language model is pointed at to **write a model or
+change one**, published at `https://www.appwithai.org/llms.txt`. It replaced four —
+`llms-full.txt` and `llmdetailed.txt` (authoring, one-pass and gated) and their
+derived enhancement editions — which are deleted. There is one file, so no URL a
+model is given can lead to a second account of the language.
 
-| | Start from a brief | Start from an existing `.mmd` |
-|---|---|---|
-| **One pass** | `llms-full.txt` | `llmtextenhancement.txt` |
-| **Phased, with approval gates** | `llmdetailed.txt` §10 | `llmdetailedenhancement.txt` §10 |
+**New or enhance is decided by one fact: did the user give a `.mmd`?** §1 is one
+procedure, run as a working session (modelled on gstack's `/office-hours`): decide the mode
+from what was given, ask the pace (*walk me through it* or *just build it*), then
+the forcing questions, premises (Gate A), two rosters — minimal and complete
+(Gate B), one Application Dictionary dossier per entity including its form
+layout (Gate C), behaviour (Gate D), write, validate, audit, review, deliver. The
+enhancement rules the derived editions existed for are all in it: ask for the
+file, never reconstruct one from memory, inventory before editing, hand back the
+whole file, and prove nothing was lost with a before-and-after table.
 
-**The enhancement pair is derived, not authored.** Each is its base with the
-protocol section swapped and everything else — the whole language reference —
-carried across byte for byte. The deriver and its four sources live in the
-website repository (`scripts/build-llmtext-enhancement.mjs`, `scripts/llmtext/`),
-because that is where the published copies are served from; regenerate this
-repository's copies by pointing it at these bases:
+**It is authored, not derived.** It began as the site's language-only
+`llms-full.txt` with §1 and §3.7 rewritten; the language reference after §1 is
+that text. Edit it in place. The same file is published by the website and
+carried by the orchestrator — copy it, byte for byte, to
+`businessappwithai.github.io/llms.txt` and
+`app-and-report-with-ai-tanstack/common/website/llmtext/llms.txt`.
 
-```bash
-node ../businessappwithai.github.io/scripts/build-llmtext-enhancement.mjs \
-  --base website/llmtext/llms-full.txt   --protocol batch \
-  --out  website/llmtext/llmtextenhancement.txt
-node ../businessappwithai.github.io/scripts/build-llmtext-enhancement.mjs \
-  --base website/llmtext/llmdetailed.txt --protocol interactive \
-  --out  website/llmtext/llmdetailedenhancement.txt
+**`bun run test:llmtext` holds it** (`scripts/ci/llmtext-claims.ts`): every code it
+cites exists, every auto-fixable code is tabulated and counted right, every
+`§N.N` resolves, every directive's status matches `appwithai-language.json`, every
+fenced `mermaid` example parses to its entities and checks with no help or layout
+gaps, the nine dictionary-completeness codes match `DICTIONARY_COMPLETENESS`, the
+mode and enhancement rules are present by their wording, the host is written in
+full, and `website/llmtext/` holds the controller and its named chunks and nothing else. Every fenced `mermaid`
+example in it must check 0 errors, 0 warnings — **including `%%section` layout on
+every entity**.
+
+**§3.7 is the Application Dictionary, and it is the chapter to keep exact.** The
+three layers (storage, screen, navigation), the reference-type derivation, the
+four conditions for a Table Direct lookup and the person-role names, display
+values, List bindings, the help contract, and the form layout. Change what the
+generator derives and change §3.7 with it.
+
+**§7.1 is the reporting application.** `generatorContract.reportingApplication` in
+`language/appwithai-language.json` and §7.1 state what `buildReportingPack`
+derives, the three surfaces that serve it, and the two sign-ins. Edit
+`reporting/pack.ts` and check both. The JSON is inlined in five bundles, so a
+change to it is a rebuild of all of them.
+
+## `%%section` — the form layout, compiled in both stacks
+
+Every entity's form is headed sections of two-column rows, declared in the model:
+
+```
+%%section entity: Order; name: Delivery; help: Where the goods go.; rows: shipping_address | carrier, tracking_number
 ```
 
-**Edit a base and you must regenerate its companion.** `bun run test:llmtext`
-fails otherwise — it asserts that everything before and after the protocol
-section is identical between a base and its enhancement edition, which is the
-only thing standing between four documents and four different accounts of what
-`%%rbac` does.
+`language/sections.ts` is the **one reading** of the directive — the checker
+(`checkSectionDirectives`, EML170–EML177), the fixer (EML172/174/175, each a
+rewrite of one line's `rows:`) and the generator (`parsers/section.parser.ts`,
+`attachFormSections`, `formLayoutFor`) all call it, and the browser bundles carry
+it. Three of the codes (EML170, EML172, EML177) are in `DICTIONARY_COMPLETENESS`.
 
-**The protocol section is numbered differently in different shapes** — §10 in
-this repository's system edition, §1 in the site's language-only `llms-full.txt`
-— so the sources use a `{{N}}` token and never quote another document's section
-number. A source that says "`llms-full.txt` §1" is correct on the website and
-wrong here.
+| Stack | Where the layout lands |
+|---|---|
+| Both | `DictionaryGenerator` → one `sys_field_group` per section (`_tabRef`, `columns: 2`) and each field's `_groupRef`, `seq_no`, `is_same_line`, `column_span` (no X/Y position — Sequence, Same Line and Column Span are the whole layout) |
+| NestJS | `withFormLayout` in `nestjs-backend.generator.ts` puts `formGroups` and `attribute.layout` in the seed context; `sys-dictionary.ts.hbs` inserts the groups (after Highlights) instead of the generic four; `bus.service` serves `col_span`; `dynamic-form.tsx` spans with literal classes (`COL_SPAN`) because Tailwind never generates an interpolated one |
+| Browser | `model-bundle.ts` → `fieldGroups` and per-field placement in `model.json`; `migrate.js` writes them; `schema.sys.sql` gained the columns (and `ADD COLUMN IF NOT EXISTS` for an older database); `entity-form.js` draws `.group__fields--2` and `.field--wide`, collapsed sections as `<details>` |
 
-**What the enhancement protocols add, and why `test:llmtext` checks for it.**
-Authoring fails one way: model the business badly. Enhancement fails three ways,
-and only the first is a diagnostic — prose instead of a model (`EML004`); a patch
-the user has to merge by hand; and a model that checks clean and is quietly
-smaller than the one that came in, because a smaller model is a valid model and
-nothing reports the `%%report` directives, the help text and the `%%rbac` lines
-that went missing. Both editions are held to asking for the file first, refusing
-to reconstruct a model from memory, inventorying before editing, and comparing
-against that inventory at the end.
+An entity with **no** sections is generated exactly as before — no groups, the
+flat list in declared order — so a model written before the directive still
+behaves the same. Columns a sectioned entity leaves unplaced go to a trailing
+collapsed `Other` section, never off the form. Held by
+`packages/generator/src/parsers/__tests__/form-sections.test.ts`.
 
 ## What a diagnostic hands back — the line, its text, and the steps
 
@@ -717,7 +764,7 @@ log line still get one.
 
 ## The published host is written in full — `https://www.appwithai.org`
 
-Every mention of the host in all four `website/llmtext/*.txt` protocol documents
+Every mention of the host in `website/llmtext/llms.txt`
 is the absolute URL — scheme and `www.` included — and each document carries a
 rule saying so. **`www` is canonical and the apex serves the same files**; both
 carry a certificate. That was not true for part of this project's life: `www`
@@ -736,11 +783,6 @@ scanning rather than filtering lines containing it — a line can hold a good UR
 *and* a bare host, which is the case that survived the first sweep — and it
 asserts the rule's three counter-examples are still present, since a checker that
 "corrects" them leaves a rule that teaches nothing.
-
-**The rule goes in §3.6, not beside the `--base` paragraph.** In this shape that
-paragraph sits inside §10, which `llmtextenhancement.txt` replaces wholesale, so
-anchoring there puts the rule in the base and not in its companion — silently,
-with every other check still green.
 
 ## EML Language
 
@@ -771,12 +813,12 @@ bun language/fixer.ts   language/examples/crm.eml.mmd.error
 
 The checker always writes the `.error` file — revert it unless the verdict changed.
 
-**The sixteen directives** (`%%` comments Mermaid ignores):
+**The seventeen directives** (`%%` comments Mermaid ignores):
 - structure: `%%meta`, `%%entity`, `%%field`, `%%enum`, `%%index`, `%%category`
 - behaviour: `%%rule`, `%%workflow`, `%%step`, `%%loop`, `%%trigger`, `%%action`, `%%hook`
 - access: `%%rbac`
 - automation condition: `%%guard`
-- reporting: `%%report`
+- reporting: `%%report`, `%%dashboard`
 
 `%%guard` is the one that moved. It used to mean a role restriction; that sense
 is `%%rbac` now, and `%%guard` means only an automation's condition
@@ -818,6 +860,58 @@ Three things to keep true when touching it:
 - The checker still owns the shape: `EML290`-`EML296` — a query that exists and
   is named, a unique name, `SELECT`/`WITH` rather than a write, both axes when a
   chart is asked for, an `entity:` the model declares, a known chart type.
+
+### `%%dashboard` and the per-role reporting minimums
+
+Reporting is mandatory and covers the whole domain. `%%dashboard <name> title: <T>
+role: <role> reports: <a>, <b>, … [help: <why>]` groups a role's own `%%report`
+directives into a named dashboard, and **every declared `%%rbac` role needs at least
+50 charted `%%report` directives it can run (one is a report and a chart) and at
+least 10 dashboards of at least 3 reports each**. The same numbers are stated in
+`website/llmtext/eml-reporting.txt` §7.2, rule M12 of the controller, and the
+language definition; change all of them or none.
+
+| Reader | Where |
+|---|---|
+| Language side — parser, model, shape (`EML297`), minimums (`EML298` reports, `EML299` dashboards) | `language/cli/src/{parser,model}.ts`, `language/checker.ts` (`REPORTS_PER_ROLE`, `DASHBOARDS_PER_ROLE`, `DASHBOARD_MIN_REPORTS`) |
+| Generator side — `compileDashboards`, then one `DashboardSpec` per directive | `packages/generator/src/reports/index.ts`, `pipeline/parse-model.ts`, `reporting/pack.ts` (`deriveAuthoredDashboards`) |
+
+- **"A role can run a report" is a table question.** `canRun` in the checker reads the
+  `bus_` tables in the report's SQL and asks `%%rbac`'s `read` (or `*`/`all`/`any`)
+  lines whether the role admits each; an entity with no read line is open to all, a
+  role called `administrator` reads everything (and, inheriting every other role's
+  reports and dashboards, owes no minimum of its own), and a table no entity declares is
+  not narrowed. This mirrors `deriveAccess` in `rbac/roles.ts` and `tableNameFor` in
+  `naming/tables.ts` — they are separate implementations because `language/` cannot
+  import the generator, so keep the three in step.
+- **`EML298`/`EML299` are gaps, not advice.** They are in `REPORTING_COVERAGE` in
+  `checker.entry.ts`, beside — not inside — `DICTIONARY_COMPLETENESS`, so the checker's
+  closing words name them as reporting gaps rather than dictionary ones, and
+  `audit-model.mjs` fails while they stand.
+- **A dashboard's `role` is metadata, not access control.** The pack carries it, but the
+  reporting platform's `dashboard:view` permission is per role, not per dashboard, so
+  every role that may view dashboards sees every dashboard. A tile whose report reads a
+  table the viewer may not read answers 403, which is why §7.2.4 tells authors to list
+  only reports the dashboard's own role can run.
+- **Every published model meets the minimums** (the twelve in the website's list, and the
+  orchestrator's ten). Most of their reports are *derived* from each model's structure
+  (lifecycles, enumerated columns, dates, flags, measures, parents, optional fields) rather than
+  written as business questions; each model's header says which is which. A few narrow roles had
+  their `%%rbac … .read` lists widened to reach 50, each flagged in the PR that did it. None of the
+  checks is satisfied by editing a number: expanding a model still means writing the questions.
+- **A dashboard or a report title is used once.** The platform upserts a query, report, chart and
+  dashboard by *title*, so two sharing one collapse into one row and `buildReportingPack` refuses the
+  pack. The checker holds the title as well as the name: `EML297` for dashboards, `EML292` for reports
+  (trimmed, case-insensitive). `reporting/__tests__/published-models.test.ts` builds the pack for each
+  published model, which is what caught the dance-studio pair before the checker did.
+- **SonarCloud's duplication gate needs the bundles excluded in the project's own settings.** The five
+  committed bundles inline the same checker, so any change that touches it shows 30%+ new-code
+  duplication against a 3% limit. `sonar-project.properties` in this repository is *not* read by the
+  PR analysis (it was tried; the number did not move). Set Duplication Exclusions under
+  Administration → Analysis Scope in the SonarCloud project, in each of the three repositories that
+  vendor these files, as wildcard patterns (plain paths did not take effect):
+  `**/html/checker.js, **/html/fixer.js, **/html/assets/appwithai-wasm.js,
+  **/html/assets/appwithai-fullstack.js, **/website/viewers/eml-model.js, **/*.generated.ts`.
 
 ### The browser schema types a foreign key the way the NestJS one does
 
@@ -971,10 +1065,8 @@ than committed: `bun run vendor:pglite` and `bun run build:stack-templates`.
 | `packages/web/vite.config.ts` | Vite config, root-.env loading, start-api-routes shim |
 | `language/appwithai-language.json` | ⭐ EML canonical definition |
 | `language/composer.ts` | ⭐ The only writer of complete EML documents |
-| `website/llmtext/llms-full.txt` | ⭐ The spec written for language models |
-| `website/llmtext/llmtextenhancement.txt` | `llms-full.txt` with its protocol section replaced: enhance an existing `.mmd`. **Derived — do not hand-edit** |
-| `website/llmtext/llmdetailedenhancement.txt` | `llmdetailed.txt` with its §10 replaced: the same, with approval gates. **Derived** |
-| `website/llmtext/llmdetailed.txt` | The same spec, §10 replaced by the interactive authoring walkthrough |
+| `website/llmtext/llms.txt` | ⭐ The one protocol document for language models: write a model, or change one |
+| `language/sections.ts` | ⭐ The one reading of `%%section` — checker, fixer and generator |
 | `packages/generator/src/viewers/view-model.ts` | ⭐ One reading of a model for the viewers — composed, never re-derived |
 | `website/viewers/` | ⭐ The published model viewers. `eml-model.js` is built; the rest is hand-written |
 | `scripts/ci/llmtext-claims.ts` | ⭐ Holds both specs, and their claims about the viewers, to the real code — run by CI |
@@ -1067,6 +1159,6 @@ Add once in `GenerationSettings` in `generate-application.ts`. Do NOT add at cal
 ## Git Workflow
 
 1. Feature branch from `main`
-2. `bun run type-check` and `bun run lint` before pushing
+2. `bun run type-check` (`bun check`) before pushing
 3. If you touched `packages/generator/templates/`, generate an app and build it
 4. Target `main` for PRs

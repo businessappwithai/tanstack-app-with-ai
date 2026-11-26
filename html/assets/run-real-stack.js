@@ -11,19 +11,21 @@
  *      was written, so it has never been watched working — see `#limits` in the
  *      page, which says the same thing to the reader.
  *
- * The import of the WebContainer API is deliberately late and guarded. It is a
- * network dependency the rest of the page does not have, and a reader who only
- * wants to see four hundred files appear should not be stopped by a CDN.
+ * The import of the WebContainer API is deliberately late and guarded. It is
+ * served beside this page (`bun run vendor:webcontainer`), never from a CDN,
+ * and a reader who only wants to see four hundred files appear should not be
+ * stopped because that copy has not been placed. The runtime it then opens is
+ * StackBlitz's own service, which is the one thing here that is not local.
  */
 
-// The published validator — the same file `llms-full.txt` §10 points a model at.
+// The published validator — the same file `llms.txt` §1.3 points a model at.
 // Checking here, when the model is chosen, rather than only inside
 // `generateFullStack`: the reader is looking at the model now, and a document
 // with an error is not going to become an application by pressing Assemble.
 import { checkAndFix } from "../fixer.js";
 import { generateFullStack, loadTemplates } from "./appwithai-fullstack.js";
 
-const WEBCONTAINER_API = "https://esm.sh/@webcontainer/api@1.6.4";
+const WEBCONTAINER_API = new URL("vendor/webcontainer-api/index.js", import.meta.url).href;
 
 /** npm colours its output; the log below is already styled. Built from the
  * escape code rather than written literally, because a literal ESC in source
@@ -450,6 +452,13 @@ $("run").addEventListener("click", async () => {
 
     build.start("boot", "Fetching the WebContainer runtime");
     say("Loading @webcontainer/api");
+    const present = await fetch(WEBCONTAINER_API, { method: "HEAD" }).catch(() => null);
+    if (!present?.ok) {
+      throw new Error(
+        `@webcontainer/api is not beside this page at ${WEBCONTAINER_API}, and it is never ` +
+          "fetched from a CDN. Run `bun run vendor:webcontainer` and reload."
+      );
+    }
     const { WebContainer } = await import(/* @vite-ignore */ WEBCONTAINER_API);
 
     // One container per tab: booting a second throws, and the API says so in a

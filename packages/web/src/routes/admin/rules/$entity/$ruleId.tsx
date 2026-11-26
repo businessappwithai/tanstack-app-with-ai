@@ -1,15 +1,18 @@
+import { RuleTableEditor } from "@appwithai/editors/components/automation/RuleTableEditor";
+import {
+  asDecisionTable,
+  wouldReplaceStoredContent,
+} from "@appwithai/editors/lib/automation/rule-content";
+import type { DecisionTable } from "@appwithai/editors/lib/workflow/bpmn-model";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon, CheckIcon, SaveIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { RuleTableEditor } from "@/components/automation/RuleTableEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { asDecisionTable, wouldReplaceStoredContent } from "@/lib/automation/rule-content";
 import { requestContext } from "@/lib/request-context";
-import type { DecisionTable } from "@/lib/workflow/bpmn-model";
 
 async function checkAuthMe() {
   const { baseUrl, fetchInit } = await requestContext();

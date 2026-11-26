@@ -13,8 +13,9 @@
  *
  * What is not: there is no SQL editor, nothing here writes a definition, and
  * the platform's NL→SQL pipeline, scheduled deliveries and knowledge graph need
- * servers this runtime does not have. A read-only mirror is worth more than a
- * set of buttons that answer "not in the browser build".
+ * servers this runtime does not have. The screens say so rather than offering
+ * buttons that fail. Who may read which table *is* editable, by a reporting
+ * administrator, through `report-admin.routes.js`.
  *
  * ## Access
  *
@@ -30,6 +31,7 @@
 
 import { Router } from "../lib/router.js";
 import { badRequest, forbidden, json, notFound, unauthorized } from "../lib/http.js";
+import { logReportActivity } from "../lib/report-log.js";
 
 /**
  * The most rows one report returns.
@@ -129,6 +131,7 @@ export function reportingRoutes(model) {
         charts: visibleCharts.length,
         chartsTotal: charts.length,
         dashboards: dashboards.length,
+        queries: queries.filter((query) => tablesRefused(reportUser, query).length === 0).length,
       },
     });
   });
@@ -154,10 +157,18 @@ export function reportingRoutes(model) {
     json(
       dashboards.map((dashboard) => {
         const chartOf = new Map(charts.map((chart) => [chart.key, chart]));
+        const reportOf = new Map(reports.map((report) => [report.key, report]));
         const widgets = (dashboard.widgets || []).filter((widget) => {
-          const chart = widget.chartKey ? chartOf.get(widget.chartKey) : null;
-          if (!chart) return !widget.chartKey;
-          return readable(reportUser)(chart);
+          // A tile is a chart or a report, and either one reads a query. Both
+          // are held to the role's tables — a report tile used to pass
+          // unchecked, and then refused itself on the dashboard with a 403.
+          const target = widget.chartKey
+            ? chartOf.get(widget.chartKey)
+            : widget.reportKey
+              ? reportOf.get(widget.reportKey)
+              : null;
+          if (!target) return !widget.chartKey && !widget.reportKey;
+          return readable(reportUser)(target);
         });
         return {
           ...dashboard,
@@ -192,7 +203,15 @@ export function reportingRoutes(model) {
     }
 
     const refused = tablesRefused(reportUser, query);
+    const action = `run ${params.kind.replace(/s$/, "")}`;
     if (refused.length > 0) {
+      await logReportActivity(db, {
+        user: reportUser,
+        action,
+        target: item.name,
+        outcome: "refused",
+        detail: `may not read ${refused.join(", ")}`,
+      });
       throw forbidden(
         `${reportUser.role ?? "This role"} may not read ${refused.join(", ")}, which "${item.name}" queries.`
       );
@@ -206,16 +225,34 @@ export function reportingRoutes(model) {
     // means. One row past the cap distinguishes a full page from a truncated
     // one without counting the whole thing twice.
     let rows;
+    let numeric;
     try {
-      rows = await db.query(`SELECT * FROM (${body}) AS report_body LIMIT ${MAX_ROWS + 1}`);
+      ({ rows, numeric } = await db.queryWithNumeric(`SELECT * FROM (${body}) AS report_body LIMIT ${MAX_ROWS + 1}`));
     } catch (error) {
       // The query came out of the model, so this is a defect in the document or
       // in the derivation rather than in the request. Name the report and quote
       // the database — nobody can act on "the report failed".
+      await logReportActivity(db, {
+        user: reportUser,
+        action,
+        target: item.name,
+        outcome: "failed",
+        detail: error?.message || String(error),
+        durationMs: Date.now() - started,
+      });
       throw badRequest(
         `Report "${item.name}" failed: ${error?.message || String(error)}`
       );
     }
+
+    await logReportActivity(db, {
+      user: reportUser,
+      action,
+      target: item.name,
+      outcome: "ok",
+      detail: `${Math.min(rows.length, MAX_ROWS)} row${rows.length === 1 ? "" : "s"}`,
+      durationMs: Date.now() - started,
+    });
 
     const truncated = rows.length > MAX_ROWS;
     if (truncated) rows = rows.slice(0, MAX_ROWS);
@@ -226,6 +263,8 @@ export function reportingRoutes(model) {
       // Off the first row rather than a driver field list, so the column order
       // the query's own SELECT declares is the order it renders in.
       columns: rows.length > 0 ? Object.keys(rows[0]) : [],
+      // Which of those are NUMERIC, which arrives as a string — see queryWithNumeric.
+      numeric,
       rows,
       rowCount: rows.length,
       truncated,
